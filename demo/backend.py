@@ -123,7 +123,7 @@ def execute_code_safe(
 
 # API endpoint and model path
 API_BASE = "http://localhost:8000/v1"  # this localhost is for vllm api, do not change
-MODEL_PATH = "DeepAnalyze-8B"  # replace to your path to DeepAnalyze-8B
+MODEL_PATH = "qwen2.5-3b-instruct"  # replace to your path to DeepAnalyze-8B
 
 
 # Initialize OpenAI client
@@ -840,7 +840,7 @@ async def chat(body: dict = Body(...)):
             "object": "chat.completion.chunk",
             "created": 1677652288,
             "model": MODEL_PATH,
-            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]
+            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
         }
         yield json.dumps(end_chunk) + "\n"
 

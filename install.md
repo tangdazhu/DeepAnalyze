@@ -179,8 +179,46 @@ source ~/.nvm/nvm.sh
 (deepanalyze) tdz@tangdazhu:~$ vllm serve ~/models/qwen2.5-3b-instruct        --host 0.0.0.0 --port 8000        --trust-remote-code
 
 - 启动服务 ： 
-tdz@tangdazhu:~/DeepAnalyze/API$ python start_server.py
+cd ~/DeepAnalyze/demo
+python backend.py
 
 - 启动客户端webui 
 tdz@tangdazhu:~/DeepAnalyze/demo/chat$ 
 npm run dev -- --hostname 0.0.0.0 --port 4000
+
+
+现在的 WebUI 之所以恢复正常，是因为你改成运行 
+demo/backend.py
+，它自身就提供了 /workspace/*、代码执行、导出报告等接口（端口 8200/8100）。在这种模式下：*
+
+不需要再启动 API/start_server.py。两者都会占用 8200/8100，功能还部分重叠，反而会端口冲突。
+只要保持三件事在跑：
+vllm serve ... --port 8000（模型服务）
+python backend.py（demo 后端，负责 workspace + API）
+npm run dev -- --hostname 0.0.0.0 --port 4000（WebUI）
+如果你未来想使用更标准的 OpenAI 兼容接口（/v1/models、/v1/chat/completions 等），可以改回 API/start_server.py，但那时需要把 /workspace/* 路由迁过去或继续额外跑 
+backend.py
+。当前阶段，为了完成流程验证，维持上述三进程即可。*
+
+- tdz@tangdazhu:~/DeepAnalyze/API$ python start_server.py
+
+
+### “The model DeepAnalyze-8B does not exist” 的原因
+
+前端 → backend → vLLM 这条链路里，模型名称依旧写死为 `DeepAnalyze-8B`（大写），这就是 vLLM 日志里报 “The model `DeepAnalyze-8B` does not exist” 的原因。虽然你已经用 Qwen2.5-3B-Instruct 启动了 vLLM，但：
+
+- [demo/backend.py](cci:7://file:///d:/Python-Learning/deepanalyze/demo/backend.py:0:0-0:0) 初始化 OpenAI 客户端时，`MODEL_PATH = "DeepAnalyze-8B"`，后续所有 `/v1/chat/completions` 请求都会带上这个 `model` 名称 @demo/backend.py#118-135。
+- WebUI 的 [ThreePanelInterface](cci:1://file:///d:/Python-Learning/deepanalyze/demo/chat/components/three-panel-interface.tsx:115:0-3280:1) 里同样把 `model` 字段写成 `deepanalyze-8b` @demo/chat/components/three-panel-interface.tsx#2138-2159。
+
+要让整个链路指向你当前的 Qwen 模型，有 2 个选择：
+
+1. **改 backend 的模型名**（推荐，只需一次）：  
+   - 打开 [demo/backend.py](cci:7://file:///d:/Python-Learning/deepanalyze/demo/backend.py:0:0-0:0)，把 `MODEL_PATH = "DeepAnalyze-8B"` 改成你在 vLLM `--served-model-name`/默认模型的名字（例如 `MODEL_PATH = "qwen2.5-3b-instruct"`）。  
+   - 重启 `python backend.py`。这样 WebUI 发来的任何请求都会携带 `model="qwen2.5-3b-instruct"`。
+
+2. **改 WebUI 的请求模型名**（如果只想改前端）：  
+   - 在 [demo/chat/components/three-panel-interface.tsx](cci:7://file:///d:/Python-Learning/deepanalyze/demo/chat/components/three-panel-interface.tsx:0:0-0:0) 中把 `model: "deepanalyze-8b"` 改为 `model: "qwen2.5-3b-instruct"`，重新 `npm run dev`。  
+   - 但 backend 里仍是 `DeepAnalyze-8B`，它在其他 API（如生成报告、执行代码）里也会用到 OpenAI 接口，所以最终还是要改 backend。
+
+只要两个地方（backend + WebUI）统一成 vLLM 里实际的模型名字，所有 `/v1/chat/completions` 请求就会命中 Qwen，聊天不会再 404 卡住。
+
