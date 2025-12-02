@@ -2,6 +2,7 @@
 .DS_Store
 Thumbs.db
 ehthumbs.db
+package-lock.json
 
 # Python files
 __pycache__/
