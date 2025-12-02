@@ -2,76 +2,102 @@
 
 > 参考资料：https://learn.microsoft.com/windows/wsl/install
 
-### 1. 确认系统要求
+### 1. 系统要求
+
 - Windows 11（或 Windows 10 版本 ≥ 2004，内部版本 ≥ 19041）。
-- BIOS/UEFI 已启用虚拟化（Intel VT-x / AMD-V）。如未启用，需进入 BIOS/UEFI 打开 Virtualization 相关选项并保存。
+- BIOS/UEFI 已启用虚拟化（Intel VT-x / AMD-V）。如未启用，请进入 BIOS/UEFI 开启 Virtualization 相关选项并保存。
 
 ### 2. 以管理员身份打开终端
-- 在开始菜单搜索 “PowerShell” 或 “Windows Terminal”，右键选择 **以管理员身份运行**。
+
+在开始菜单搜索 “PowerShell” 或 “Windows Terminal”，右键选择 **以管理员身份运行**。
 
 ### 3. 一键安装 WSL（含默认 Ubuntu）
+
 ```powershell
 wsl --install
 ```
+
 - 自动启用 `VirtualMachinePlatform` 与 `Microsoft-Windows-Subsystem-Linux` 组件、下载 Linux 内核并安装 Ubuntu。
 - 安装结束后若提示重启，请立即重启。
 
 ### 4. 首次启动并创建 Linux 账户
-- 重启后第一次打开 WSL，会进入 Ubuntu 初始化流程，按提示设置新的 UNIX 用户名和密码（可与 Windows 账号不同）。
+
+重启后第一次打开 WSL，会进入 Ubuntu 初始化流程，按提示设置新的 UNIX 用户名和密码（可与 Windows 账号不同）。
 
 ### 5. 选择或更换发行版（可选）
-- 查看可安装的发行版：
-  ```powershell
-  wsl --list --online
-  ```
-- 安装特定发行版（示例 Debian）：
-  ```powershell
-  wsl --install -d Debian
-  ```
-- 查看本机已装发行版与默认项：
-  ```powershell
-  wsl --list --verbose
-  ```
-- 切换默认发行版：
-  ```powershell
-  wsl --set-default <发行版名称>
-  ```
+
+查看可安装的发行版：
+
+```powershell
+wsl --list --online
+```
+
+安装特定发行版（示例 Debian）：
+
+```powershell
+wsl --install -d Debian
+```
+
+查看本机已装发行版与默认项：
+
+```powershell
+wsl --list --verbose
+```
+
+切换默认发行版：
+
+```powershell
+wsl --set-default <发行版名称>
+```
 
 ### 6. 确认或升级到 WSL 2
-- 检查发行版所用版本：
-  ```powershell
-  wsl --list --verbose
-  ```
-- 若仍是 WSL 1，可升级：
-  ```powershell
-  wsl --set-version <发行版名称> 2
-  ```
+
+检查发行版所用版本：
+
+```powershell
+wsl --list --verbose
+```
+
+若仍是 WSL 1，可升级：
+
+```powershell
+wsl --set-version <发行版名称> 2
+```
 
 ### 7. 更新 Linux 内核（如提示）
-- 执行：
-  ```powershell
-  wsl --update
-  ```
-- 建议随后重启 WSL：
-  ```powershell
-  wsl --shutdown
-  ```
+
+执行：
+
+```powershell
+wsl --update
+```
+
+建议随后重启 WSL：
+
+```powershell
+wsl --shutdown
+```
 
 ### 8. WSLg（可选 GUI 支持）
-- Windows 11 已默认集成 WSLg，只需保持系统更新即可获得 GUI 支持。
+
+Windows 11 已默认集成 WSLg，只需保持系统更新即可获得 GUI 支持。
 
 ### 9. 访问 WSL 文件系统
+
 - 在资源管理器地址栏输入 `\\wsl$` 可直接打开 Linux 文件。
 - 建议在 Linux 目录（如 `~/projects`）内操作，避免跨平台权限问题。
 
 ### 10. 在 WSL 内安装 DeepAnalyze 环境
-- 进入 Ubuntu 终端后，参考 README 执行：
-  ```bash
-  conda create -n deepanalyze python=3.12 -y
-  conda activate deepanalyze
-  pip install -r requirements.txt
-  ```
-- 这样可获得 Linux + CUDA 兼容的运行环境。
+
+进入 Ubuntu 终端后，参考 README 执行：
+
+```bash
+conda create -n deepanalyze python=3.12 -y
+conda activate deepanalyze
+pip install -r requirements.txt
+```
+
+这样可获得 Linux + CUDA 兼容的运行环境。
 
 完成以上 10 步后，即可在 Ubuntu 终端中 clone DeepAnalyze 仓库、安装依赖并部署 vLLM/DeepAnalyze 服务。
 
@@ -81,15 +107,16 @@ wsl --install
 
 执行 `wsl --list --verbose` 的结果：
 
-```
+```text
 NAME              STATE           VERSION
 * docker-desktop    Running         2
 ```
 
-- 这表明系统组件已经支持 WSL 2，但 `docker-desktop` 发行版仅供 Docker 使用，不能直接拿来部署 DeepAnalyze。
-- 需要再安装一个常规发行版（例如 Ubuntu），所有 DeepAnalyze 相关操作在该发行版中完成。
+- 说明系统已支持 WSL 2，但 `docker-desktop` 仅供 Docker 使用，不适合部署 DeepAnalyze。
+- 需额外安装常规发行版（如 Ubuntu），所有 DeepAnalyze 操作在该发行版内进行。
 
 ### 1. 安装 Linux 发行版
+
 - 再次确认可选列表：
   ```powershell
   wsl --list --online
@@ -98,30 +125,31 @@ NAME              STATE           VERSION
   ```powershell
   wsl --install -d Ubuntu
   ```
-- 推荐明确指定 LTS 版本（如 22.04）：
+- 建议指定 LTS 版本（如 22.04）：
   ```powershell
   wsl --install -d Ubuntu-22.04
   ```
 
 ### 2. 首次启动并设置账户
-- 在开始菜单启动 “Ubuntu” 应用，按照提示设置新的 Linux 用户名/密码（当前使用 `tdz/tdz`）。
+
+- 打开 “Ubuntu” 应用，按提示设置 Linux 用户名/密码（示例 `tdz/tdz`）。
 - 示例网络信息：`IPv4 address for eth0: 172.23.6.173`。
 
 ### 3. WSL 与 GUI 相关说明
-- WSL 默认提供命令行界面（CLI），这是正常现象。
-- Windows 11 自带 WSLg：
-  - 运行自带 GUI 的软件（如 `gedit`、`nautilus`）会自动弹出窗口。
-  - 确保 Windows 更新至最新版即可使用。
-- 如有完整桌面需求，可在 WSL 内安装轻量桌面 + XRDP/VNC；或使用 `winget install --id Canonical.Ubuntu` 获得带 GUI 的官方发布。但 DeepAnalyze 仅需终端，无需额外桌面。
-- 结论：继续在 Ubuntu 终端里按 README 完成安装即可，仅在确实需要 GUI 时再扩展配置。
 
-### 4. 从wsl ubuntu ping 172.23.0.1不通， Windows 防火墙拦截 ICMP
-启动后， 通过ifconfig, 得到wsl 实例的IP地址为： 172.23.6.173 
-默认情况下，“Hyper-V firewall” 接口走的是 Windows 防火墙的 Public 配置。如果 File and Printer Sharing (Echo Request - ICMPv4-In) 规则在 Public 配置中被禁用，WSL 发出的 Ping 会被阻断。
-解决：打开 “Windows Defender 防火墙 -> 高级设置 -> 入站规则”，找到上述 ICMP 规则，为 Public 配置启用。
+- WSL 默认提供 CLI，这是正常现象。
+- Windows 11 自带 WSLg，可直接运行 `gedit`、`nautilus` 等 GUI 应用。
+- 若需要完整桌面，可安装轻量桌面 + XRDP/VNC；但 DeepAnalyze 仅需终端。
+- 结论：在 Ubuntu 终端按 README 完成安装即可，如确有 GUI 需求再扩展配置。
 
+### 4. WSL ping Windows 失败（防火墙 ICMP）
+
+- 通过 `ifconfig` 获取 WSL IP（如 172.23.6.173），默认 “Hyper-V firewall” 走 Public 配置。
+- 若 Public 配置禁用 “File and Printer Sharing (Echo Request - ICMPv4-In)” 规则，Ping 会被阻断。
+- 解决：在 “Windows Defender 防火墙 → 高级设置 → 入站规则” 中启用该 ICMP 规则的 Public 配置。
 
 ### 5. 确认版本与默认发行版（可选）
+
 - 再次检查：
   ```powershell
   wsl --list --verbose
@@ -132,40 +160,46 @@ NAME              STATE           VERSION
   ```
 
 ### 6. 更新并准备开发环境
+
 - 在 Ubuntu 终端执行：
   ```bash
   sudo apt update && sudo apt upgrade -y
   sudo apt install git build-essential -y
   ```
-- 之后参考 README 创建 Conda 环境并 `pip install -r requirements.txt`，即可继续部署 DeepAnalyze 与 vLLM。
+- 之后参考 README 创建 Conda 环境并 `pip install -r requirements.txt`，即可部署 DeepAnalyze 与 vLLM。
 
-### 7.允许局域网/WSL 访问
+### 7. 允许局域网/WSL 访问
 
-- 打开你的代理软件（Clash、V2RayN 等），勾选“Allow LAN / 允许局域网连接”
-- 在wsl 实例上运行 
-export http_proxy=http://172.23.0.1:7890
-export https_proxy=http://172.23.0.1:7890
-export all_proxy=socks5://172.23.0.1:7890 
-
-让变量在每次打开 shell 时自动生效
-将上述 export 追加到 ~/.bashrc 或 ~/.zshrc：
-
-echo 'export http_proxy=http://172.23.0.1:7890' >> ~/.bashrc
-echo 'export https_proxy=http://172.23.0.1:7890' >> ~/.bashrc
-echo 'export all_proxy=socks5://172.23.0.1:7890' >> ~/.bashrc
-source ~/.bashrc
+- 在代理软件（Clash、V2RayN 等）中勾选 “Allow LAN / 允许局域网连接”。
+- 在 WSL 中设置代理：
+  ```bash
+  export http_proxy=http://172.23.0.1:7890
+  export https_proxy=http://172.23.0.1:7890
+  export all_proxy=socks5://172.23.0.1:7890
+  ```
+- 如需持久化，将上述命令追加到 `~/.bashrc` 或 `~/.zshrc`：
+  ```bash
+  echo 'export http_proxy=http://172.23.0.1:7890' >> ~/.bashrc
+  echo 'export https_proxy=http://172.23.0.1:7890' >> ~/.bashrc
+  echo 'export all_proxy=socks5://172.23.0.1:7890' >> ~/.bashrc
+  source ~/.bashrc
+  ```
 
 ### 8. 下载模型
 
-运行新版登录命令：hf auth login（粘贴 token，确认成功）。
-下载模型权重：hf download RUC-DataLab/DeepAnalyze-8B --local-dir ~/models/DeepAnalyze-8B
+- 登录 Hugging Face：`hf auth login`（粘贴 token）。
+- 下载权重：
+  ```bash
+  hf download RUC-DataLab/DeepAnalyze-8B --local-dir ~/models/DeepAnalyze-8B
+  ```
 
 ### 9. 启动服务
 
-启动 vLLM 服务：
-vllm serve ~/models/DeepAnalyze-8B --host 0.0.0.0 --port 8000
-
-再按照 README @README.md#47-205 启动 API/WebUI 或 CLI，测试整个链路
+- 启动 vLLM：
+  ```bash
+  vllm serve ~/models/DeepAnalyze-8B --host 0.0.0.0 --port 8000
+  ```
+- 按 README @README.md#47-205 启动 API/WebUI 或 CLI，测试链路。
 
 ### 日志里的根本错误是 “Failed to find C compiler”。也就是说当前 WSL 环境还没有可用的 gcc/g++，所以 Triton 无法编译内核。请按下面步骤处理：
 
@@ -204,37 +238,6 @@ vllm serve ~/models/DeepAnalyze-8B --host 0.0.0.0 --port 8000
    - `Not enough SMs to use max_autotune_gemm`：显卡 SM 数较少时的提示，不影响运行。  
 
 完成以上步骤后，vLLM 应能顺利加载模型并对外提供 8000 端口的 API。若仍有报错，请提供新的日志。
-
-### Available KV cache memory: -1.60 GiB，随后抛出 ValueError: No available memory for the cache blocks）。单卡显存装下 8B 模型后所剩空间有限，需要手动“挤出”缓存空间。可以按下面步骤逐项尝试：
-
-
-vLLM 现在已经可以成功加载权重并完成 torch.compile，最后失败的根因是 **KV Cache 没有可用显存**（日志 `Available KV cache memory: -1.60 GiB`，随后抛出 `ValueError: No available memory for the cache blocks`）。单卡显存装下 8B 模型后所剩空间有限，需要手动“挤出”缓存空间。可以按下面步骤逐项尝试：
-
-1. **调低 KV Cache 占用**
-   - 直接在 `vllm serve` 命令里增加 `--gpu-memory-utilization 0.7`（默认 0.9）。如果你的显卡只有 16GB，建议从 0.6 ~ 0.7 试起：
-     ```bash
-     vllm serve ~/models/DeepAnalyze-8B --host 0.0.0.0 --port 8000 --gpu-memory-utilization 0.7 --max-model-len 4096
-     ```
-   - 该参数越小，给 KV cache 的空间越少，吞吐会下降，但能避免 “no available memory” 报错。
-
-2. **降低最大上下文长度**
-   - DeepAnalyze-8B 的默认 `max_model_len` 131072 对显存要求非常高。可以显式限制，例如：
-     ```bash
-     --max-model-len 4096
-     ```
-     或根据需求选择 8k/16k。上下文越短，KV cache 占用越小。
-
-3. **限制并发 token 数**
-   - `--max-num-batched-tokens 1024`（默认 2048）也能进一步减少缓存需求。
-
-4. **确认显存占用**
-   - 在 WSL 里运行 `nvidia-smi`，查看启动前 GPU 还剩多少显存；如果其他程序占用，可先关闭。
-
-5. **可选优化**
-   - `pip install torch-c-dlpack-ext` 可以消除 `EnvTensorAllocator` 告警，略·微改善显存复用。  
-   - 如显卡支持 FP8/INT8，可尝试 vLLM 的量化选项（例如 `--quantization awq`），但需要相应的量化权重，这里暂未提供。
-
-综合建议：先尝试方案 1+2（`--gpu-memory-utilization`+`--max-model-len`），通常即可在 16GB 显卡上跑通；若仍不足，再调小 `--max-num-batched-tokens` 或关闭其他占用显存的进程。完成这些调整后重新运行 `vllm serve`，若还有报错，贴出新的日志我再帮你分析。
 
 ### 根据最新日志，当前 16 GB 显卡连模型本体都快放不下（启动时只剩 14.57 GiB 空闲，却想保留 0.95×16 GiB≈15.12 GiB 给 vLLM），因此还没进入 KV cache 初始化就被拒绝。要在 16 GB 上勉强跑 DeepAnalyze-8B，需要进一步牺牲上下文、并发甚至把 KV cache 部分放到 CPU。可按优先级尝试：
 
@@ -304,8 +307,6 @@ vLLM 现在已经可以成功加载权重并完成 torch.compile，最后失败�
 4. **记录替代方案**  
    - 在文档（如 `wsl安装指南.md`）中说明：测试阶段使用某个 7B 模型，通过 vLLM + DeepAnalyze API 已走通流程；待获取大显存或量化版本后，再切回官方 DeepAnalyze-8B。
 
-
-
 这样做可以先验证“流程通”“接口通”，后续再切换回 DeepAnalyze-8B 时只需改模型路径即可。不需要额外的代码改动。
 
 #### 可在 16 GB 显卡上运行的 Qwen 模型清单
@@ -322,3 +323,110 @@ vLLM 现在已经可以成功加载权重并完成 torch.compile，最后失败�
 | `Qwen/Qwen1.5-7B-Chat` / `Qwen/Qwen2-7B-Instruct` | 7B | 经典 7B 版本，可作为 Qwen2.5 的替代。 |
 
 > 以上显存估算基于 FP16/bfloat16，全精度运行时可按照 README 流程直接部署；若使用量化权重，需在 vLLM 命令中添加对应 `--quantization` 参数。
+
+### 编译器缺失：Failed to find C compiler
+
+`vllm` 在加载 DeepAnalyze-8B 时需要 Triton/torch.compile 生成 CUDA kernel，若日志提示 “Failed to find C compiler”，说明当前 WSL 环境没有可用的 `gcc/g++`。处理步骤：
+
+1. **安装编译工具链**
+   ```bash
+   sudo apt update
+   sudo apt install -y build-essential
+   ```
+   安装后确认：
+   ```bash
+   gcc --version
+   which gcc
+   ```
+2. **如有多个 gcc 版本，显式指定**
+   ```bash
+   export CC=/usr/bin/gcc
+   export CXX=/usr/bin/g++
+   ```
+3. **重新启动 vLLM**
+   ```bash
+   vllm serve ~/models/DeepAnalyze-8B --host 0.0.0.0 --port 8000
+   ```
+4. **可忽略的常见告警**
+   - `pin_memory=False`：WSL 默认设置，仅影响性能。
+   - `torch-c-dlpack-ext`：可选组件，若要消除警告可 `pip install torch-c-dlpack-ext`。
+   - `Not enough SMs to use max_autotune_gemm`：显卡 SM 较少时的提示，不影响运行。
+
+完成以上步骤后，vLLM 应能顺利加载模型并提供 8000 端口的 API。
+
+### KV Cache 显存不足：Available KV cache memory < 0
+
+若日志出现 `Available KV cache memory: -1.60 GiB` 并抛出 `ValueError: No available memory for the cache blocks`，说明 8B 模型几乎耗尽显存，需要压缩 KV Cache：
+
+1. **调低 KV Cache 占用**
+   ```bash
+   vllm serve ~/models/DeepAnalyze-8B \
+     --host 0.0.0.0 --port 8000 \
+     --gpu-memory-utilization 0.7 \
+     --max-model-len 4096
+   ```
+   可根据显卡从 0.6~0.7 试起。
+2. **降低最大上下文长度**：将 `--max-model-len` 设为 4k/8k/16k。
+3. **限制并发 token 数**：如 `--max-num-batched-tokens 1024`。
+4. **确认显存占用**：启动前运行 `nvidia-smi` 并关闭占用显存的进程。
+5. **可选优化**：`pip install torch-c-dlpack-ext`，或使用量化权重（`--quantization awq` 等）。
+
+通常组合使用方案 1+2 即可在 16GB 显卡上运行；如仍不足，再调低并发或关闭其他进程。
+
+### 启动阶段即报显存不足
+
+若 16GB 显卡在模型加载阶段即失败，可进一步牺牲上下文/并发或启用 CPU Swap：
+
+```bash
+vllm serve ~/models/DeepAnalyze-8B \
+  --host 0.0.0.0 --port 8000 \
+  --gpu-memory-utilization 0.65 \
+  --max-model-len 1024 \
+  --max-num-batched-tokens 128 \
+  --max-num-seqs 1 \
+  --swap-space 8
+```
+
+- `--max-num-seqs 1` 强制单会话以减少缓存。
+- `--swap-space 8` 将部分 KV cache 放到 CPU，延迟会上升但可换取内存。
+
+如显存依旧不足，可考虑量化或使用更大显存的 GPU。
+
+### 当前硬件的最终结论
+
+- 在 16GB 显卡上以非量化方式运行 DeepAnalyze-8B 非常困难，即使调低各项参数仍可能因 KV Cache 空间不足失败。
+- 可行替代：
+  1. 使用更小或量化模型（7B/4B/GPTQ/AWQ 等）。
+  2. 在 24GB+ 显卡或云端部署，再通过 API 调用。
+  3. 若需继续探索，可远程部署推理，本地仅调用接口。
+
+### 以 7B 级模型替代 DeepAnalyze-8B 的实践
+
+1. **选择兼容模型**：如 `Qwen2.5-7B-Instruct`、`Llama-3.1-8B-Instruct`、`Yi-1.5-6B-Chat`、`Mistral-7B-Instruct-v0.3` 等。
+2. **下载权重**：
+   ```bash
+   hf download Qwen/Qwen2.5-3B-Instruct --local-dir ~/models/qwen2.5-3b-instruct
+   ```
+3. **启动 vLLM**：
+   ```bash
+   vllm serve ~/models/qwen2.5-3b-instruct \
+     --host 0.0.0.0 --port 8000 \
+     --trust-remote-code
+   ```
+4. **保持 API/WebUI 流程不变**：仍按 README 顺序启动 API、WebUI、示例脚本，只是模型端换成 7B 权重即可验证链路。
+5. **记录替代方案**：在文档中说明临时使用 7B 模型，待硬件升级或量化权重到位后，再切回 DeepAnalyze-8B。
+
+#### 可在 16 GB 显卡上运行的 Qwen 模型清单
+
+| 模型 | 参数规模 | 说明 |
+| --- | --- | --- |
+| `Qwen/Qwen2.5-0.5B-Instruct` | 0.5B | 占用极低，适合最小化流程验证。 |
+| `Qwen/Qwen2.5-1.5B-Instruct` | 1.5B | 16 GB 显存轻松运行。 |
+| `Qwen/Qwen2.5-3B-Instruct` | 3B | 约 10–12 GB 显存即可。 |
+| `Qwen/Qwen2.5-7B-Instruct` | 7B | 16 GB 可运行，建议降低 `max_model_len`。 |
+| `Qwen/Qwen2.5-7B-Instruct-GPTQ-Int4` | 7B INT4 | 8–10 GB 显存即可，需 `--quantization gptq`。 |
+| `Qwen/Qwen1.5-4B-Chat` | 4B | 显存余量更大，适合测试。 |
+| `Qwen/Qwen1.5-1.8B-Chat` | 1.8B | 低显存占用，适合脚本验证。 |
+| `Qwen/Qwen1.5-7B-Chat` / `Qwen/Qwen2-7B-Instruct` | 7B | 经典 7B 版本，可替代使用。 |
+
+> 以上显存估算基于 FP16/bfloat16；若使用量化权重，请在 vLLM 命令中添加对应 `--quantization` 参数。
