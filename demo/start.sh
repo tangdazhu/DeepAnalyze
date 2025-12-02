@@ -3,6 +3,9 @@
 echo "Starting Chat System"
 echo "=========================="
 
+# Flag to skip cleanup when已有 vLLM/API 在运行
+SKIP_CLEANUP=${SKIP_CLEANUP:-0}
+
 # Ensure logs directory exists
 mkdir -p logs
 
@@ -17,18 +20,26 @@ check_port() {
 }
 
 # Clean up old processes
-echo "Cleaning old processes..."
-pkill -f "python.*backend.py" 2>/dev/null || true
-pkill -f "npm.*dev" 2>/dev/null || true
+if [[ "$SKIP_CLEANUP" == "1" ]]; then
+    echo "Skipping cleanup (SKIP_CLEANUP=1)，保留当前运行的服务。"
+else
+    echo "Cleaning old processes..."
+    pkill -f "python.*backend.py" 2>/dev/null || true
+    pkill -f "npm.*dev" 2>/dev/null || true
+fi
 
 # Frontend port (default 4000, can override via FRONTEND_PORT)
 FRONTEND_PORT=${FRONTEND_PORT:-4000}
 
 # Check and clean ports
-check_port 8000
-check_port 8100
-check_port 8200
-check_port $FRONTEND_PORT
+if [[ "$SKIP_CLEANUP" == "1" ]]; then
+    echo "跳过端口清理，可能需要确保端口空闲。"
+else
+    check_port 8000
+    check_port 8100
+    check_port 8200
+    check_port $FRONTEND_PORT
+fi
 
 echo "Cleanup completed."
 echo ""

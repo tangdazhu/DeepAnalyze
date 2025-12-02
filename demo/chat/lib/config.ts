@@ -1,13 +1,43 @@
+const resolveBaseUrl = (rawUrl: string, fallbackPort: number) => {
+  if (typeof window === "undefined") {
+    return rawUrl;
+  }
+
+  const safeOrigin = `${window.location.protocol}//${window.location.hostname}`;
+  const defaultUrl = `${safeOrigin}:${fallbackPort}`;
+
+  if (!rawUrl) {
+    return defaultUrl;
+  }
+
+  try {
+    const parsed = new URL(rawUrl, safeOrigin);
+    const isLocalhost = ["localhost", "127.0.0.1"].includes(parsed.hostname);
+
+    if (isLocalhost && window.location.hostname !== "localhost") {
+      const port = parsed.port || String(fallbackPort);
+      return `${safeOrigin}:${port}`;
+    }
+
+    return parsed.origin + parsed.pathname.replace(/\/$/, "");
+  } catch {
+    return defaultUrl;
+  }
+};
+
+const RAW_BACKEND_BASE_URL =
+  process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8200";
+const RAW_FILE_SERVER_BASE =
+  process.env.NEXT_PUBLIC_FILE_SERVER_BASE || "http://localhost:8100";
+
 // API配置
 export const API_CONFIG = {
-  // 后端API基础地址
-  BACKEND_BASE_URL:
-    process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8200",
+  // 后端API基础地址（在浏览器端访问非 localhost 时自动回退到当前主机）
+  BACKEND_BASE_URL: resolveBaseUrl(RAW_BACKEND_BASE_URL, 8200),
 
   // 静态文件服务基础地址（前端可配置下载/预览所使用的文件基址）
   // 例如：http://<server-ip>:8100 或 https://cdn.example.com
-  FILE_SERVER_BASE:
-    process.env.NEXT_PUBLIC_FILE_SERVER_BASE || "http://localhost:8100",
+  FILE_SERVER_BASE: resolveBaseUrl(RAW_FILE_SERVER_BASE, 8100),
 
   // 模拟AI API地址
   AI_API_BASE_URL:
