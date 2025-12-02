@@ -3,6 +3,7 @@
 Thumbs.db
 ehthumbs.db
 package-lock.json
+.env.local
 
 # Python files
 __pycache__/
