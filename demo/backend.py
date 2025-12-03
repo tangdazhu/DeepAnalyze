@@ -807,8 +807,15 @@ def bot_stream(messages, workspace, session_id="default"):
                 assistant_reply += missing_tag
                 yield missing_tag
             elif "<Code>" not in cur_res:
-                finished = True
-                break
+                # 模型未输出 <Code>，向其追加纠错提示并进入下一轮
+                messages.append({"role": "assistant", "content": cur_res})
+                correction_prompt = (
+                    "你必须严格按如下结构输出：先用 <Analyze> 拆解任务，紧接着在 <Code> 中给出可执行的"
+                    " Python 代码（使用 ```python ... ``` 包裹），等待系统执行，再结合 <Execute>/<File> 结果"
+                    " 继续分析。不要重复欢迎语，立刻补充缺失的 <Code>。"
+                )
+                messages.append({"role": "user", "content": correction_prompt})
+                continue
 
         if "</Code>" in cur_res and not finished:
             messages.append({"role": "assistant", "content": cur_res})
