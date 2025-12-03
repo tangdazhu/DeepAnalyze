@@ -777,6 +777,14 @@ def bot_stream(messages, workspace, session_id="default"):
                 finished = True
                 break
 
+        fixed_res = fix_tags_and_codeblock(cur_res)
+        if fixed_res != cur_res:
+            extra_text = fixed_res[len(cur_res) :]
+            if extra_text:
+                assistant_reply += extra_text
+                yield extra_text
+            cur_res = fixed_res
+
         if not cur_res.strip() and not finished:
             forced_reason = "模型未返回新增内容，已终止本轮迭代"
             finished = True
