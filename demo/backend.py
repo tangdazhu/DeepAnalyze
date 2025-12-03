@@ -200,6 +200,41 @@ def collect_file_info(directory: str) -> str:
     return all_file_info_str
 
 
+def format_workspace_payload(workspace_entries: list[dict]) -> str:
+    """将前端传入的 workspace 文件元信息转换为 prompt 文本。"""
+    if not isinstance(workspace_entries, list):
+        return ""
+
+    formatted = []
+    for idx, entry in enumerate(workspace_entries, start=1):
+        if not isinstance(entry, dict):
+            continue
+        info = {
+            "name": entry.get("name"),
+            "extension": entry.get("extension"),
+        }
+        size_value = entry.get("size")
+        if isinstance(size_value, (int, float)):
+            info["size"] = f"{size_value / 1024:.1f}KB"
+        elif size_value:
+            info["size"] = size_value
+        download_url = entry.get("download_url")
+        if download_url:
+            info["download_url"] = download_url
+        formatted.append(
+            f"File {idx}:\n" + json.dumps(info, indent=4, ensure_ascii=False) + "\n\n"
+        )
+    return "".join(formatted).strip()
+
+
+def snapshot_workspace_files(directory: str) -> set[str]:
+    """生成 workspace 目录下所有文件的绝对路径集合。"""
+    try:
+        return {str(p.resolve()) for p in Path(directory).rglob("*") if p.is_file()}
+    except Exception:
+        return set()
+
+
 def get_file_icon(extension):
     """获取文件图标"""
     ext = extension.lower()
@@ -651,21 +686,34 @@ def bot_stream(messages, workspace, session_id="default"):
     # print(messages)
     if messages and messages[0]["role"] == "assistant":
         messages = messages[1:]
+    workspace_file_info = ""
+    tracked_paths: set[str] = set()
+    if isinstance(workspace, list) and workspace:
+        workspace_file_info = format_workspace_payload(workspace)
+        for entry in workspace:
+            if not isinstance(entry, dict):
+                continue
+            name = entry.get("name")
+            if not name:
+                continue
+            tracked_paths.add(str((Path(WORKSPACE_DIR) / name).resolve()))
+    elif isinstance(workspace, str) and workspace:
+        workspace_file_info = collect_file_info(workspace)
+        tracked_paths = snapshot_workspace_files(workspace)
+    else:
+        workspace_file_info = collect_file_info(WORKSPACE_DIR)
+        tracked_paths = snapshot_workspace_files(WORKSPACE_DIR)
+
     if messages and messages[-1]["role"] == "user":
         user_message = messages[-1]["content"]
-        file_info = (
-            collect_file_info(workspace)
-            if workspace
-            else collect_file_info(WORKSPACE_DIR)
-        )
-        if file_info:
+        if workspace_file_info:
             messages[-1][
                 "content"
-            ] = f"# Instruction\n{user_message}\n\n# Data\n{file_info}"
+            ] = f"# Instruction\n{user_message}\n\n# Data\n{workspace_file_info}"
         else:
             messages[-1]["content"] = f"# Instruction\n{user_message}"
     # print("111",messages)
-    initial_workspace = set(workspace)
+    initial_workspace = set(tracked_paths)
     assistant_reply = ""
     finished = False
     exe_output = None
@@ -802,7 +850,6 @@ def bot_stream(messages, workspace, session_id="default"):
                 )
                 new_files = list(current_files - initial_workspace)
                 if new_files:
-                    workspace.extend(new_files)
                     initial_workspace.update(new_files)
     os.chdir(original_cwd)
 
