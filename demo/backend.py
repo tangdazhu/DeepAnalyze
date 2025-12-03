@@ -757,12 +757,15 @@ def bot_stream(messages, workspace, session_id="default"):
             },
         )
         cur_res = ""
+        last_finish_reason = None
         for chunk in response:
             if chunk.choices and chunk.choices[0].delta.content is not None:
                 delta = chunk.choices[0].delta.content
                 cur_res += delta
                 assistant_reply += delta
                 yield delta
+            if chunk.choices and chunk.choices[0].finish_reason:
+                last_finish_reason = chunk.choices[0].finish_reason
             if should_stop(session_id):
                 stop_msg = "\n<Execute>\n```\n检测到停止指令，正在安全结束当前迭代。\n```\n</Execute>\n"
                 assistant_reply += stop_msg
@@ -774,10 +777,15 @@ def bot_stream(messages, workspace, session_id="default"):
                 finished = True
                 break
 
+        if not cur_res.strip() and not finished:
+            forced_reason = "模型未返回新增内容，已终止本轮迭代"
+            finished = True
+            break
+
         if finished:
             break
 
-        if chunk.choices[0].finish_reason == "stop" and not finished:
+        if last_finish_reason in {"stop", "length"} and not finished:
             if "<Code>" in cur_res and "</Code>" not in cur_res:
                 missing_tag = "</Code>"
                 cur_res += missing_tag
