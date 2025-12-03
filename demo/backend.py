@@ -745,6 +745,9 @@ def bot_stream(messages, workspace, session_id="default"):
 
     while not finished and iteration < MAX_ITERATIONS:
         iteration += 1
+        print(
+            f"[bot_stream] session={session_id} iteration={iteration} starting, messages={len(messages)}"
+        )
         response = client.chat.completions.create(
             model=MODEL_PATH,
             messages=messages,
@@ -785,6 +788,10 @@ def bot_stream(messages, workspace, session_id="default"):
                 yield extra_text
             cur_res = fixed_res
 
+        print(
+            f"[bot_stream] session={session_id} iteration={iteration} finish_reason={last_finish_reason} has_code={'<Code>' in cur_res} closed={'</Code>' in cur_res} len={len(cur_res)}"
+        )
+
         if not cur_res.strip() and not finished:
             forced_reason = "模型未返回新增内容，已终止本轮迭代"
             finished = True
@@ -810,6 +817,9 @@ def bot_stream(messages, workspace, session_id="default"):
                 code_content = code_match.group(1).strip()
                 md_match = re.search(r"```(?:python)?(.*?)```", code_content, re.DOTALL)
                 code_str = md_match.group(1).strip() if md_match else code_content
+                print(
+                    f"[bot_stream] session={session_id} iteration={iteration} executing code, length={len(code_str)}"
+                )
                 try:
                     before_state = {
                         p.resolve(): (p.stat().st_size, p.stat().st_mtime_ns)
