@@ -148,6 +148,7 @@ export function ThreePanelInterface() {
   >({});
   const [autoCollapseEnabled, setAutoCollapseEnabled] = useState(true);
   const [manualLocks, setManualLocks] = useState<Record<string, boolean>>({});
+  const [isStopping, setIsStopping] = useState(false);
 
   // Session ID：用于区分不同浏览器用户（无需登录）
   const [sessionId, setSessionId] = useState<string>("");
@@ -156,6 +157,7 @@ export function ThreePanelInterface() {
   const [activeSection, setActiveSection] = useState<string>("");
   const stepNavigatorRef = useRef<HTMLDivElement>(null);
   const activeStepRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const fetchControllerRef = useRef<AbortController | null>(null);
 
   // 组件挂载后从 localStorage 读取主题
   useEffect(() => {
@@ -2145,6 +2147,7 @@ export function ThreePanelInterface() {
 
   const handleSendMessage = async () => {
     if (!inputValue.trim() && attachments.length === 0) return;
+    if (isTyping) return;
 
     const newMessage: Message = {
       id: Date.now().toString(),
@@ -2174,6 +2177,9 @@ export function ThreePanelInterface() {
           content: msg.content,
         }));
 
+      const controller = new AbortController();
+      fetchControllerRef.current = controller;
+
       const response = await fetch(API_URLS.CHAT_COMPLETIONS, {
         method: "POST",
         headers: {
@@ -2190,6 +2196,7 @@ export function ThreePanelInterface() {
           workspace: workspacePayload,
           session_id: sessionId,
         }),
+        signal: controller.signal,
       });
 
       const contentType = response.headers.get("content-type") || "";
@@ -2312,23 +2319,54 @@ export function ThreePanelInterface() {
       // 处理 buffer 中剩余的内容 (极少情况)
       if (buffer.trim()) {
         try {
-            const json = JSON.parse(buffer.trim());
-            const deltaContent = json.choices?.[0]?.delta?.content;
-            if (deltaContent) {
-              accumulatedMessage += deltaContent;
-              updateAiMessage(accumulatedMessage);
-            }
+          const json = JSON.parse(buffer.trim());
+          const deltaContent = json.choices?.[0]?.delta?.content;
+          if (deltaContent) {
+            accumulatedMessage += deltaContent;
+            updateAiMessage(accumulatedMessage);
+          }
         } catch (e) {}
       }
 
       // 结束后刷新一次文件列表确保无遗漏
       await loadWorkspaceFiles();
       await loadWorkspaceTree();
-      setIsTyping(false); // 结束加载状态
 
-    } catch (error) {
-      console.error("Error sending message:", error);
+    } catch (error: any) {
+      if (error?.name === "AbortError") {
+        console.info("请求已通过停止操作取消");
+      } else {
+        console.error("Error sending message:", error);
+        toast({ description: "请求失败，请稍后重试", variant: "destructive" });
+      }
+    } finally {
+      if (fetchControllerRef.current) {
+        fetchControllerRef.current = null;
+      }
       setIsTyping(false);
+      setIsStopping(false);
+    }
+  };
+
+  const handleStop = async () => {
+    if (!isTyping && !fetchControllerRef.current) return;
+    setIsStopping(true);
+    try {
+      if (fetchControllerRef.current) {
+        fetchControllerRef.current.abort();
+      }
+      await fetch(API_URLS.CHAT_STOP, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: sessionId }),
+      });
+      toast({ description: "已发送停止指令" });
+    } catch (error) {
+      console.error("Stop request failed", error);
+      toast({ description: "停止失败，请重试", variant: "destructive" });
+    } finally {
+      setIsTyping(false);
+      setIsStopping(false);
     }
   };
 
@@ -2905,25 +2943,36 @@ export function ThreePanelInterface() {
                       </AlertDialogFooter>
                     </AlertDialogContent>
                   </AlertDialog>
-                  {isTyping ? (
-                    <Button
-                      size="sm"
-                      className="h-9 w-9 p-0 rounded-full bg-white text-black border border-blue-400/50 dark:bg-white dark:text-black"
-                      title="正在生成…"
-                      disabled
-                    >
-                      <RefreshCw className="h-4 w-4 animate-spin" />
-                    </Button>
-                  ) : (
+                  <div className="flex items-center gap-2">
+                    {isTyping && (
+                      <Button
+                        size="sm"
+                        className="h-9 w-9 p-0 rounded-full bg-white text-black border border-blue-400/50 dark:bg-white dark:text-black"
+                        title="正在生成…"
+                        disabled
+                      >
+                        <RefreshCw className="h-4 w-4 animate-spin" />
+                      </Button>
+                    )}
                     <Button
                       onClick={handleSendMessage}
                       size="sm"
-                      disabled={!inputValue.trim()}
+                      disabled={!inputValue.trim() || isTyping}
                       className="bg-black text-white dark:bg-white dark:text-black hover:bg-gray-800 dark:hover:bg-gray-200"
                     >
                       <Send className="h-4 w-4" />
                     </Button>
-                  )}
+                    <Button
+                      onClick={handleStop}
+                      size="sm"
+                      variant="destructive"
+                      disabled={!isTyping || isStopping}
+                      className="bg-red-500 hover:bg-red-600 text-white"
+                      title="停止当前执行"
+                    >
+                      <Square className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
               </div>
             </div>

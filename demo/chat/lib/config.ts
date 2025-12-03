@@ -50,6 +50,7 @@ export const API_CONFIG = {
   ENDPOINTS: {
     // 聊天
     CHAT_COMPLETIONS: "/chat/completions",
+    CHAT_STOP: "/chat/stop",
 
     // 文件管理
     WORKSPACE_FILES: "/workspace/files",
@@ -93,4 +94,5 @@ export const API_URLS = {
 
   // AI服务
   CHAT_COMPLETIONS: buildApiUrl(API_CONFIG.ENDPOINTS.CHAT_COMPLETIONS),
+  CHAT_STOP: buildApiUrl(API_CONFIG.ENDPOINTS.CHAT_STOP),
 };

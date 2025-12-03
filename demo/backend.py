@@ -19,7 +19,8 @@ import socketserver
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Query
 from fastapi.responses import JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
-from typing import List, Optional
+from typing import List, Optional, Dict, Tuple
+from collections import defaultdict
 import httpx
 import uvicorn
 import os
@@ -124,6 +125,7 @@ def execute_code_safe(
 # API endpoint and model path
 API_BASE = "http://localhost:8000/v1"  # this localhost is for vllm api, do not change
 MODEL_PATH = "qwen2.5-3b-instruct"  # replace to your path to DeepAnalyze-8B
+MAX_ITERATIONS = 12
 
 
 # Initialize OpenAI client
@@ -180,6 +182,26 @@ def start_http_server():
 
 # Start HTTP server in a separate thread
 threading.Thread(target=start_http_server, daemon=True).start()
+
+
+# 会话级别的中断标记
+SESSION_STOP_FLAGS: Dict[str, bool] = defaultdict(bool)
+session_flag_lock = threading.Lock()
+
+
+def trigger_stop_flag(session_id: str) -> None:
+    with session_flag_lock:
+        SESSION_STOP_FLAGS[session_id or "default"] = True
+
+
+def reset_stop_flag(session_id: str) -> None:
+    with session_flag_lock:
+        SESSION_STOP_FLAGS[session_id or "default"] = False
+
+
+def should_stop(session_id: str) -> bool:
+    with session_flag_lock:
+        return SESSION_STOP_FLAGS.get(session_id or "default", False)
 
 
 def collect_file_info(directory: str) -> str:
@@ -678,14 +700,15 @@ def fix_tags_and_codeblock(s: str) -> str:
 
 def bot_stream(messages, workspace, session_id="default"):
     original_cwd = os.getcwd()
-    WORKSPACE_DIR = get_session_workspace(session_id)
-    os.makedirs(WORKSPACE_DIR, exist_ok=True)
-    # 创建 generated 子文件夹用于存放代码生成的文件
-    GENERATED_DIR = os.path.join(WORKSPACE_DIR, "generated")
-    os.makedirs(GENERATED_DIR, exist_ok=True)
-    # print(messages)
+    workspace_path = Path(get_session_workspace(session_id)).resolve()
+    workspace_path.mkdir(parents=True, exist_ok=True)
+    generated_dir = workspace_path / "generated"
+    generated_dir.mkdir(parents=True, exist_ok=True)
+    reset_stop_flag(session_id)
+
     if messages and messages[0]["role"] == "assistant":
         messages = messages[1:]
+
     workspace_file_info = ""
     tracked_paths: set[str] = set()
     if isinstance(workspace, list) and workspace:
@@ -696,13 +719,13 @@ def bot_stream(messages, workspace, session_id="default"):
             name = entry.get("name")
             if not name:
                 continue
-            tracked_paths.add(str((Path(WORKSPACE_DIR) / name).resolve()))
+            tracked_paths.add(str((workspace_path / name).resolve()))
     elif isinstance(workspace, str) and workspace:
         workspace_file_info = collect_file_info(workspace)
         tracked_paths = snapshot_workspace_files(workspace)
     else:
-        workspace_file_info = collect_file_info(WORKSPACE_DIR)
-        tracked_paths = snapshot_workspace_files(WORKSPACE_DIR)
+        workspace_file_info = collect_file_info(str(workspace_path))
+        tracked_paths = snapshot_workspace_files(str(workspace_path))
 
     if messages and messages[-1]["role"] == "user":
         user_message = messages[-1]["content"]
@@ -712,12 +735,16 @@ def bot_stream(messages, workspace, session_id="default"):
             ] = f"# Instruction\n{user_message}\n\n# Data\n{workspace_file_info}"
         else:
             messages[-1]["content"] = f"# Instruction\n{user_message}"
-    # print("111",messages)
+
     initial_workspace = set(tracked_paths)
     assistant_reply = ""
     finished = False
     exe_output = None
-    while not finished:
+    iteration = 0
+    forced_reason = ""
+
+    while not finished and iteration < MAX_ITERATIONS:
+        iteration += 1
         response = client.chat.completions.create(
             model=MODEL_PATH,
             messages=messages,
@@ -736,15 +763,30 @@ def bot_stream(messages, workspace, session_id="default"):
                 cur_res += delta
                 assistant_reply += delta
                 yield delta
+            if should_stop(session_id):
+                stop_msg = "\n<Execute>\n```\n检测到停止指令，正在安全结束当前迭代。\n```\n</Execute>\n"
+                assistant_reply += stop_msg
+                yield stop_msg
+                forced_reason = "任务已根据用户的停止指令终止"
+                finished = True
+                break
             if "</Answer>" in cur_res:
                 finished = True
                 break
+
+        if finished:
+            break
+
         if chunk.choices[0].finish_reason == "stop" and not finished:
-            if not cur_res.endswith("</Code>"):
+            if "<Code>" in cur_res and "</Code>" not in cur_res:
                 missing_tag = "</Code>"
                 cur_res += missing_tag
                 assistant_reply += missing_tag
                 yield missing_tag
+            elif "<Code>" not in cur_res:
+                finished = True
+                break
+
         if "</Code>" in cur_res and not finished:
             messages.append({"role": "assistant", "content": cur_res})
             code_match = re.search(r"<Code>(.*?)</Code>", cur_res, re.DOTALL)
@@ -752,27 +794,26 @@ def bot_stream(messages, workspace, session_id="default"):
                 code_content = code_match.group(1).strip()
                 md_match = re.search(r"```(?:python)?(.*?)```", code_content, re.DOTALL)
                 code_str = md_match.group(1).strip() if md_match else code_content
-                # 执行前快照（路径 -> (size, mtime)）
                 try:
                     before_state = {
                         p.resolve(): (p.stat().st_size, p.stat().st_mtime_ns)
-                        for p in Path(WORKSPACE_DIR).rglob("*")
+                        for p in workspace_path.rglob("*")
                         if p.is_file()
                     }
                 except Exception:
                     before_state = {}
-                # 在子进程中以固定工作区执行
-                exe_output = execute_code_safe(code_str, WORKSPACE_DIR)
-                # 执行后快照
+
+                exe_output = execute_code_safe(code_str, str(workspace_path))
+
                 try:
                     after_state = {
                         p.resolve(): (p.stat().st_size, p.stat().st_mtime_ns)
-                        for p in Path(WORKSPACE_DIR).rglob("*")
+                        for p in workspace_path.rglob("*")
                         if p.is_file()
                     }
                 except Exception:
                     after_state = {}
-                # 计算新增与修改
+
                 added_paths = [p for p in after_state.keys() if p not in before_state]
                 modified_paths = [
                     p
@@ -780,52 +821,42 @@ def bot_stream(messages, workspace, session_id="default"):
                     if p in before_state and after_state[p] != before_state[p]
                 ]
 
-                # 将新增和修改的文件移动到 generated 文件夹
                 artifact_paths = []
+                generated_dir_str = str(generated_dir.resolve())
                 for p in added_paths:
                     try:
-                        # 如果文件不在 generated 文件夹中，移动它
-                        if not str(p).startswith(GENERATED_DIR):
-                            dest_path = Path(GENERATED_DIR) / p.name
-                            dest_path = uniquify_path(dest_path)
-                            shutil.copy2(str(p), str(dest_path))
+                        if not str(p).startswith(generated_dir_str):
+                            dest_path = uniquify_path(generated_dir / p.name)
+                            shutil.copy2(p, dest_path)
                             artifact_paths.append(dest_path.resolve())
                         else:
-                            artifact_paths.append(p)
+                            artifact_paths.append(p.resolve())
                     except Exception as e:
                         print(f"Error moving file {p}: {e}")
-                        artifact_paths.append(p)
 
-                # 为修改的文件生成副本并移动到 generated 文件夹
                 for p in modified_paths:
                     try:
-                        dest_name = f"{Path(p).stem}_modified{Path(p).suffix}"
-                        dest_path = Path(GENERATED_DIR) / dest_name
-                        dest_path = uniquify_path(dest_path)
+                        dest_path = uniquify_path(
+                            generated_dir / f"{p.stem}_modified{p.suffix}"
+                        )
                         shutil.copy2(p, dest_path)
                         artifact_paths.append(dest_path.resolve())
                     except Exception as e:
                         print(f"Error copying modified file {p}: {e}")
 
-                # 旧：Execute 内部放控制台输出；新：追加 <File> 段落给前端渲染卡片
                 exe_str = f"\n<Execute>\n```\n{exe_output}\n```\n</Execute>\n"
                 file_block = ""
                 if artifact_paths:
                     lines = ["<File>"]
                     for p in artifact_paths:
                         try:
-                            rel = (
-                                Path(p)
-                                .relative_to(Path(WORKSPACE_DIR).resolve())
-                                .as_posix()
-                            )
+                            rel = p.resolve().relative_to(workspace_path).as_posix()
                         except Exception:
-                            rel = Path(p).name
-                        # 在相对路径前加上 session_id 前缀
+                            rel = p.name
                         url = build_download_url(f"{session_id}/{rel}")
-                        name = Path(p).name
+                        name = p.name
                         lines.append(f"- [{name}]({url})")
-                        if Path(p).suffix.lower() in [
+                        if p.suffix.lower() in [
                             ".png",
                             ".jpg",
                             ".jpeg",
@@ -836,21 +867,32 @@ def bot_stream(messages, workspace, session_id="default"):
                             lines.append(f"![{name}]({url})")
                     lines.append("</File>")
                     file_block = "\n" + "\n".join(lines) + "\n"
+
                 full_execution_block = exe_str + file_block
                 assistant_reply += full_execution_block
                 yield full_execution_block
                 messages.append({"role": "execute", "content": f"{exe_output}"})
-                # 刷新工作区快照（路径集合）
-                current_files = set(
-                    [
-                        os.path.join(WORKSPACE_DIR, f)
-                        for f in os.listdir(WORKSPACE_DIR)
-                        if os.path.isfile(os.path.join(WORKSPACE_DIR, f))
-                    ]
-                )
-                new_files = list(current_files - initial_workspace)
+
+                current_files = {
+                    str(p.resolve()) for p in workspace_path.rglob("*") if p.is_file()
+                }
+                new_files = current_files - initial_workspace
                 if new_files:
                     initial_workspace.update(new_files)
+
+        if should_stop(session_id) and not forced_reason:
+            forced_reason = "任务已根据用户的停止指令终止"
+            finished = True
+            break
+
+    if not finished and forced_reason == "" and iteration >= MAX_ITERATIONS:
+        forced_reason = f"已达到最大迭代次数（{MAX_ITERATIONS}），自动结束当前任务"
+
+    if forced_reason and "</Answer>" not in assistant_reply:
+        answer_block = f"\n<Answer>\n{forced_reason}。请参考以上 <Execute>/<File> 输出，必要时重新发起指令。\n</Answer>\n"
+        assistant_reply += answer_block
+        yield answer_block
+
     os.chdir(original_cwd)
 
 
@@ -892,6 +934,14 @@ async def chat(body: dict = Body(...)):
         yield json.dumps(end_chunk) + "\n"
 
     return StreamingResponse(generate(), media_type="text/plain")
+
+
+@app.post("/chat/stop")
+async def stop_chat(body: dict = Body(...)):
+    """接收前端停止请求，设置对应 session 的中断标记。"""
+    session_id = body.get("session_id", "default")
+    trigger_stop_flag(session_id)
+    return {"message": f"stop signal sent for {session_id}"}
 
 
 # -------- Export Report (PDF + MD) --------

@@ -49,11 +49,7 @@ def _normalize_openai_message_content(raw_content: Any) -> str:
     if isinstance(raw_content, list):
         parts: List[str] = []
         for item in raw_content:
-            if (
-                isinstance(item, dict)
-                and item.get("type") == "text"
-                and "text" in item
-            ):
+            if isinstance(item, dict) and item.get("type") == "text" and "text" in item:
                 parts.append(item.get("text", {}).get("value", ""))
         return "".join(parts)
     return str(raw_content or "")
@@ -86,8 +82,6 @@ def collect_file_info(directory: str) -> str:
     return all_file_info_str
 
 
-
-
 def prepare_vllm_messages(
     messages: List[Dict[str, Any]],
     workspace_dir: str,
@@ -118,18 +112,18 @@ def prepare_vllm_messages(
         user_content = str(vllm_messages[last_user_idx].get("content", "")).strip()
         instruction_body = user_content if user_content else "# Instruction"
         if workspace_file_info:
-            vllm_messages[last_user_idx]["content"] = (
-                f"# Instruction\n{instruction_body}\n\n# Data\n{workspace_file_info}"
-            )
+            vllm_messages[last_user_idx][
+                "content"
+            ] = f"# Instruction\n{instruction_body}\n\n# Data\n{workspace_file_info}"
         else:
-            vllm_messages[last_user_idx]["content"] = f"# Instruction\n{instruction_body}"
+            vllm_messages[last_user_idx][
+                "content"
+            ] = f"# Instruction\n{instruction_body}"
 
     return vllm_messages
 
 
-def execute_code_safe(
-    code_str: str, workspace_dir: str, timeout_sec: int = 120
-) -> str:
+def execute_code_safe(code_str: str, workspace_dir: str, timeout_sec: int = 120) -> str:
     """Execute Python code in a separate process with timeout"""
     exec_cwd = os.path.abspath(workspace_dir)
     os.makedirs(exec_cwd, exist_ok=True)
@@ -187,7 +181,8 @@ async def execute_code_safe_async(
 
         # Use asyncio.subprocess for non-blocking execution
         process = await asyncio.create_subprocess_exec(
-            sys.executable, tmp_path,
+            sys.executable,
+            tmp_path,
             cwd=exec_cwd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -196,10 +191,11 @@ async def execute_code_safe_async(
 
         try:
             stdout, stderr = await asyncio.wait_for(
-                process.communicate(),
-                timeout=timeout_sec
+                process.communicate(), timeout=timeout_sec
             )
-            output = (stdout.decode() if stdout else "") + (stderr.decode() if stderr else "")
+            output = (stdout.decode() if stdout else "") + (
+                stderr.decode() if stderr else ""
+            )
             return output
         except asyncio.TimeoutError:
             # Kill the process if it times out
@@ -226,7 +222,7 @@ def extract_code_from_segment(segment: str) -> Optional[str]:
         return None
     code_content = code_match.group(1).strip()
     md_match = re.search(r"```(?:python)?(.*?)```", code_content, re.DOTALL)
-    return (md_match.group(1).strip() if md_match else code_content)
+    return md_match.group(1).strip() if md_match else code_content
 
 
 def fix_tags_and_codeblock(s: str) -> str:
@@ -258,7 +254,9 @@ def extract_sections_from_history(messages: List[Dict[str, str]]) -> str:
 
     parts: List[str] = []
     appendix: List[str] = []
-    tag_pattern = re.compile(r"<(Analyze|Understand|Code|Execute|File|Answer)>([\s\S]*?)</\1>")
+    tag_pattern = re.compile(
+        r"<(Analyze|Understand|Code|Execute|File|Answer)>([\s\S]*?)</\1>"
+    )
 
     for msg in messages:
         if not isinstance(msg, dict):
@@ -296,8 +294,6 @@ def save_markdown_report(md_text: str, base_name: str, target_dir: Path) -> Path
     return md_path
 
 
-
-
 class WorkspaceTracker:
     """Track workspace file changes and collect artifacts into generated/ folder."""
 
@@ -330,7 +326,8 @@ class WorkspaceTracker:
 
         added = [p for p in after_state.keys() if p not in self.before_state]
         modified = [
-            p for p in after_state.keys()
+            p
+            for p in after_state.keys()
             if p in self.before_state and after_state[p] != self.before_state[p]
         ]
 
@@ -419,6 +416,8 @@ def generate_report_from_messages(
     except Exception as report_error:
         print(f"Report generation error: {report_error}")
         return ""
+
+
 def render_file_block(
     artifact_paths: List[Path],
     workspace_dir: str,
@@ -429,26 +428,32 @@ def render_file_block(
     if not artifact_paths:
         return ""
 
-
+    lines = ["<File>"]
     for p in artifact_paths:
         try:
-            rel = Path(p).resolve().relative_to(Path(workspace_dir).resolve()).as_posix()
+            rel = (
+                Path(p).resolve().relative_to(Path(workspace_dir).resolve()).as_posix()
+            )
         except Exception:
             rel = Path(p).name
         url = build_download_url(thread_id, rel)
         name = Path(p).name
-        if generated_files_sink is not None :
+        lines.append(f"- [{name}]({url})")
+        if Path(p).suffix.lower() in [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"]:
+            lines.append(f"![{name}]({url})")
+        if generated_files_sink is not None:
             if {"name": name, "url": url} not in generated_files_sink:
                 generated_files_sink.append({"name": name, "url": url})
-    return ""
+    lines.append("</File>")
+    return "\n" + "\n".join(lines) + "\n"
+
 
 def start_http_server():
     os.makedirs(WORKSPACE_BASE_DIR, exist_ok=True)
 
     # 使用 ThreadingTCPServer 处理并发
     handler = partial(
-        http.server.SimpleHTTPRequestHandler,
-        directory=WORKSPACE_BASE_DIR
+        http.server.SimpleHTTPRequestHandler, directory=WORKSPACE_BASE_DIR
     )
 
     with socketserver.ThreadingTCPServer(("", HTTP_SERVER_PORT), handler) as httpd:
