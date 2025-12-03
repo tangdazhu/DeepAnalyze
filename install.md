@@ -35,6 +35,7 @@ pip install -r requirements.txt
 1. **模型服务**
    ```bash
    (deepanalyze) tdz@tangdazhu:~$
+   conda activate deepanalyze
    vllm serve ~/models/qwen2.5-3b-instruct \
      --host 0.0.0.0 --port 8000 \
      --served-model-name qwen2.5-3b-instruct \
@@ -42,11 +43,13 @@ pip install -r requirements.txt
    ```
 2. **后端服务**（使用 demo/backend.py，提供 `/workspace/*` 等接口）
    ```bash
+   conda activate deepanalyze
    cd ~/DeepAnalyze/demo
    python backend.py
    ```
 3. **前端 WebUI**
    ```bash
+   conda activate deepanalyze
    cd ~/DeepAnalyze/demo/chat
    npm run dev -- --hostname 0.0.0.0 --port 4000
    ```

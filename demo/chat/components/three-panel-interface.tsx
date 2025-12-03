@@ -2135,6 +2135,13 @@ export function ThreePanelInterface() {
     setIsTyping(true);
 
     try {
+      const workspacePayload = workspaceFiles.map((f) => ({
+        name: f.name,
+        size: f.size,
+        extension: f.extension,
+        download_url: f.download_url,
+      }));
+
       const response = await fetch(API_URLS.CHAT_COMPLETIONS, {
         method: "POST",
         headers: {
@@ -2155,6 +2162,7 @@ export function ThreePanelInterface() {
             },
           ],
           stream: true, // [修改] 明确开启流式模式
+          workspace: workspacePayload,
           session_id: sessionId,
         }),
       });
