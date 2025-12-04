@@ -719,6 +719,25 @@ def fix_tags_and_codeblock(s: str) -> str:
     return s
 
 
+def extract_effective_code(code_str: str) -> str:
+    """若 <Code> 中包裹三引号字符串，提取其中的实际脚本内容。"""
+    if not code_str:
+        return ""
+    for quote in ('"""', "'''"):
+        start = code_str.find(quote)
+        if start != -1:
+            end = code_str.find(quote, start + 3)
+            if end != -1:
+                inner = code_str[start + 3 : end].strip()
+                # 如果内层脚本仍包含 import / SELECT 等关键字，则认为是有效脚本
+                if any(
+                    token in inner
+                    for token in ["import", "select", "plt.", "sns.", "pd."]
+                ):
+                    return inner
+    return code_str
+
+
 def bot_stream(messages, workspace, session_id="default"):
     original_cwd = os.getcwd()
     workspace_path = Path(get_session_workspace(session_id)).resolve()
@@ -769,6 +788,10 @@ def bot_stream(messages, workspace, session_id="default"):
     last_analyze_signature = None
     last_execute_signature = None
     schema_confirmed = False
+    schema_only_repeat = 0
+    execute_rounds = 0
+    answer_requested = False
+    answer_waiting_rounds = 0
 
     while not finished and iteration < MAX_ITERATIONS:
         iteration += 1
@@ -885,17 +908,29 @@ def bot_stream(messages, workspace, session_id="default"):
                 continue
 
         if "</Code>" in cur_res and not finished:
+            if answer_requested:
+                messages.append({"role": "assistant", "content": cur_res})
+                reminder = "分析已完成，请停止输出新的 <Code>。在下一轮直接编写 <Answer>，总结已得到的 <Execute>/<File> 结果并给出进一步建议。"
+                messages.append({"role": "user", "content": reminder})
+                answer_waiting_rounds += 1
+                if answer_waiting_rounds >= 2:
+                    violation_block = "\n<Answer>\n多次提醒后仍未输出 <Answer>，任务被自动终止。请使用现有 <Execute>/<File> 结果手动总结或重新发起指令。\n</Answer>\n"
+                    assistant_reply += violation_block
+                    yield violation_block
+                    return
+                continue
             messages.append({"role": "assistant", "content": cur_res})
             code_match = re.search(r"<Code>(.*?)</Code>", cur_res, re.DOTALL)
             if code_match:
                 code_content = code_match.group(1).strip()
                 md_match = re.search(r"```(?:python)?(.*?)```", code_content, re.DOTALL)
                 code_str = md_match.group(1).strip() if md_match else code_content
+                effective_code = extract_effective_code(code_str)
 
                 code_signature = "\n".join(
-                    line.strip() for line in code_str.splitlines()
+                    line.strip() for line in effective_code.splitlines()
                 ).strip()
-                normalized_code = code_str.lower()
+                normalized_code = effective_code.lower()
                 if code_signature and code_signature == last_code_signature:
                     reminder = (
                         "你的代码与上一轮完全相同。请根据已获取的表结构推进新的分析，"
@@ -908,15 +943,51 @@ def bot_stream(messages, workspace, session_id="default"):
                     and "sqlite_master" in normalized_code
                     and "pragma" not in normalized_code
                 ):
-                    refresh_prompt = "表结构已经明确，无需再次查询 sqlite_master。请引用现有表/字段执行新的 SELECT 或分析步骤。"
+                    schema_only_repeat += 1
+                    refresh_prompt = "表结构已经明确，无需再次查询 sqlite_master。请引用现有表/字段执行新的 SELECT 或统计分析。"
+                    if schema_only_repeat >= 2:
+                        violation_block = (
+                            "\n<Answer>\n已确认表结构后仍连续输出 sqlite_master 查询，任务被自动终止。"
+                            " 请重新发起会话，并在首轮之外直接针对真实表执行 SELECT/EDA。\n</Answer>\n"
+                        )
+                        assistant_reply += violation_block
+                        yield violation_block
+                        return
                     messages.append({"role": "user", "content": refresh_prompt})
                     continue
+                else:
+                    schema_only_repeat = 0
                 if not schema_confirmed and "sqlite_master" not in normalized_code:
                     schema_prompt = (
                         "请先在 <Code> 中执行 `SELECT name FROM sqlite_master WHERE type='table'` 并列出真实表结构，"
                         "首轮必须完成表结构确认后才能继续 EDA。"
                     )
                     messages.append({"role": "user", "content": schema_prompt})
+                    continue
+
+                missing_imports = []
+                if (
+                    "pd." in effective_code
+                    and "import pandas as pd" not in effective_code
+                ):
+                    missing_imports.append("import pandas as pd")
+                if (
+                    "plt." in effective_code
+                    and "import matplotlib.pyplot as plt" not in effective_code
+                ):
+                    missing_imports.append("import matplotlib.pyplot as plt")
+                if (
+                    "sns." in effective_code
+                    and "import seaborn as sns" not in effective_code
+                ):
+                    missing_imports.append("import seaborn as sns")
+                if missing_imports:
+                    import_prompt = (
+                        "检测到 <Code> 使用了 pandas/matplotlib/seaborn，但缺少以下导入："
+                        + ", ".join(missing_imports)
+                        + "。请补全导入后再执行。"
+                    )
+                    messages.append({"role": "user", "content": import_prompt})
                     continue
 
                 last_code_signature = code_signature
@@ -933,7 +1004,9 @@ def bot_stream(messages, workspace, session_id="default"):
                 except Exception:
                     before_state = {}
 
-                exe_output = execute_code_safe(code_str, str(workspace_path))
+                exe_output = execute_code_safe(
+                    effective_code or code_str, str(workspace_path)
+                )
 
                 if not schema_confirmed and "sqlite_master" in normalized_code:
                     schema_confirmed = True
@@ -1005,6 +1078,18 @@ def bot_stream(messages, workspace, session_id="default"):
                 assistant_reply += full_execution_block
                 yield full_execution_block
                 messages.append({"role": "execute", "content": f"{exe_output}"})
+
+                execute_rounds += 1
+                if answer_requested:
+                    answer_waiting_rounds = 0
+                if execute_rounds >= 2 and not answer_requested:
+                    answer_requested = True
+                    answer_waiting_rounds = 0
+                    answer_prompt = (
+                        "你已完成至少两轮代码执行。请停止继续编写 <Code>，在下一轮直接输出 <Answer>，"
+                        "总结上述 <Execute>/<File> 结果并给出后续建议。"
+                    )
+                    messages.append({"role": "user", "content": answer_prompt})
 
                 exe_signature = (
                     re.sub(r"\s+", " ", exe_output.strip())
