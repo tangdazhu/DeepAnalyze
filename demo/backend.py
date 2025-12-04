@@ -766,6 +766,8 @@ def bot_stream(messages, workspace, session_id="default"):
     forced_reason = ""
 
     last_code_signature = None
+    last_analyze_signature = None
+    last_execute_signature = None
     schema_confirmed = False
 
     while not finished and iteration < MAX_ITERATIONS:
@@ -816,6 +818,36 @@ def bot_stream(messages, workspace, session_id="default"):
         print(
             f"[bot_stream] session={session_id} iteration={iteration} finish_reason={last_finish_reason} has_code={'<Code>' in cur_res} closed={'</Code>' in cur_res} len={len(cur_res)}"
         )
+
+        analyze_match = re.search(r"<Analyze>(.*?)</Analyze>", cur_res, re.DOTALL)
+        analyze_content = analyze_match.group(1).strip() if analyze_match else ""
+        analyze_signature = (
+            re.sub(r"\s+", " ", analyze_content) if analyze_content else ""
+        )
+
+        if not analyze_content:
+            messages.append({"role": "assistant", "content": cur_res})
+            analyze_prompt = "你的输出缺少 <Analyze> 段，必须先在 <Analyze> 中说明当前目标与依据，再给出 <Code>。"
+            messages.append({"role": "user", "content": analyze_prompt})
+            continue
+
+        if (
+            schema_confirmed
+            and "列出" in analyze_content
+            and "表结构" in analyze_content
+        ):
+            messages.append({"role": "assistant", "content": cur_res})
+            advance_prompt = "表结构已在首轮列出，请基于已知表/字段提出新的分析目标，换用真实查询或 EDA 任务。"
+            messages.append({"role": "user", "content": advance_prompt})
+            continue
+
+        if last_analyze_signature and analyze_signature == last_analyze_signature:
+            messages.append({"role": "assistant", "content": cur_res})
+            diff_prompt = "你的 <Analyze> 内容与上一轮完全相同，请结合最新的 <Execute>/<File> 结果提出不同的分析步骤。"
+            messages.append({"role": "user", "content": diff_prompt})
+            continue
+
+        last_analyze_signature = analyze_signature
 
         if not cur_res.strip() and not finished:
             empty_retry += 1
@@ -870,6 +902,14 @@ def bot_stream(messages, workspace, session_id="default"):
                         "不要重复列出 sqlite_master。"
                     )
                     messages.append({"role": "user", "content": reminder})
+                    continue
+                if (
+                    schema_confirmed
+                    and "sqlite_master" in normalized_code
+                    and "pragma" not in normalized_code
+                ):
+                    refresh_prompt = "表结构已经明确，无需再次查询 sqlite_master。请引用现有表/字段执行新的 SELECT 或分析步骤。"
+                    messages.append({"role": "user", "content": refresh_prompt})
                     continue
                 if not schema_confirmed and "sqlite_master" not in normalized_code:
                     schema_prompt = (
@@ -965,6 +1005,21 @@ def bot_stream(messages, workspace, session_id="default"):
                 assistant_reply += full_execution_block
                 yield full_execution_block
                 messages.append({"role": "execute", "content": f"{exe_output}"})
+
+                exe_signature = (
+                    re.sub(r"\s+", " ", exe_output.strip())
+                    if isinstance(exe_output, str)
+                    else ""
+                )
+                if (
+                    schema_confirmed
+                    and exe_signature
+                    and last_execute_signature
+                    and exe_signature == last_execute_signature
+                ):
+                    repeat_prompt = "连续两轮的 <Execute> 输出完全一致（仍在列出 sqlite_master 结果）。请立即改用真实表进行 `SELECT *` 或统计分析。"
+                    messages.append({"role": "user", "content": repeat_prompt})
+                last_execute_signature = exe_signature or last_execute_signature
 
                 normalized_output = (
                     exe_output.lower() if isinstance(exe_output, str) else ""
