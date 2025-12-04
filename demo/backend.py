@@ -270,6 +270,53 @@ def summarize_sqlite_schema(workspace_dir: Path) -> str:
     return "\n".join(summaries).strip()
 
 
+def list_sqlite_tables(workspace_dir: Path) -> set[str]:
+    """返回 workspace 内所有 sqlite 文件中出现的表名集合。"""
+    tables: set[str] = set()
+    for db_file in workspace_dir.glob("*.sqlite"):
+        try:
+            conn = sqlite3.connect(db_file)
+            cursor = conn.cursor()
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            tables.update(row[0] for row in cursor.fetchall() if row and row[0])
+            conn.close()
+        except Exception:
+            continue
+    return tables
+
+
+TABLE_TOKEN_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+SQL_TABLE_PATTERN = re.compile(
+    r"(?:from|join|into|update|table)\s+([A-Za-z_][A-Za-z0-9_]*)",
+    re.IGNORECASE,
+)
+SQL_PRAGMA_PATTERN = re.compile(
+    r"pragma\s+table_info\s*\(\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)",
+    re.IGNORECASE,
+)
+
+
+def extract_table_mentions_from_text(
+    text: str, known_tables: set[str]
+) -> tuple[set[str], set[str]]:
+    tokens = set(TABLE_TOKEN_PATTERN.findall(text or ""))
+    known = {tok for tok in tokens if tok in known_tables}
+    unknown = {
+        tok
+        for tok in tokens
+        if tok not in known_tables
+        and "_" in tok
+        and tok.lower() not in {"sqlite_master", "sqlite_sequence"}
+    }
+    return known, unknown
+
+
+def extract_sql_table_names(code: str) -> set[str]:
+    tables = set(SQL_TABLE_PATTERN.findall(code or ""))
+    tables.update(SQL_PRAGMA_PATTERN.findall(code or ""))
+    return tables
+
+
 def snapshot_workspace_files(directory: str) -> set[str]:
     """生成 workspace 目录下所有文件的绝对路径集合。"""
     try:
@@ -793,6 +840,7 @@ def bot_stream(messages, workspace, session_id="default"):
     non_schema_exec_rounds = 0
     answer_requested = False
     answer_waiting_rounds = 0
+    known_tables = list_sqlite_tables(workspace_path)
 
     while not finished and iteration < MAX_ITERATIONS:
         iteration += 1
@@ -876,6 +924,31 @@ def bot_stream(messages, workspace, session_id="default"):
             diff_prompt = "你的 <Analyze> 内容与上一轮完全相同，请结合最新的 <Execute>/<File> 结果提出不同的分析步骤。"
             messages.append({"role": "user", "content": diff_prompt})
             continue
+
+        known_mentions = set()
+        unknown_mentions = set()
+        if known_tables:
+            known_mentions, unknown_mentions = extract_table_mentions_from_text(
+                analyze_content, known_tables
+            )
+            if schema_confirmed and unknown_mentions:
+                messages.append({"role": "assistant", "content": cur_res})
+                warn_unknown = (
+                    "检测到你引用了不存在于实际 SQLite 中的表："
+                    + ", ".join(sorted(unknown_mentions))
+                    + "。请重新查看 sqlite_master 结果，仅使用真实表名。"
+                )
+                messages.append({"role": "user", "content": warn_unknown})
+                continue
+            if schema_confirmed and not known_mentions:
+                messages.append({"role": "assistant", "content": cur_res})
+                ref_prompt = (
+                    "请在 <Analyze> 中明确引用 sqlite_master 返回的真实表名，例如："
+                    + ", ".join(sorted(known_tables))
+                    + "，再制定分析目标。"
+                )
+                messages.append({"role": "user", "content": ref_prompt})
+                continue
 
         last_analyze_signature = analyze_signature
 
@@ -964,6 +1037,25 @@ def bot_stream(messages, workspace, session_id="default"):
                     continue
                 else:
                     schema_only_repeat = 0
+                sql_tables_used = extract_sql_table_names(effective_code)
+                invalid_tables = set()
+                if known_tables and sql_tables_used:
+                    invalid_tables = {
+                        tbl
+                        for tbl in sql_tables_used
+                        if tbl not in known_tables
+                        and tbl.lower() not in {"sqlite_master", "sqlite_sequence"}
+                    }
+
+                if schema_confirmed and invalid_tables:
+                    invalid_msg = (
+                        "脚本中引用了不存在的表："
+                        + ", ".join(sorted(invalid_tables))
+                        + "。请改用 sqlite_master 中的真实表名。"
+                    )
+                    messages.append({"role": "user", "content": invalid_msg})
+                    continue
+
                 if not schema_confirmed and "sqlite_master" not in normalized_code:
                     schema_prompt = (
                         "请先在 <Code> 中执行 `SELECT name FROM sqlite_master WHERE type='table'` 并列出真实表结构，"
@@ -1022,6 +1114,9 @@ def bot_stream(messages, workspace, session_id="default"):
 
                 if not schema_confirmed and "sqlite_master" in normalized_code:
                     schema_confirmed = True
+                    latest_tables = list_sqlite_tables(workspace_path)
+                    if latest_tables:
+                        known_tables = latest_tables
 
                 try:
                     after_state = {
