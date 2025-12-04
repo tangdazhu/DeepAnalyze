@@ -790,6 +790,7 @@ def bot_stream(messages, workspace, session_id="default"):
     schema_confirmed = False
     schema_only_repeat = 0
     execute_rounds = 0
+    non_schema_exec_rounds = 0
     answer_requested = False
     answer_waiting_rounds = 0
 
@@ -820,15 +821,21 @@ def bot_stream(messages, workspace, session_id="default"):
             if chunk.choices and chunk.choices[0].finish_reason:
                 last_finish_reason = chunk.choices[0].finish_reason
             if should_stop(session_id):
-                stop_msg = "\n<Execute>\n```\n检测到停止指令，正在安全结束当前迭代。\n```\n</Execute>\n"
+                stop_msg = "\n<Execute>\n``````\n检测到停止指令，正在安全结束当前迭代。\n```\n</Execute>\n"
                 assistant_reply += stop_msg
                 yield stop_msg
                 forced_reason = "任务已根据用户的停止指令终止"
                 finished = True
                 break
             if "</Answer>" in cur_res:
-                finished = True
-                break
+                if non_schema_exec_rounds == 0:
+                    messages.append({"role": "assistant", "content": cur_res})
+                    warn_msg = "尚未基于真实表执行任何 EDA/可视化。请先按照要求运行 `SELECT *` 等分析，形成 <Execute>/<File> 结果后再给出 <Answer>。"
+                    messages.append({"role": "user", "content": warn_msg})
+                    cur_res = cur_res.replace("<Answer>", "<Answer (ignored)>")
+                else:
+                    finished = True
+                    break
 
         fixed_res = fix_tags_and_codeblock(cur_res)
         if fixed_res != cur_res:
@@ -1008,6 +1015,11 @@ def bot_stream(messages, workspace, session_id="default"):
                     effective_code or code_str, str(workspace_path)
                 )
 
+                is_schema_code = (
+                    "sqlite_master" in normalized_code
+                    and "pragma" not in normalized_code
+                )
+
                 if not schema_confirmed and "sqlite_master" in normalized_code:
                     schema_confirmed = True
 
@@ -1080,9 +1092,15 @@ def bot_stream(messages, workspace, session_id="default"):
                 messages.append({"role": "execute", "content": f"{exe_output}"})
 
                 execute_rounds += 1
+                if not is_schema_code:
+                    non_schema_exec_rounds += 1
                 if answer_requested:
                     answer_waiting_rounds = 0
-                if execute_rounds >= 2 and not answer_requested:
+                if (
+                    execute_rounds >= 2
+                    and non_schema_exec_rounds >= 1
+                    and not answer_requested
+                ):
                     answer_requested = True
                     answer_waiting_rounds = 0
                     answer_prompt = (
