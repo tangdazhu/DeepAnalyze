@@ -16,6 +16,7 @@ import threading
 import http.server
 from functools import partial
 import socketserver
+import sqlite3
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Query
 from fastapi.responses import JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -247,6 +248,26 @@ def format_workspace_payload(workspace_entries: list[dict]) -> str:
             f"File {idx}:\n" + json.dumps(info, indent=4, ensure_ascii=False) + "\n\n"
         )
     return "".join(formatted).strip()
+
+
+def summarize_sqlite_schema(workspace_dir: Path) -> str:
+    """遍历 workspace 下的 SQLite 文件并返回表与字段摘要。"""
+    summaries: list[str] = []
+    for db_file in sorted(workspace_dir.glob("*.sqlite")):
+        try:
+            conn = sqlite3.connect(db_file)
+            cursor = conn.cursor()
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            tables = [row[0] for row in cursor.fetchall()]
+            for table in tables:
+                cursor.execute(f"PRAGMA table_info('{table}')")
+                columns = [col[1] for col in cursor.fetchall()]
+                column_desc = ", ".join(columns) if columns else "(无字段)"
+                summaries.append(f"{db_file.name}:{table} => {column_desc}")
+            conn.close()
+        except Exception as exc:
+            summaries.append(f"{db_file.name} 读取失败: {exc}")
+    return "\n".join(summaries).strip()
 
 
 def snapshot_workspace_files(directory: str) -> set[str]:
@@ -745,6 +766,7 @@ def bot_stream(messages, workspace, session_id="default"):
     forced_reason = ""
 
     last_code_signature = None
+    schema_confirmed = False
 
     while not finished and iteration < MAX_ITERATIONS:
         iteration += 1
@@ -841,6 +863,7 @@ def bot_stream(messages, workspace, session_id="default"):
                 code_signature = "\n".join(
                     line.strip() for line in code_str.splitlines()
                 ).strip()
+                normalized_code = code_str.lower()
                 if code_signature and code_signature == last_code_signature:
                     reminder = (
                         "你的代码与上一轮完全相同。请根据已获取的表结构推进新的分析，"
@@ -848,6 +871,14 @@ def bot_stream(messages, workspace, session_id="default"):
                     )
                     messages.append({"role": "user", "content": reminder})
                     continue
+                if not schema_confirmed and "sqlite_master" not in normalized_code:
+                    schema_prompt = (
+                        "请先在 <Code> 中执行 `SELECT name FROM sqlite_master WHERE type='table'` 并列出真实表结构，"
+                        "首轮必须完成表结构确认后才能继续 EDA。"
+                    )
+                    messages.append({"role": "user", "content": schema_prompt})
+                    continue
+
                 last_code_signature = code_signature
 
                 print(
@@ -863,6 +894,9 @@ def bot_stream(messages, workspace, session_id="default"):
                     before_state = {}
 
                 exe_output = execute_code_safe(code_str, str(workspace_path))
+
+                if not schema_confirmed and "sqlite_master" in normalized_code:
+                    schema_confirmed = True
 
                 try:
                     after_state = {
@@ -931,6 +965,29 @@ def bot_stream(messages, workspace, session_id="default"):
                 assistant_reply += full_execution_block
                 yield full_execution_block
                 messages.append({"role": "execute", "content": f"{exe_output}"})
+
+                normalized_output = (
+                    exe_output.lower() if isinstance(exe_output, str) else ""
+                )
+                if "no such table" in normalized_output:
+                    missing_match = re.search(
+                        r"no such table:?\s*([\w\d_]+)", exe_output, re.IGNORECASE
+                    )
+                    missing_table = missing_match.group(1) if missing_match else ""
+                    schema_hint = summarize_sqlite_schema(workspace_path)
+                    hint_lines = [
+                        "执行结果显示引用了不存在的表。请复查 sqlite_master 输出，在下一轮 <Analyze> 中说明修复计划，并改用真实表名。"
+                    ]
+                    if missing_table:
+                        hint_lines.append(f"缺失的表：{missing_table}")
+                    if schema_hint:
+                        hint_lines.append(
+                            "当前 workspace 中 SQLite 表结构（系统实时扫描）："
+                        )
+                        hint_lines.append(schema_hint)
+                    messages.append(
+                        {"role": "user", "content": "\n\n".join(hint_lines)}
+                    )
 
                 current_files = {
                     str(p.resolve()) for p in workspace_path.rglob("*") if p.is_file()
