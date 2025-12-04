@@ -127,6 +127,8 @@ def execute_code_safe(
 API_BASE = "http://localhost:8000/v1"  # this localhost is for vllm api, do not change
 MODEL_PATH = "qwen2.5-3b-instruct"  # replace to your path to DeepAnalyze-8B
 MAX_ITERATIONS = 12
+ANSWER_MIN_EXEC_ROUNDS = 3
+ANSWER_MIN_NON_SCHEMA_ROUNDS = 2
 
 
 # Initialize OpenAI client
@@ -842,6 +844,7 @@ def bot_stream(messages, workspace, session_id="default"):
     answer_requested = False
     answer_waiting_rounds = 0
     known_tables = list_sqlite_tables(workspace_path)
+    recent_tables_used: set[str] = set()
 
     def trim_messages(input_messages: list[dict]) -> list[dict]:
         serialized = "\n".join(
@@ -953,6 +956,7 @@ def bot_stream(messages, workspace, session_id="default"):
 
         known_mentions = set()
         unknown_mentions = set()
+        require_known_reference = schema_confirmed and non_schema_exec_rounds == 0
         if known_tables:
             known_mentions, unknown_mentions = extract_table_mentions_from_text(
                 analyze_content, known_tables
@@ -966,12 +970,16 @@ def bot_stream(messages, workspace, session_id="default"):
                 )
                 messages.append({"role": "user", "content": warn_unknown})
                 continue
-            if schema_confirmed and not known_mentions:
+            if require_known_reference and not known_mentions:
                 messages.append({"role": "assistant", "content": cur_res})
+                table_samples = sorted(known_tables)
+                sample_hint = (
+                    ", ".join(table_samples[:3]) if table_samples else "真实表"
+                )
                 ref_prompt = (
-                    "请在 <Analyze> 中明确引用 sqlite_master 返回的真实表名，例如："
-                    + ", ".join(sorted(known_tables))
-                    + "，再制定分析目标。"
+                    "请在 <Analyze> 中引用 sqlite_master 返回的真实表名（如："
+                    + sample_hint
+                    + "），并结合这些表/字段制定下一步分析计划。"
                 )
                 messages.append({"role": "user", "content": ref_prompt})
                 continue
@@ -1074,7 +1082,20 @@ def bot_stream(messages, workspace, session_id="default"):
                     and "pragma" not in normalized_code
                 ):
                     schema_only_repeat += 1
-                    refresh_prompt = "表结构已经明确，无需再次查询 sqlite_master。请引用现有表/字段执行新的 SELECT 或统计分析。"
+                    table_examples = sorted(known_tables)
+                    example_text = (
+                        ", ".join(table_examples[:3]) if table_examples else "真实表"
+                    )
+                    sample_next = (
+                        f"例如：SELECT * FROM {table_examples[0]} LIMIT 5"
+                        if table_examples
+                        else "例如：SELECT * FROM 某个真实表 LIMIT 5"
+                    )
+                    refresh_prompt = (
+                        "表结构已经明确，无需再次查询 sqlite_master。请直接对真实表（如："
+                        + example_text
+                        + f"）执行 SELECT/EDA，比如 {sample_next} 或绘制对应字段的分布。"
+                    )
                     if schema_only_repeat >= 2:
                         violation_block = (
                             "\n<Answer>\n已确认表结构后仍连续输出 sqlite_master 查询，任务被自动终止。"
@@ -1088,6 +1109,8 @@ def bot_stream(messages, workspace, session_id="default"):
                 else:
                     schema_only_repeat = 0
                 sql_tables_used = extract_sql_table_names(effective_code)
+                if sql_tables_used:
+                    recent_tables_used = sql_tables_used
                 invalid_tables = set()
                 if known_tables and sql_tables_used:
                     invalid_tables = {
@@ -1242,8 +1265,8 @@ def bot_stream(messages, workspace, session_id="default"):
                 if answer_requested:
                     answer_waiting_rounds = 0
                 if (
-                    execute_rounds >= 2
-                    and non_schema_exec_rounds >= 1
+                    execute_rounds >= ANSWER_MIN_EXEC_ROUNDS
+                    and non_schema_exec_rounds >= ANSWER_MIN_NON_SCHEMA_ROUNDS
                     and not answer_requested
                 ):
                     answer_requested = True
