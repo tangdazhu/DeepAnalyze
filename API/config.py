@@ -28,6 +28,7 @@ CLEANUP_INTERVAL_MINUTES = 30
 # Code execution configuration
 CODE_EXECUTION_TIMEOUT = 120
 MAX_NEW_TOKENS = 32768
+MAX_PROMPT_CHARS = 16000
 
 # File handling configuration
 FILE_STORAGE_DIR = os.path.join(WORKSPACE_BASE_DIR, "_files")

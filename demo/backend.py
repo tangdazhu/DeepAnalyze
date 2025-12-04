@@ -28,14 +28,8 @@ import os
 import re
 import json
 from fastapi.responses import StreamingResponse
-import os
-import re
 from copy import deepcopy
-import openai
-from fastapi import FastAPI, Body
-from fastapi.responses import StreamingResponse
-
-import re
+from API import config as api_config
 
 os.environ.setdefault("MPLBACKEND", "Agg")
 
@@ -135,6 +129,7 @@ client = openai.OpenAI(base_url=API_BASE, api_key="dummy")
 # Workspace directory
 WORKSPACE_BASE_DIR = "workspace"
 HTTP_SERVER_PORT = 8100
+MAX_PROMPT_CHARS = getattr(api_config, "MAX_PROMPT_CHARS", 16000)
 HTTP_SERVER_BASE = (
     f"http://localhost:{HTTP_SERVER_PORT}"  # you can replace localhost to your local ip
 )
@@ -842,20 +837,45 @@ def bot_stream(messages, workspace, session_id="default"):
     answer_waiting_rounds = 0
     known_tables = list_sqlite_tables(workspace_path)
 
+    def trim_messages(input_messages: list[dict]) -> list[dict]:
+        serialized = "\n".join(
+            json.dumps(m, ensure_ascii=False) for m in input_messages
+        )
+        if len(serialized) <= MAX_PROMPT_CHARS:
+            return input_messages
+        trimmed: list[dict] = []
+        total = 0
+        for msg in reversed(input_messages):
+            encoded = json.dumps(msg, ensure_ascii=False)
+            if total + len(encoded) > MAX_PROMPT_CHARS:
+                break
+            trimmed.append(msg)
+            total += len(encoded)
+        trimmed = list(reversed(trimmed))
+        lead = [
+            {
+                "role": "system",
+                "content": "历史消息过长，已截断早期对话，请根据仍保留的内容继续。",
+            }
+        ]
+        return lead + trimmed
+
     while not finished and iteration < MAX_ITERATIONS:
         iteration += 1
         print(
             f"[bot_stream] session={session_id} iteration={iteration} starting, messages={len(messages)}"
         )
+        safe_messages = trim_messages(messages)
+
         response = client.chat.completions.create(
             model=MODEL_PATH,
-            messages=messages,
+            messages=safe_messages,
             temperature=0.4,
             stream=True,
             extra_body={
                 "add_generation_prompt": False,
                 "stop_token_ids": [151676, 151645],
-                "max_new_tokens": 32768,
+                "max_new_tokens": 4096,
             },
         )
         cur_res = ""
@@ -969,6 +989,30 @@ def bot_stream(messages, workspace, session_id="default"):
 
         if finished:
             break
+
+        has_code_block = "<Code>" in cur_res and "</Code>" in cur_res
+
+        if not has_code_block:
+            messages.append({"role": "assistant", "content": cur_res})
+            if answer_requested:
+                answer_waiting_rounds += 1
+                reminder = (
+                    "你已完成必要的代码执行，请直接给出 <Answer>，总结 <Execute>/<File> 的发现并提出建议，"
+                    "不要再给新的 <Analyze>/<Code>。"
+                )
+                messages.append({"role": "user", "content": reminder})
+                if answer_waiting_rounds >= 2:
+                    violation_block = "\n<Answer>\n多次提醒后仍未输出 <Answer>，任务被终止。请使用现有结果自行总结或重新发起任务。\n</Answer>\n"
+                    assistant_reply += violation_block
+                    yield violation_block
+                    return
+            else:
+                code_prompt = (
+                    "你的输出缺少 <Code> 段。请在 <Analyze> 后立刻提供完整的 Python 代码（含 import/连接/EDA/plt 保存/conn.close()），"
+                    "以便系统执行。"
+                )
+                messages.append({"role": "user", "content": code_prompt})
+            continue
 
         if last_finish_reason in {"stop", "length"} and not finished:
             if "<Code>" in cur_res and "</Code>" not in cur_res:
