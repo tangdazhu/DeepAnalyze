@@ -741,6 +741,7 @@ def bot_stream(messages, workspace, session_id="default"):
     finished = False
     exe_output = None
     iteration = 0
+    empty_retry = 0
     forced_reason = ""
 
     while not finished and iteration < MAX_ITERATIONS:
@@ -793,9 +794,19 @@ def bot_stream(messages, workspace, session_id="default"):
         )
 
         if not cur_res.strip() and not finished:
-            forced_reason = "模型未返回新增内容，已终止本轮迭代"
+            empty_retry += 1
+            if empty_retry < 3:
+                retry_prompt = (
+                    "上一轮你没有任何输出，请继续按照既定计划进行分析，"
+                    "务必给出 <Analyze>/<Code>/<Execute> 的完整内容。"
+                )
+                messages.append({"role": "user", "content": retry_prompt})
+                continue
+            forced_reason = "连续多轮未返回新增内容，已终止本轮迭代"
             finished = True
             break
+        else:
+            empty_retry = 0
 
         if finished:
             break

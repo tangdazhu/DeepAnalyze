@@ -54,6 +54,8 @@ pip install -r requirements.txt
    npm run dev -- --hostname 0.0.0.0 --port 4000
    ```
 
+ 然后从浏览器访问WebUI： http://172.23.6.173:4000/
+
 此模式下无需再启动 `API/start_server.py`，避免 8200/8100 端口冲突。若后续改用官方 API，可将 `/workspace/*` 路由迁移或继续并行运行 `backend.py`。
 
 
