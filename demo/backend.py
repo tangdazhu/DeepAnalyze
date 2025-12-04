@@ -29,6 +29,11 @@ import re
 import json
 from fastapi.responses import StreamingResponse
 from copy import deepcopy
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from API import config as api_config
 
 os.environ.setdefault("MPLBACKEND", "Agg")
