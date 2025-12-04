@@ -744,6 +744,8 @@ def bot_stream(messages, workspace, session_id="default"):
     empty_retry = 0
     forced_reason = ""
 
+    last_code_signature = None
+
     while not finished and iteration < MAX_ITERATIONS:
         iteration += 1
         print(
@@ -835,6 +837,19 @@ def bot_stream(messages, workspace, session_id="default"):
                 code_content = code_match.group(1).strip()
                 md_match = re.search(r"```(?:python)?(.*?)```", code_content, re.DOTALL)
                 code_str = md_match.group(1).strip() if md_match else code_content
+
+                code_signature = "\n".join(
+                    line.strip() for line in code_str.splitlines()
+                ).strip()
+                if code_signature and code_signature == last_code_signature:
+                    reminder = (
+                        "你的代码与上一轮完全相同。请根据已获取的表结构推进新的分析，"
+                        "不要重复列出 sqlite_master。"
+                    )
+                    messages.append({"role": "user", "content": reminder})
+                    continue
+                last_code_signature = code_signature
+
                 print(
                     f"[bot_stream] session={session_id} iteration={iteration} executing code, length={len(code_str)}"
                 )
