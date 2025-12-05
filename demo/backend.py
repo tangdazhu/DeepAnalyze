@@ -226,15 +226,12 @@ def collect_file_info(directory: str) -> str:
     return all_file_info_str
 
 
-def format_workspace_payload(workspace_entries: list[dict]) -> str:
+def format_workspace_payload(workspace_payload: list[dict]) -> str:
     """将前端传入的 workspace 文件元信息转换为 prompt 文本。"""
-    if not isinstance(workspace_entries, list):
-        return ""
-
     formatted = []
-    for idx, entry in enumerate(workspace_entries, start=1):
-        if not isinstance(entry, dict):
-            continue
+    for idx, entry in enumerate(workspace_payload, start=1):
+        info = {k: v for k, v in entry.items() if v is not None}
+        download_url = info.get("download_url")
         info = {
             "name": entry.get("name"),
             "extension": entry.get("extension"),
@@ -253,10 +250,25 @@ def format_workspace_payload(workspace_entries: list[dict]) -> str:
     return "".join(formatted).strip()
 
 
+def iter_sqlite_files(workspace_dir: Path) -> list[Path]:
+    """递归枚举 workspace 内的 SQLite 文件列表。"""
+    if not isinstance(workspace_dir, Path):
+        workspace_dir = Path(workspace_dir)
+    found: dict[str, Path] = {}
+    for pattern in SQLITE_PATTERNS:
+        try:
+            for file in workspace_dir.rglob(pattern):
+                if file.is_file():
+                    found[str(file.resolve())] = file
+        except Exception:
+            continue
+    return sorted(found.values())
+
+
 def summarize_sqlite_schema(workspace_dir: Path) -> str:
     """遍历 workspace 下的 SQLite 文件并返回表与字段摘要。"""
     summaries: list[str] = []
-    for db_file in sorted(workspace_dir.glob("*.sqlite")):
+    for db_file in iter_sqlite_files(workspace_dir):
         try:
             conn = sqlite3.connect(db_file)
             cursor = conn.cursor()
@@ -276,7 +288,7 @@ def summarize_sqlite_schema(workspace_dir: Path) -> str:
 def list_sqlite_tables(workspace_dir: Path) -> set[str]:
     """返回 workspace 内所有 sqlite 文件中出现的表名集合。"""
     tables: set[str] = set()
-    for db_file in workspace_dir.glob("*.sqlite"):
+    for db_file in iter_sqlite_files(workspace_dir):
         try:
             conn = sqlite3.connect(db_file)
             cursor = conn.cursor()
@@ -1250,15 +1262,14 @@ def bot_stream(messages, workspace, session_id="default"):
                         and tbl.lower() not in {"sqlite_master", "sqlite_sequence"}
                     }
 
+                post_execute_prompts: list[str] = []
                 if schema_confirmed and invalid_tables:
                     invalid_msg = (
-                        "脚本中引用了不存在的表："
+                        "脚本中引用了系统尚未确认的表："
                         + ", ".join(sorted(invalid_tables))
-                        + "。请改用 sqlite_master 中的真实表名。"
+                        + "。系统会尝试执行以验证其是否真实存在；若下一轮 <Execute> 报错，请优先回到 sqlite_master/PRAGMA 重新核对表名。"
                     )
-                    messages.append({"role": "user", "content": invalid_msg})
-                    refund_iteration()
-                    continue
+                    post_execute_prompts.append(invalid_msg)
 
                 if not schema_confirmed and "sqlite_master" not in normalized_code:
                     schema_prompt = (
@@ -1420,6 +1431,8 @@ def bot_stream(messages, workspace, session_id="default"):
                 assistant_reply += full_execution_block
                 yield full_execution_block
                 messages.append({"role": "execute", "content": f"{exe_output}"})
+                for prompt in post_execute_prompts:
+                    messages.append({"role": "user", "content": prompt})
 
                 execute_rounds += 1
                 if not is_schema_code:
