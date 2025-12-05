@@ -866,6 +866,7 @@ def bot_stream(messages, workspace, session_id="default"):
     answer_waiting_rounds = 0
     known_tables = list_sqlite_tables(workspace_path)
     recent_tables_used: set[str] = set()
+    schema_summary_injected = False
 
     def refund_iteration():
         nonlocal iteration
@@ -944,6 +945,7 @@ def bot_stream(messages, workspace, session_id="default"):
                     finished = True
                     break
 
+        cur_res = normalize_model_tags(cur_res)
         fixed_res = fix_tags_and_codeblock(cur_res)
         if fixed_res != cur_res:
             extra_text = fixed_res[len(cur_res) :]
@@ -1061,6 +1063,7 @@ def bot_stream(messages, workspace, session_id="default"):
                     "以便系统执行。"
                 )
                 messages.append({"role": "user", "content": code_prompt})
+            refund_iteration()
             continue
 
         if last_finish_reason in {"stop", "length"} and not finished:
@@ -1110,6 +1113,7 @@ def bot_stream(messages, workspace, session_id="default"):
                         "不要重复列出 sqlite_master。"
                     )
                     messages.append({"role": "user", "content": reminder})
+                    refund_iteration()
                     continue
                 if (
                     schema_confirmed
@@ -1140,6 +1144,7 @@ def bot_stream(messages, workspace, session_id="default"):
                         yield violation_block
                         return
                     messages.append({"role": "user", "content": refresh_prompt})
+                    refund_iteration()
                     continue
                 else:
                     schema_only_repeat = 0
@@ -1162,6 +1167,7 @@ def bot_stream(messages, workspace, session_id="default"):
                         + "。请改用 sqlite_master 中的真实表名。"
                     )
                     messages.append({"role": "user", "content": invalid_msg})
+                    refund_iteration()
                     continue
 
                 if not schema_confirmed and "sqlite_master" not in normalized_code:
@@ -1170,6 +1176,7 @@ def bot_stream(messages, workspace, session_id="default"):
                         "首轮必须完成表结构确认后才能继续 EDA。"
                     )
                     messages.append({"role": "user", "content": schema_prompt})
+                    refund_iteration()
                     continue
 
                 missing_imports = []
@@ -1195,6 +1202,7 @@ def bot_stream(messages, workspace, session_id="default"):
                         + "。请补全导入后再执行。"
                     )
                     messages.append({"role": "user", "content": import_prompt})
+                    refund_iteration()
                     continue
 
                 last_code_signature = code_signature
@@ -1225,6 +1233,17 @@ def bot_stream(messages, workspace, session_id="default"):
                     latest_tables = list_sqlite_tables(workspace_path)
                     if latest_tables:
                         known_tables = latest_tables
+                    if not schema_summary_injected:
+                        schema_hint = summarize_sqlite_schema(workspace_path)
+                        if schema_hint:
+                            schema_summary = (
+                                "系统已从实际 sqlite_master/PRAGMA 中解析到以下表结构，请在后续 <Analyze>/<Code> 中"
+                                " 直接引用这些真实名字，并按其中字段推进分析：\n"
+                                f"{schema_hint}\n"
+                                "下一步建议：从上述表中任选一个（如第一张表）执行 `SELECT * ... LIMIT 50` 做初步概览。"
+                            )
+                            messages.append({"role": "user", "content": schema_summary})
+                        schema_summary_injected = True
 
                 try:
                     after_state = {
