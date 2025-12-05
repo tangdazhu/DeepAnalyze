@@ -831,6 +831,8 @@ def bot_stream(messages, workspace, session_id="default"):
     finished = False
     exe_output = None
     iteration = 0
+    raw_iterations = 0
+    max_raw_iterations = MAX_ITERATIONS * 2
     empty_retry = 0
     forced_reason = ""
 
@@ -845,6 +847,10 @@ def bot_stream(messages, workspace, session_id="default"):
     answer_waiting_rounds = 0
     known_tables = list_sqlite_tables(workspace_path)
     recent_tables_used: set[str] = set()
+
+    def refund_iteration():
+        nonlocal iteration
+        iteration = max(0, iteration - 1)
 
     def trim_messages(input_messages: list[dict]) -> list[dict]:
         serialized = "\n".join(
@@ -869,10 +875,15 @@ def bot_stream(messages, workspace, session_id="default"):
         ]
         return lead + trimmed
 
-    while not finished and iteration < MAX_ITERATIONS:
+    while (
+        not finished
+        and iteration < MAX_ITERATIONS
+        and raw_iterations < max_raw_iterations
+    ):
+        raw_iterations += 1
         iteration += 1
         print(
-            f"[bot_stream] session={session_id} iteration={iteration} starting, messages={len(messages)}"
+            f"[bot_stream] session={session_id} iteration={iteration} raw={raw_iterations} starting, messages={len(messages)}"
         )
         safe_messages = trim_messages(messages)
 
@@ -936,6 +947,7 @@ def bot_stream(messages, workspace, session_id="default"):
             messages.append({"role": "assistant", "content": cur_res})
             analyze_prompt = "你的输出缺少 <Analyze> 段，必须先在 <Analyze> 中说明当前目标与依据，再给出 <Code>。"
             messages.append({"role": "user", "content": analyze_prompt})
+            refund_iteration()
             continue
 
         if (
@@ -946,12 +958,14 @@ def bot_stream(messages, workspace, session_id="default"):
             messages.append({"role": "assistant", "content": cur_res})
             advance_prompt = "表结构已在首轮列出，请基于已知表/字段提出新的分析目标，换用真实查询或 EDA 任务。"
             messages.append({"role": "user", "content": advance_prompt})
+            refund_iteration()
             continue
 
         if last_analyze_signature and analyze_signature == last_analyze_signature:
             messages.append({"role": "assistant", "content": cur_res})
             diff_prompt = "你的 <Analyze> 内容与上一轮完全相同，请结合最新的 <Execute>/<File> 结果提出不同的分析步骤。"
             messages.append({"role": "user", "content": diff_prompt})
+            refund_iteration()
             continue
 
         known_mentions = set()
@@ -969,6 +983,7 @@ def bot_stream(messages, workspace, session_id="default"):
                     + "。请重新查看 sqlite_master 结果，仅使用真实表名。"
                 )
                 messages.append({"role": "user", "content": warn_unknown})
+                refund_iteration()
                 continue
             if require_known_reference and not known_mentions:
                 messages.append({"role": "assistant", "content": cur_res})
@@ -982,6 +997,7 @@ def bot_stream(messages, workspace, session_id="default"):
                     + "），并结合这些表/字段制定下一步分析计划。"
                 )
                 messages.append({"role": "user", "content": ref_prompt})
+                refund_iteration()
                 continue
 
         last_analyze_signature = analyze_signature
