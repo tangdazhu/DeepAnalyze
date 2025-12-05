@@ -793,6 +793,39 @@ HEADING_TAG_PATTERN = re.compile(
     r"^\s{0,3}#{2,3}\s*(Analyze|Code|Execute|File|Answer)\s*$",
     re.MULTILINE,
 )
+FILE_TAG_CAPTURE_PATTERN = re.compile(r"<File>(.*?)</File>", re.DOTALL)
+FILE_NAME_PATTERN = re.compile(
+    r"([\w\-.]+\.(?:csv|tsv|txt|md|json|png|jpg|jpeg|gif|svg|pdf|xlsx|xls|parquet))",
+    re.IGNORECASE,
+)
+FILENAME_SUFFIX_CLEANER = re.compile(r"\s+\(\d+\)$")
+
+
+def normalize_filename(name: str) -> str:
+    """统一文件名对比：去除 (n)/_modified 等后缀并转小写。"""
+    if not name:
+        return ""
+    name = name.strip()
+    try:
+        path = Path(name)
+        stem = FILENAME_SUFFIX_CLEANER.sub("", path.stem)
+        stem = stem.removesuffix("_modified")
+        return f"{stem}{path.suffix}".lower()
+    except Exception:
+        return name.lower()
+
+
+def extract_file_claims(content: str) -> set[str]:
+    """解析模型在 <File> 中声明的文件名集合。"""
+    claims: set[str] = set()
+    if not content:
+        return claims
+    for block in FILE_TAG_CAPTURE_PATTERN.findall(content):
+        for match in FILE_NAME_PATTERN.findall(block):
+            normalized = normalize_filename(match)
+            if normalized:
+                claims.add(normalized)
+    return claims
 
 
 def normalize_model_tags(content: str) -> str:
@@ -1185,6 +1218,8 @@ def bot_stream(messages, workspace, session_id="default"):
                 messages.append({"role": "user", "content": correction_prompt})
                 continue
 
+        claimed_files_in_round = extract_file_claims(cur_res)
+
         if "</Code>" in cur_res and not finished:
             if answer_requested:
                 messages.append({"role": "assistant", "content": cur_res})
@@ -1404,9 +1439,11 @@ def bot_stream(messages, workspace, session_id="default"):
                         print(f"Error copying modified file {p}: {e}")
 
                 exe_str = f"\n<Execute>\n```\n{exe_output}\n```\n</Execute>\n"
-                file_block = ""
+                actual_files = {
+                    normalize_filename(Path(p).name) for p in artifact_paths
+                }
+                file_block_lines = ["<File>"]
                 if artifact_paths:
-                    lines = ["<File>"]
                     for p in artifact_paths:
                         try:
                             rel = p.resolve().relative_to(workspace_path).as_posix()
@@ -1414,7 +1451,7 @@ def bot_stream(messages, workspace, session_id="default"):
                             rel = p.name
                         url = build_download_url(f"{session_id}/{rel}")
                         name = p.name
-                        lines.append(f"- [{name}]({url})")
+                        file_block_lines.append(f"- [{name}]({url})")
                         if p.suffix.lower() in [
                             ".png",
                             ".jpg",
@@ -1423,14 +1460,29 @@ def bot_stream(messages, workspace, session_id="default"):
                             ".webp",
                             ".svg",
                         ]:
-                            lines.append(f"![{name}]({url})")
-                    lines.append("</File>")
-                    file_block = "\n" + "\n".join(lines) + "\n"
+                            file_block_lines.append(f"![{name}]({url})")
+                else:
+                    file_block_lines.append("暂无文件")
+                file_block_lines.append("</File>")
+                file_block = "\n" + "\n".join(file_block_lines) + "\n"
 
                 full_execution_block = exe_str + file_block
                 assistant_reply += full_execution_block
                 yield full_execution_block
                 messages.append({"role": "execute", "content": f"{exe_output}"})
+                if claimed_files_in_round:
+                    unmatched_claims = sorted(
+                        claim
+                        for claim in claimed_files_in_round
+                        if claim not in actual_files
+                    )
+                    if unmatched_claims:
+                        warn_missing_file = (
+                            "系统未检测到你在 <File> 中声明的文件："
+                            + ", ".join(unmatched_claims)
+                            + "。请确保脚本真实写入这些文件，并依赖系统自动输出的 <File> 段，而不是手动杜撰。"
+                        )
+                        messages.append({"role": "user", "content": warn_missing_file})
                 for prompt in post_execute_prompts:
                     messages.append({"role": "user", "content": prompt})
 
