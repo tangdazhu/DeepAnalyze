@@ -769,6 +769,25 @@ def fix_tags_and_codeblock(s: str) -> str:
     return s
 
 
+EMOJI_TAG_MAP = {
+    "🔍Analyze": "<Analyze>",
+    "💻Code": "<Code>",
+    "⚡Execute": "<Execute>",
+    "📎File": "<File>",
+    "✅Answer": "<Answer>",
+}
+
+
+def normalize_model_tags(content: str) -> str:
+    """将常见的 emoji 标签转换为标准 <Tag> 形式。"""
+    if not content:
+        return content
+    normalized = content
+    for emoji_tag, canonical in EMOJI_TAG_MAP.items():
+        normalized = normalized.replace(emoji_tag, canonical)
+    return normalized
+
+
 def extract_effective_code(code_str: str) -> str:
     """若 <Code> 中包裹三引号字符串，提取其中的实际脚本内容。"""
     if not code_str:
