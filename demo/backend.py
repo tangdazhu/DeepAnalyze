@@ -788,6 +788,51 @@ def normalize_model_tags(content: str) -> str:
     return normalized
 
 
+def find_primary_sqlite(workspace_path: Path) -> Path | None:
+    """在 workspace 根目录定位首个 sqlite 文件。"""
+    try:
+        candidates = sorted(workspace_path.glob("*.sqlite"))
+    except Exception:
+        candidates = []
+    return candidates[0] if candidates else None
+
+
+def build_schema_bootstrap_block(workspace_path: Path) -> str:
+    """生成首轮自动列出 sqlite_master 的模板响应。"""
+    db_path = find_primary_sqlite(workspace_path)
+    if not db_path:
+        return ""
+    db_name = db_path.name
+    analyze = (
+        "<Analyze>\n"
+        "系统检测到模型尚未正确进入首轮分析，已自动补充：当前目标=列出所有表结构，"
+        "并在同轮 <Execute> 中打印 sqlite_master 结果，供后续引用。\n"
+        "</Analyze>\n"
+    )
+    query_lines = "\n".join(
+        [
+            "SELECT name AS table_name, type, sql",
+            "FROM sqlite_master",
+            "WHERE type IN ('table', 'view');",
+        ]
+    )
+    code = (
+        "<Code>\n"
+        "```python\n"
+        "import sqlite3\n"
+        "import pandas as pd\n"
+        "\n"
+        f'conn = sqlite3.connect("{db_name}")\n'
+        f'query = """\n{query_lines}\n"""\n'
+        "schema_df = pd.read_sql_query(query, conn)\n"
+        "print(schema_df)\n"
+        "conn.close()\n"
+        "```\n"
+        "</Code>"
+    )
+    return analyze + "\n" + code
+
+
 def extract_effective_code(code_str: str) -> str:
     """若 <Code> 中包裹三引号字符串，提取其中的实际脚本内容。"""
     if not code_str:
@@ -867,6 +912,7 @@ def bot_stream(messages, workspace, session_id="default"):
     known_tables = list_sqlite_tables(workspace_path)
     recent_tables_used: set[str] = set()
     schema_summary_injected = False
+    schema_bootstrap_used = False
 
     def refund_iteration():
         nonlocal iteration
@@ -966,6 +1012,18 @@ def bot_stream(messages, workspace, session_id="default"):
 
         if not analyze_content:
             messages.append({"role": "assistant", "content": cur_res})
+            if not schema_confirmed and not schema_bootstrap_used:
+                auto_block = build_schema_bootstrap_block(workspace_path)
+                if auto_block:
+                    schema_bootstrap_used = True
+                    replacement = (
+                        "<Analyze>\n系统已代替你完成首轮 <Analyze>/<Code>，请参考以下模板结果并从真实表入手继续迭代。\n</Analyze>\n"
+                        + auto_block
+                    )
+                    assistant_reply += replacement
+                    yield replacement
+                    messages.append({"role": "assistant", "content": replacement})
+                    continue
             analyze_prompt = "你的输出缺少 <Analyze> 段，必须先在 <Analyze> 中说明当前目标与依据，再给出 <Code>。"
             messages.append({"role": "user", "content": analyze_prompt})
             refund_iteration()
