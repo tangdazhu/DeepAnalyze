@@ -794,13 +794,20 @@ def normalize_model_tags(content: str) -> str:
     return normalized
 
 
+SQLITE_PATTERNS = ("*.sqlite", "*.db", "*.db3")
+
+
 def find_primary_sqlite(workspace_path: Path) -> Path | None:
-    """在 workspace 根目录定位首个 sqlite 文件。"""
-    try:
-        candidates = sorted(workspace_path.glob("*.sqlite"))
-    except Exception:
-        candidates = []
-    return candidates[0] if candidates else None
+    """在 workspace 中（递归）定位首个 sqlite 文件。"""
+    for pattern in SQLITE_PATTERNS:
+        try:
+            candidates = sorted(workspace_path.rglob(pattern))
+        except Exception:
+            candidates = []
+        for file in candidates:
+            if file.is_file():
+                return file
+    return None
 
 
 def build_schema_bootstrap_block(workspace_path: Path) -> str:
@@ -808,7 +815,11 @@ def build_schema_bootstrap_block(workspace_path: Path) -> str:
     db_path = find_primary_sqlite(workspace_path)
     if not db_path:
         return ""
-    db_name = db_path.name
+    try:
+        rel_path = db_path.resolve().relative_to(workspace_path.resolve())
+        db_name = rel_path.as_posix()
+    except Exception:
+        db_name = db_path.name
     analyze = (
         "<Analyze>\n"
         "系统检测到模型尚未正确进入首轮分析，已自动补充：当前目标=列出所有表结构，"
@@ -828,7 +839,7 @@ def build_schema_bootstrap_block(workspace_path: Path) -> str:
         "import sqlite3\n"
         "import pandas as pd\n"
         "\n"
-        f'conn = sqlite3.connect("{db_name}")\n'
+        f'conn = sqlite3.connect(r"{db_name}")\n'
         f'query = """\n{query_lines}\n"""\n'
         "schema_df = pd.read_sql_query(query, conn)\n"
         "print(schema_df)\n"
