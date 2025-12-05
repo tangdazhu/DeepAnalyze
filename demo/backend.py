@@ -850,6 +850,21 @@ def build_schema_bootstrap_block(workspace_path: Path) -> str:
     return analyze + "\n" + code
 
 
+def run_schema_bootstrap(workspace_path: Path) -> str:
+    """执行首轮 schema 查询并返回完整 <Analyze>/<Code>/<Execute> 块。"""
+    block = build_schema_bootstrap_block(workspace_path)
+    if not block:
+        return ""
+    code_match = re.search(r"```python(.*?)```", block, re.DOTALL)
+    script = code_match.group(1).strip() if code_match else ""
+    if not script:
+        return block
+    output = execute_code_safe(script, str(workspace_path))
+    exe_block = f"\n<Execute>\n```\n{output}\n```\n</Execute>\n"
+    file_block = "\n<File>\n暂无文件\n</File>\n"
+    return f"{block}{exe_block}{file_block}"
+
+
 def extract_effective_code(code_str: str) -> str:
     """若 <Code> 中包裹三引号字符串，提取其中的实际脚本内容。"""
     if not code_str:
@@ -1030,16 +1045,16 @@ def bot_stream(messages, workspace, session_id="default"):
         if not analyze_content:
             messages.append({"role": "assistant", "content": cur_res})
             if not schema_confirmed and not schema_bootstrap_used:
-                auto_block = build_schema_bootstrap_block(workspace_path)
+                auto_block = run_schema_bootstrap(workspace_path)
                 if auto_block:
                     schema_bootstrap_used = True
-                    replacement = (
-                        "<Analyze>\n系统已代替你完成首轮 <Analyze>/<Code>，请参考以下模板结果并从真实表入手继续迭代。\n</Analyze>\n"
-                        + auto_block
-                    )
-                    assistant_reply += replacement
-                    yield replacement
-                    messages.append({"role": "assistant", "content": replacement})
+                    schema_confirmed = True
+                    latest_tables = list_sqlite_tables(workspace_path)
+                    if latest_tables:
+                        known_tables = latest_tables
+                    assistant_reply += auto_block
+                    yield auto_block
+                    messages.append({"role": "assistant", "content": auto_block})
                     continue
             analyze_prompt = "你的输出缺少 <Analyze> 段，必须先在 <Analyze> 中说明当前目标与依据，再给出 <Code>。"
             messages.append({"role": "user", "content": analyze_prompt})
