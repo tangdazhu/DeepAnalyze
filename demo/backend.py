@@ -1294,7 +1294,7 @@ def bot_stream(messages, workspace, session_id="default"):
                     if not schema_summary_injected:
                         schema_hint = summarize_sqlite_schema(workspace_path)
                         if schema_hint:
-                            schema_summary = (
+                                    schema_summary = (
                                 "系统已从实际 sqlite_master/PRAGMA 中解析到以下表结构，请在后续 <Analyze>/<Code> 中"
                                 " 直接引用这些真实名字，并按其中字段推进分析：\n"
                                 f"{schema_hint}\n"
