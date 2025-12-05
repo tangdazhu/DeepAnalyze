@@ -1263,6 +1263,24 @@ def bot_stream(messages, workspace, session_id="default"):
                     refund_iteration()
                     continue
 
+                if "import sqlite3" not in effective_code:
+                    sqlite_prompt = (
+                        "每个 <Code> 脚本都需显式 `import sqlite3` 并建立数据库连接。"
+                        " 请将完整脚本补全（含 import / connect / 执行 / close）后再运行。"
+                    )
+                    messages.append({"role": "user", "content": sqlite_prompt})
+                    refund_iteration()
+                    continue
+
+                if "sqlite3.connect" not in effective_code:
+                    connect_prompt = (
+                        "检测到代码缺少 `sqlite3.connect(...)`，而本系统每次执行都会在独立进程运行，"
+                        "不能复用上一轮连接。请在 <Code> 中创建并关闭连接后重新提交。"
+                    )
+                    messages.append({"role": "user", "content": connect_prompt})
+                    refund_iteration()
+                    continue
+
                 last_code_signature = code_signature
 
                 print(
