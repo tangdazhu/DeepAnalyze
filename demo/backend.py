@@ -777,6 +777,11 @@ EMOJI_TAG_MAP = {
     "✅Answer": "<Answer>",
 }
 
+HEADING_TAG_PATTERN = re.compile(
+    r"^\s{0,3}#{2,3}\s*(Analyze|Code|Execute|File|Answer)\s*$",
+    re.MULTILINE,
+)
+
 
 def normalize_model_tags(content: str) -> str:
     """将常见的 emoji 标签转换为标准 <Tag> 形式。"""
@@ -785,6 +790,7 @@ def normalize_model_tags(content: str) -> str:
     normalized = content
     for emoji_tag, canonical in EMOJI_TAG_MAP.items():
         normalized = normalized.replace(emoji_tag, canonical)
+    normalized = HEADING_TAG_PATTERN.sub(lambda m: f"<{m.group(1)}>", normalized)
     return normalized
 
 
