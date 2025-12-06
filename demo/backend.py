@@ -1440,11 +1440,12 @@ def bot_stream(messages, workspace, session_id="default"):
 
                 exe_str = f"\n<Execute>\n```\n{exe_output}\n```\n</Execute>\n"
                 actual_files = {
-                    normalize_filename(Path(p).name) for p in artifact_paths
+                    normalize_filename(Path(p).name): p for p in artifact_paths
                 }
                 file_block_lines = ["<File>"]
                 if artifact_paths:
-                    for p in artifact_paths:
+                    for normalized_name, path_obj in actual_files.items():
+                        p = path_obj
                         try:
                             rel = p.resolve().relative_to(workspace_path).as_posix()
                         except Exception:
@@ -1471,18 +1472,27 @@ def bot_stream(messages, workspace, session_id="default"):
                 yield full_execution_block
                 messages.append({"role": "execute", "content": f"{exe_output}"})
                 if claimed_files_in_round:
-                    unmatched_claims = sorted(
+                    unmatched_claims = [
                         claim
                         for claim in claimed_files_in_round
                         if claim not in actual_files
-                    )
+                    ]
                     if unmatched_claims:
+                        missing_list = [f"{claim}" for claim in unmatched_claims]
+                        existing_list = ""
+                        if actual_files:
+                            existing_list = "；本轮实际捕获的文件：" + ", ".join(
+                                sorted(actual_files.keys())
+                            )
                         warn_missing_file = (
                             "系统未检测到你在 <File> 中声明的文件："
-                            + ", ".join(unmatched_claims)
+                            + ", ".join(missing_list)
                             + "。请确保脚本真实写入这些文件，并依赖系统自动输出的 <File> 段，而不是手动杜撰。"
+                            + existing_list
                         )
                         messages.append({"role": "user", "content": warn_missing_file})
+                        refund_iteration()
+                        continue
                 for prompt in post_execute_prompts:
                     messages.append({"role": "user", "content": prompt})
 
