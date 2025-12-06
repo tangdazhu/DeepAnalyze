@@ -1376,6 +1376,17 @@ def bot_stream(messages, workspace, session_id="default"):
                 exe_output = execute_code_safe(
                     effective_code or code_str, str(workspace_path)
                 )
+                try:
+                    log_path = uniquify_path(
+                        generated_dir / f"execute_round_{iteration}.txt"
+                    )
+                    with open(log_path, "w", encoding="utf-8") as log_file:
+                        if isinstance(exe_output, str):
+                            log_file.write(exe_output)
+                        else:
+                            log_file.write(json.dumps(exe_output, ensure_ascii=False))
+                except Exception as log_exc:
+                    print(f"[bot_stream] failed to persist execution log: {log_exc}")
 
                 is_schema_code = (
                     "sqlite_master" in normalized_code
