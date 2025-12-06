@@ -1030,17 +1030,30 @@ def bot_stream(messages, workspace, session_id="default"):
         )
         safe_messages = trim_messages(messages)
 
-        response = client.chat.completions.create(
-            model=MODEL_PATH,
-            messages=safe_messages,
-            temperature=0.4,
-            stream=True,
-            extra_body={
-                "add_generation_prompt": False,
-                "stop_token_ids": [151676, 151645],
-                "max_new_tokens": 4096,
-            },
-        )
+        try:
+            response = client.chat.completions.create(
+                model=MODEL_PATH,
+                messages=safe_messages,
+                temperature=0.4,
+                stream=True,
+                timeout=60,
+                extra_body={
+                    "add_generation_prompt": False,
+                    "stop_token_ids": [151676, 151645],
+                    "max_new_tokens": 4096,
+                },
+            )
+        except Exception as api_error:
+            error_block = (
+                "\n<Answer>\n"
+                "调用底层模型接口超时或失败，无法继续生成下一轮响应。"
+                f" 具体错误：{api_error}。请确认 vLLM/DeepAnalyze 模型服务（{MODEL_PATH} @ {API_BASE}）已正常启动，"
+                "并检查网络/端口后重新发起请求。\n</Answer>\n"
+            )
+            forced_reason = "模型接口调用失败"
+            assistant_reply += error_block
+            yield error_block
+            break
         cur_res = ""
         last_finish_reason = None
         for chunk in response:
