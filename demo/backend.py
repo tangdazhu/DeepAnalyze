@@ -847,8 +847,13 @@ def find_primary_sqlite(workspace_path: Path) -> Path | None:
     for pattern in SQLITE_PATTERNS:
         try:
             candidates = sorted(workspace_path.rglob(pattern))
-        except Exception:
-            candidates = []
+        except Exception as api_error:
+            error_block = (
+                "\n<Answer>\n"
+                "调用底层模型接口超时或失败，无法继续生成下一轮响应。"
+                f" 具体错误：{api_error}。请确认 vLLM/DeepAnalyze 模型服务（{MODEL_PATH} @ {API_BASE}）已正常启动，"
+            )
+            return error_block
         for file in candidates:
             if file.is_file():
                 return file
@@ -1043,30 +1048,42 @@ def bot_stream(messages, workspace, session_id="default"):
         )
         cur_res = ""
         last_finish_reason = None
-        for chunk in response:
-            if chunk.choices and chunk.choices[0].delta.content is not None:
-                delta = chunk.choices[0].delta.content
-                cur_res += delta
-                assistant_reply += delta
-                yield delta
-            if chunk.choices and chunk.choices[0].finish_reason:
-                last_finish_reason = chunk.choices[0].finish_reason
-            if should_stop(session_id):
-                stop_msg = "\n<Execute>\n``````\n检测到停止指令，正在安全结束当前迭代。\n```\n</Execute>\n"
-                assistant_reply += stop_msg
-                yield stop_msg
-                forced_reason = "任务已根据用户的停止指令终止"
-                finished = True
-                break
-            if "</Answer>" in cur_res:
-                if non_schema_exec_rounds == 0:
-                    messages.append({"role": "assistant", "content": cur_res})
-                    warn_msg = "尚未基于真实表执行任何 EDA/可视化。请先按照要求运行 `SELECT *` 等分析，形成 <Execute>/<File> 结果后再给出 <Answer>。"
-                    messages.append({"role": "user", "content": warn_msg})
-                    cur_res = cur_res.replace("<Answer>", "<Answer (ignored)>")
-                else:
+        try:
+            for chunk in response:
+                if chunk.choices and chunk.choices[0].delta.content is not None:
+                    delta = chunk.choices[0].delta.content
+                    cur_res += delta
+                    assistant_reply += delta
+                    yield delta
+                if chunk.choices and chunk.choices[0].finish_reason:
+                    last_finish_reason = chunk.choices[0].finish_reason
+                if should_stop(session_id):
+                    stop_msg = "\n<Execute>\n``````\n检测到停止指令，正在安全结束当前迭代。\n```\n</Execute>\n"
+                    assistant_reply += stop_msg
+                    yield stop_msg
+                    forced_reason = "任务已根据用户的停止指令终止"
                     finished = True
                     break
+                if "</Answer>" in cur_res:
+                    if non_schema_exec_rounds == 0:
+                        messages.append({"role": "assistant", "content": cur_res})
+                        warn_msg = "尚未基于真实表执行任何 EDA/可视化。请先按照要求运行 `SELECT *` 等分析，形成 <Execute>/<File> 结果后再给出 <Answer>。"
+                        messages.append({"role": "user", "content": warn_msg})
+                        cur_res = cur_res.replace("<Answer>", "<Answer (ignored)>")
+                    else:
+                        finished = True
+                        break
+        except Exception as stream_error:
+            error_block = (
+                "\n<Answer>\n"
+                "底层模型在流式输出过程中断或超时，当前对话被迫结束。"
+                f" 具体错误：{stream_error}。请检查模型服务日志，确认 {MODEL_PATH} 是否仍在运行且网络连通，"
+                "然后重新发起任务。若模型端无异常，也可尝试在 config 中增加 timeout。\n</Answer>\n"
+            )
+            forced_reason = "模型流式输出失败"
+            assistant_reply += error_block
+            yield error_block
+            break
 
         cur_res = normalize_model_tags(cur_res)
         fixed_res = fix_tags_and_codeblock(cur_res)
