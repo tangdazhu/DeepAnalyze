@@ -794,6 +794,7 @@ HEADING_TAG_PATTERN = re.compile(
     re.MULTILINE,
 )
 FILE_TAG_CAPTURE_PATTERN = re.compile(r"<File>(.*?)</File>", re.DOTALL)
+MODEL_FILE_TAG_PATTERN = re.compile(r"<File>.*?</File>", re.DOTALL)
 FILE_NAME_PATTERN = re.compile(
     r"([\w\-.]+\.(?:csv|tsv|txt|md|json|png|jpg|jpeg|gif|svg|pdf|xlsx|xls|parquet))",
     re.IGNORECASE,
@@ -826,6 +827,13 @@ def extract_file_claims(content: str) -> set[str]:
             if normalized:
                 claims.add(normalized)
     return claims
+
+
+def strip_model_file_blocks(content: str) -> str:
+    """移除模型原始响应中的 <File> 段，避免未校验链接直接展示给前端。"""
+    if not content:
+        return content
+    return MODEL_FILE_TAG_PATTERN.sub("", content)
 
 
 def normalize_model_tags(content: str) -> str:
@@ -1047,6 +1055,7 @@ def bot_stream(messages, workspace, session_id="default"):
             },
         )
         cur_res = ""
+        claimed_files_in_round: set[str] = set()
         last_finish_reason = None
         try:
             for chunk in response:
@@ -1085,6 +1094,8 @@ def bot_stream(messages, workspace, session_id="default"):
             yield error_block
             break
 
+        claimed_files_in_round = extract_file_claims(cur_res)
+        cur_res = strip_model_file_blocks(cur_res)
         cur_res = normalize_model_tags(cur_res)
         fixed_res = fix_tags_and_codeblock(cur_res)
         if fixed_res != cur_res:
@@ -1234,8 +1245,6 @@ def bot_stream(messages, workspace, session_id="default"):
                 )
                 messages.append({"role": "user", "content": correction_prompt})
                 continue
-
-        claimed_files_in_round = extract_file_claims(cur_res)
 
         if "</Code>" in cur_res and not finished:
             if answer_requested:
