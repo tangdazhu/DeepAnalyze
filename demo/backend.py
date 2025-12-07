@@ -794,6 +794,8 @@ HEADING_TAG_PATTERN = re.compile(
     re.MULTILINE,
 )
 FILE_TAG_CAPTURE_PATTERN = re.compile(r"<File>(.*?)</File>", re.DOTALL)
+FILES_OPEN_PATTERN = re.compile(r"<\s*Files\s*>", re.IGNORECASE)
+FILES_CLOSE_PATTERN = re.compile(r"<\s*/\s*Files\s*>", re.IGNORECASE)
 MODEL_FILE_TAG_PATTERN = re.compile(r"<File>.*?</File>", re.DOTALL)
 FILE_NAME_PATTERN = re.compile(
     r"([\w\-.]+\.(?:csv|tsv|txt|md|json|png|jpg|jpeg|gif|svg|pdf|xlsx|xls|parquet))",
@@ -844,6 +846,8 @@ def normalize_model_tags(content: str) -> str:
     for emoji_tag, canonical in EMOJI_TAG_MAP.items():
         normalized = normalized.replace(emoji_tag, canonical)
     normalized = HEADING_TAG_PATTERN.sub(lambda m: f"<{m.group(1)}>", normalized)
+    normalized = FILES_OPEN_PATTERN.sub("<File>", normalized)
+    normalized = FILES_CLOSE_PATTERN.sub("</File>", normalized)
     return normalized
 
 
@@ -1258,7 +1262,12 @@ def bot_stream(messages, workspace, session_id="default"):
                     yield violation_block
                     return
                 continue
-            messages.append({"role": "assistant", "content": cur_res})
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": strip_model_file_blocks(cur_res),
+                }
+            )
             code_match = re.search(r"<Code>(.*?)</Code>", cur_res, re.DOTALL)
             if code_match:
                 code_content = code_match.group(1).strip()
@@ -1323,14 +1332,17 @@ def bot_stream(messages, workspace, session_id="default"):
                         and tbl.lower() not in {"sqlite_master", "sqlite_sequence"}
                     }
 
-                post_execute_prompts: list[str] = []
                 if schema_confirmed and invalid_tables:
                     invalid_msg = (
-                        "脚本中引用了系统尚未确认的表："
+                        "脚本中引用了当前 sqlite_master 中不存在的表："
                         + ", ".join(sorted(invalid_tables))
-                        + "。系统会尝试执行以验证其是否真实存在；若下一轮 <Execute> 报错，请优先回到 sqlite_master/PRAGMA 重新核对表名。"
+                        + "。请重新查看首轮表结构，只能对真实表执行 SQL/EDA。"
                     )
-                    post_execute_prompts.append(invalid_msg)
+                    messages.append({"role": "user", "content": invalid_msg})
+                    refund_iteration()
+                    continue
+
+                post_execute_prompts: list[str] = []
 
                 if not schema_confirmed and "sqlite_master" not in normalized_code:
                     schema_prompt = (
@@ -1382,6 +1394,21 @@ def bot_stream(messages, workspace, session_id="default"):
                         "不能复用上一轮连接。请在 <Code> 中创建并关闭连接后重新提交。"
                     )
                     messages.append({"role": "user", "content": connect_prompt})
+                    refund_iteration()
+                    continue
+
+                uses_plot = "plt." in normalized_code or "sns." in normalized_code
+                if uses_plot and "plt.savefig" not in normalized_code:
+                    save_prompt = (
+                        "绘图脚本必须调用 `plt.savefig('generated/xxx.png')` 并写入实际文件，再在 <File> 中引用。"
+                        " 请补充 `plt.savefig` 后重新提交。"
+                    )
+                    messages.append({"role": "user", "content": save_prompt})
+                    refund_iteration()
+                    continue
+                if uses_plot and "plt.close" not in normalized_code:
+                    close_prompt = "绘图结束后需调用 `plt.close()` 释放资源，避免多轮叠加。请在 <Code> 末尾补充 `plt.close()`。"
+                    messages.append({"role": "user", "content": close_prompt})
                     refund_iteration()
                     continue
 
