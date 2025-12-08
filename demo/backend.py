@@ -1,13 +1,15 @@
-import openai
+import contextlib
+import io
 import json
 import os
-import shutil
 import re
-import io
-import contextlib
-import traceback
+import shutil
+import sqlite3
+import subprocess
+import sys
+import tempfile
 from pathlib import Path
-from urllib.parse import quote
+from typing import Iterable
 import subprocess
 import sys
 import tempfile
@@ -130,6 +132,13 @@ MAX_ITERATIONS = 12
 ANSWER_MIN_EXEC_ROUNDS = 3
 ANSWER_MIN_NON_SCHEMA_ROUNDS = 2
 MAX_PROMPT_CHARS = getattr(api_config, "MAX_PROMPT_CHARS", 16000)
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_SQLITE_SEEDS = [
+    (
+        PROJECT_ROOT / "example" / "analysis_on_student_loan" / "data" / "student_loan.sqlite",
+        "student_loan.sqlite",
+    )
+]
 
 
 # Initialize OpenAI client
@@ -154,6 +163,22 @@ def get_session_workspace(session_id: str) -> str:
     session_dir = WORKSPACE_ROOT / session_id
     os.makedirs(session_dir, exist_ok=True)
     return str(session_dir)
+
+
+def ensure_default_sqlite(workspace_path: Path) -> None:
+    """若 workspace 中不存在任何 sqlite 文件，则自动拷贝示例数据，避免模型引用不到真实库。"""
+    has_sqlite = any(iter_sqlite_files(workspace_path))
+    if has_sqlite:
+        return
+    for src, dest_name in DEFAULT_SQLITE_SEEDS:
+        try:
+            if src.exists():
+                dest_path = workspace_path / dest_name
+                if not dest_path.exists():
+                    shutil.copy2(src, dest_path)
+                break
+        except Exception as copy_error:
+            print(f"[ensure_default_sqlite] copy failed: {copy_error}")
 
 
 def build_download_url(rel_path: str) -> str:
@@ -1106,6 +1131,7 @@ def bot_stream(messages, workspace, session_id="default"):
         sanitized_stream = ""
         claimed_files_in_round: set[str] = set()
         last_finish_reason = None
+        code_executed = False
         try:
             for chunk in response:
                 if chunk.choices and chunk.choices[0].delta.content is not None:
@@ -1562,6 +1588,7 @@ def bot_stream(messages, workspace, session_id="default"):
                 exe_output = execute_code_safe(
                     effective_code or code_str, str(workspace_path)
                 )
+                code_executed = True
 
                 is_schema_code = (
                     "sqlite_master" in normalized_code
@@ -1736,6 +1763,13 @@ def bot_stream(messages, workspace, session_id="default"):
                 new_files = current_files - initial_workspace
                 if new_files:
                     initial_workspace.update(new_files)
+
+        finally:
+            if claimed_files_in_round and not code_executed:
+                warn_block = emit_file_claim_warning("本轮代码未执行或已被退票")
+                if warn_block:
+                    assistant_reply += warn_block
+                    yield warn_block
 
         if should_stop(session_id) and not forced_reason:
             forced_reason = "任务已根据用户的停止指令终止"
