@@ -321,6 +321,9 @@ SQL_PRAGMA_PATTERN = re.compile(
     r"pragma\s+table_info\s*\(\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)",
     re.IGNORECASE,
 )
+DDL_TABLE_PATTERN = re.compile(
+    r"\b(create|drop|alter)\s+table\b", re.IGNORECASE | re.MULTILINE
+)
 
 
 def extract_table_mentions_from_text(
@@ -1016,7 +1019,9 @@ def bot_stream(messages, workspace, session_id="default"):
     non_schema_exec_rounds = 0
     answer_requested = False
     answer_waiting_rounds = 0
-    known_tables = list_sqlite_tables(workspace_path)
+    baseline_tables = list_sqlite_tables(workspace_path)
+    known_tables = set(baseline_tables)
+    initial_tables_locked = bool(known_tables)
     recent_tables_used: set[str] = set()
     schema_summary_injected = False
     schema_bootstrap_used = False
@@ -1024,6 +1029,14 @@ def bot_stream(messages, workspace, session_id="default"):
     def refund_iteration():
         nonlocal iteration
         iteration = max(0, iteration - 1)
+
+    def ensure_known_tables(latest: set[str]):
+        nonlocal known_tables, initial_tables_locked
+        if initial_tables_locked:
+            return
+        if latest:
+            known_tables = set(latest)
+            initial_tables_locked = True
 
     def trim_messages(input_messages: list[dict]) -> list[dict]:
         serialized = "\n".join(
@@ -1140,8 +1153,7 @@ def bot_stream(messages, workspace, session_id="default"):
                     schema_bootstrap_used = True
                     schema_confirmed = True
                     latest_tables = list_sqlite_tables(workspace_path)
-                    if latest_tables:
-                        known_tables = latest_tables
+                    ensure_known_tables(latest_tables)
                     assistant_reply += auto_block
                     yield auto_block
                     messages.append({"role": "assistant", "content": auto_block})
@@ -1292,6 +1304,14 @@ def bot_stream(messages, workspace, session_id="default"):
                     line.strip() for line in effective_code.splitlines()
                 ).strip()
                 normalized_code = effective_code.lower()
+                if DDL_TABLE_PATTERN.search(normalized_code):
+                    ddl_prompt = (
+                        "检测到脚本尝试执行 `CREATE/DROP/ALTER TABLE` 等操作。"
+                        " 出于数据安全考虑，本系统禁止修改数据库结构，请改为针对已有表进行查询或分析。"
+                    )
+                    messages.append({"role": "user", "content": ddl_prompt})
+                    refund_iteration()
+                    continue
                 if code_signature and code_signature == last_code_signature:
                     reminder = (
                         "你的代码与上一轮完全相同。请根据已获取的表结构推进新的分析，"
@@ -1451,8 +1471,7 @@ def bot_stream(messages, workspace, session_id="default"):
                 if not schema_confirmed and "sqlite_master" in normalized_code:
                     schema_confirmed = True
                     latest_tables = list_sqlite_tables(workspace_path)
-                    if latest_tables:
-                        known_tables = latest_tables
+                    ensure_known_tables(latest_tables)
                     if not schema_summary_injected:
                         schema_hint = summarize_sqlite_schema(workspace_path)
                         if schema_hint:
