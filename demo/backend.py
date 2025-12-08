@@ -1197,8 +1197,7 @@ def bot_stream(messages, workspace, session_id="default"):
             refund_iteration()
             continue
 
-        cur_res = normalize_model_tags(raw_res)
-        claimed_files_in_round = extract_file_claims(cur_res)
+        claimed_files_in_round: set[str] = set()
         file_claim_warning_sent = False
 
         def emit_file_claim_warning(reason: str) -> str:
@@ -1217,559 +1216,583 @@ def bot_stream(messages, workspace, session_id="default"):
                 "</Analyze>\n"
             )
 
-        cur_res = strip_model_file_blocks(cur_res)
-        fixed_res = fix_tags_and_codeblock(cur_res)
-        if fixed_res != cur_res:
-            extra_text = fixed_res[len(cur_res) :]
-            if extra_text:
-                assistant_reply += extra_text
-                yield extra_text
-            cur_res = fixed_res
+        try:
+            cur_res = normalize_model_tags(raw_res)
+            claimed_files_in_round = extract_file_claims(cur_res)
 
-        print(
-            f"[bot_stream] session={session_id} iteration={iteration} finish_reason={last_finish_reason} has_code={'<Code>' in cur_res} closed={'</Code>' in cur_res} len={len(cur_res)}"
-        )
+            cur_res = strip_model_file_blocks(cur_res)
+            fixed_res = fix_tags_and_codeblock(cur_res)
+            if fixed_res != cur_res:
+                extra_text = fixed_res[len(cur_res) :]
+                if extra_text:
+                    assistant_reply += extra_text
+                    yield extra_text
+                cur_res = fixed_res
 
-        analyze_match = re.search(r"<Analyze>(.*?)</Analyze>", cur_res, re.DOTALL)
-        analyze_content = analyze_match.group(1).strip() if analyze_match else ""
-        analyze_signature = (
-            re.sub(r"\s+", " ", analyze_content) if analyze_content else ""
-        )
-
-        if not analyze_content:
-            messages.append({"role": "assistant", "content": cur_res})
-            if not schema_confirmed and not schema_bootstrap_used:
-                auto_block = run_schema_bootstrap(workspace_path)
-                if auto_block:
-                    schema_bootstrap_used = True
-                    schema_confirmed = True
-                    latest_tables = list_sqlite_tables(workspace_path)
-                    ensure_known_tables(latest_tables)
-                    assistant_reply += auto_block
-                    yield auto_block
-                    messages.append({"role": "assistant", "content": auto_block})
-                    continue
-            analyze_prompt = "你的输出缺少 <Analyze> 段，必须先在 <Analyze> 中说明当前目标与依据，再给出 <Code>。"
-            messages.append({"role": "user", "content": analyze_prompt})
-            refund_iteration()
-            continue
-
-        if (
-            schema_confirmed
-            and "列出" in analyze_content
-            and "表结构" in analyze_content
-        ):
-            messages.append({"role": "assistant", "content": cur_res})
-            advance_prompt = "表结构已在首轮列出，请基于已知表/字段提出新的分析目标，换用真实查询或 EDA 任务。"
-            messages.append({"role": "user", "content": advance_prompt})
-            refund_iteration()
-            continue
-
-        if last_analyze_signature and analyze_signature == last_analyze_signature:
-            messages.append({"role": "assistant", "content": cur_res})
-            diff_prompt = "你的 <Analyze> 内容与上一轮完全相同，请结合最新的 <Execute>/<File> 结果提出不同的分析步骤。"
-            messages.append({"role": "user", "content": diff_prompt})
-            refund_iteration()
-            continue
-
-        known_mentions = set()
-        unknown_mentions = set()
-        require_known_reference = schema_confirmed
-        if known_tables:
-            known_mentions, unknown_mentions = extract_table_mentions_from_text(
-                analyze_content, known_tables
+            print(
+                f"[bot_stream] session={session_id} iteration={iteration} finish_reason={last_finish_reason} has_code={'<Code>' in cur_res} closed={'</Code>' in cur_res} len={len(cur_res)}"
             )
-            if schema_confirmed and unknown_mentions:
+
+            analyze_match = re.search(r"<Analyze>(.*?)</Analyze>", cur_res, re.DOTALL)
+            analyze_content = analyze_match.group(1).strip() if analyze_match else ""
+            analyze_signature = (
+                re.sub(r"\s+", " ", analyze_content) if analyze_content else ""
+            )
+
+            if not analyze_content:
                 messages.append({"role": "assistant", "content": cur_res})
-                warn_unknown = (
-                    "检测到你引用了不存在于实际 SQLite 中的表："
-                    + ", ".join(sorted(unknown_mentions))
-                    + "。请重新查看 sqlite_master 结果，仅使用真实表名。"
-                )
-                messages.append({"role": "user", "content": warn_unknown})
-                refund_iteration()
-                continue
-            if require_known_reference and not known_mentions:
-                messages.append({"role": "assistant", "content": cur_res})
-                table_samples = sorted(known_tables)
-                sample_hint = (
-                    ", ".join(table_samples[:3]) if table_samples else "真实表"
-                )
-                ref_prompt = (
-                    "请在 <Analyze> 中引用 sqlite_master 返回的真实表名（如："
-                    + sample_hint
-                    + "），并结合这些表/字段制定下一步分析计划。"
-                )
-                messages.append({"role": "user", "content": ref_prompt})
+                if not schema_confirmed and not schema_bootstrap_used:
+                    auto_block = run_schema_bootstrap(workspace_path)
+                    if auto_block:
+                        schema_bootstrap_used = True
+                        schema_confirmed = True
+                        latest_tables = list_sqlite_tables(workspace_path)
+                        ensure_known_tables(latest_tables)
+                        assistant_reply += auto_block
+                        yield auto_block
+                        messages.append({"role": "assistant", "content": auto_block})
+                        continue
+                analyze_prompt = "你的输出缺少 <Analyze> 段，必须先在 <Analyze> 中说明当前目标与依据，再给出 <Code>。"
+                messages.append({"role": "user", "content": analyze_prompt})
                 refund_iteration()
                 continue
 
-        last_analyze_signature = analyze_signature
-
-        if not cur_res.strip() and not finished:
-            empty_retry += 1
-            if empty_retry < 3:
-                retry_prompt = (
-                    "上一轮你没有任何输出，请继续按照既定计划进行分析，"
-                    "务必给出 <Analyze>/<Code>/<Execute> 的完整内容。"
-                )
-                messages.append({"role": "user", "content": retry_prompt})
-                continue
-            forced_reason = "连续多轮未返回新增内容，已终止本轮迭代"
-            finished = True
-            break
-        else:
-            empty_retry = 0
-
-        if finished:
-            break
-
-        has_code_block = "<Code>" in cur_res and "</Code>" in cur_res
-
-        if not has_code_block:
-            messages.append({"role": "assistant", "content": cur_res})
-            if answer_requested:
-                answer_waiting_rounds += 1
-                reminder = (
-                    "你已完成必要的代码执行，请直接给出 <Answer>，总结 <Execute>/<File> 的发现并提出建议，"
-                    "不要再给新的 <Analyze>/<Code>。"
-                )
-                messages.append({"role": "user", "content": reminder})
-                if answer_waiting_rounds >= 2:
-                    violation_block = "\n<Answer>\n多次提醒后仍未输出 <Answer>，任务被终止。请使用现有结果自行总结或重新发起任务。\n</Answer>\n"
-                    assistant_reply += violation_block
-                    yield violation_block
-                    return
-            else:
-                code_prompt = (
-                    "你的输出缺少 <Code> 段。请在 <Analyze> 后立刻提供完整的 Python 代码（含 import/连接/EDA/plt 保存/conn.close()），"
-                    "以便系统执行。"
-                )
-                messages.append({"role": "user", "content": code_prompt})
-            refund_iteration()
-            continue
-
-        if last_finish_reason in {"stop", "length"} and not finished:
-            if "<Code>" in cur_res and "</Code>" not in cur_res:
-                missing_tag = "</Code>"
-                cur_res += missing_tag
-                assistant_reply += missing_tag
-                yield missing_tag
-            elif "<Code>" not in cur_res:
-                # 模型未输出 <Code>，向其追加纠错提示并进入下一轮
+            if (
+                schema_confirmed
+                and "列出" in analyze_content
+                and "表结构" in analyze_content
+            ):
                 messages.append({"role": "assistant", "content": cur_res})
-                correction_prompt = (
-                    "你必须严格按如下结构输出：先用 <Analyze> 拆解任务，紧接着在 <Code> 中给出可执行的"
-                    " Python 代码（使用 ```python ... ``` 包裹），等待系统执行，再结合 <Execute>/<File> 结果"
-                    " 继续分析。不要重复欢迎语，立刻补充缺失的 <Code>。"
-                )
-                messages.append({"role": "user", "content": correction_prompt})
+                advance_prompt = "表结构已在首轮列出，请基于已知表/字段提出新的分析目标，换用真实查询或 EDA 任务。"
+                messages.append({"role": "user", "content": advance_prompt})
+                refund_iteration()
                 continue
 
-        if "</Code>" in cur_res and not finished:
-            if answer_requested:
+            if last_analyze_signature and analyze_signature == last_analyze_signature:
                 messages.append({"role": "assistant", "content": cur_res})
-                reminder = "分析已完成，请停止输出新的 <Code>。在下一轮直接编写 <Answer>，总结已得到的 <Execute>/<File> 结果并给出进一步建议。"
-                messages.append({"role": "user", "content": reminder})
-                answer_waiting_rounds += 1
-                if answer_waiting_rounds >= 2:
-                    violation_block = "\n<Answer>\n多次提醒后仍未输出 <Answer>，任务被自动终止。请使用现有 <Execute>/<File> 结果手动总结或重新发起指令。\n</Answer>\n"
-                    assistant_reply += violation_block
-                    yield violation_block
-                    return
+                diff_prompt = "你的 <Analyze> 内容与上一轮完全相同，请结合最新的 <Execute>/<File> 结果提出不同的分析步骤。"
+                messages.append({"role": "user", "content": diff_prompt})
+                refund_iteration()
                 continue
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": strip_model_file_blocks(cur_res),
-                }
-            )
-            code_match = re.search(r"<Code>(.*?)</Code>", cur_res, re.DOTALL)
-            if code_match:
-                code_content = code_match.group(1).strip()
-                md_match = re.search(r"```(?:python)?(.*?)```", code_content, re.DOTALL)
-                code_str = md_match.group(1).strip() if md_match else code_content
-                effective_code = extract_effective_code(code_str)
 
-                code_signature = "\n".join(
-                    line.strip() for line in effective_code.splitlines()
-                ).strip()
-                normalized_code = effective_code.lower()
-                if DDL_TABLE_PATTERN.search(normalized_code):
-                    ddl_prompt = (
-                        "检测到脚本尝试执行 `CREATE/DROP/ALTER TABLE` 等操作。"
-                        " 出于数据安全考虑，本系统禁止修改数据库结构，请改为针对已有表进行查询或分析。"
+            known_mentions = set()
+            unknown_mentions = set()
+            require_known_reference = schema_confirmed
+            if known_tables:
+                known_mentions, unknown_mentions = extract_table_mentions_from_text(
+                    analyze_content, known_tables
+                )
+                if schema_confirmed and unknown_mentions:
+                    messages.append({"role": "assistant", "content": cur_res})
+                    warn_unknown = (
+                        "检测到你引用了不存在于实际 SQLite 中的表："
+                        + ", ".join(sorted(unknown_mentions))
+                        + "。请重新查看 sqlite_master 结果，仅使用真实表名。"
                     )
-                    messages.append({"role": "user", "content": ddl_prompt})
+                    messages.append({"role": "user", "content": warn_unknown})
                     refund_iteration()
                     continue
-                if code_signature and code_signature == last_code_signature:
+                if require_known_reference and not known_mentions:
+                    messages.append({"role": "assistant", "content": cur_res})
+                    table_samples = sorted(known_tables)
+                    sample_hint = (
+                        ", ".join(table_samples[:3]) if table_samples else "真实表"
+                    )
+                    ref_prompt = (
+                        "请在 <Analyze> 中引用 sqlite_master 返回的真实表名（如："
+                        + sample_hint
+                        + "），并结合这些表/字段制定下一步分析计划。"
+                    )
+                    messages.append({"role": "user", "content": ref_prompt})
+                    refund_iteration()
+                    continue
+
+            last_analyze_signature = analyze_signature
+
+            if not cur_res.strip() and not finished:
+                empty_retry += 1
+                if empty_retry < 3:
+                    retry_prompt = (
+                        "上一轮你没有任何输出，请继续按照既定计划进行分析，"
+                        "务必给出 <Analyze>/<Code>/<Execute> 的完整内容。"
+                    )
+                    messages.append({"role": "user", "content": retry_prompt})
+                    continue
+                forced_reason = "连续多轮未返回新增内容，已终止本轮迭代"
+                finished = True
+                break
+            else:
+                empty_retry = 0
+
+            if finished:
+                break
+
+            has_code_block = "<Code>" in cur_res and "</Code>" in cur_res
+
+            if not has_code_block:
+                messages.append({"role": "assistant", "content": cur_res})
+                if answer_requested:
+                    answer_waiting_rounds += 1
                     reminder = (
-                        "你的代码与上一轮完全相同。请根据已获取的表结构推进新的分析，"
-                        "不要重复列出 sqlite_master。"
+                        "你已完成必要的代码执行，请直接给出 <Answer>，总结 <Execute>/<File> 的发现并提出建议，"
+                        "不要再给新的 <Analyze>/<Code>。"
                     )
                     messages.append({"role": "user", "content": reminder})
-                    refund_iteration()
-                    continue
-                if (
-                    schema_confirmed
-                    and "sqlite_master" in normalized_code
-                    and "pragma" not in normalized_code
-                ):
-                    schema_only_repeat += 1
-                    table_examples = sorted(known_tables)
-                    example_text = (
-                        ", ".join(table_examples[:3]) if table_examples else "真实表"
-                    )
-                    sample_next = (
-                        f"例如：SELECT * FROM {table_examples[0]} LIMIT 5"
-                        if table_examples
-                        else "例如：SELECT * FROM 某个真实表 LIMIT 5"
-                    )
-                    refresh_prompt = (
-                        "表结构已经明确，无需再次查询 sqlite_master。请直接对真实表（如："
-                        + example_text
-                        + f"）执行 SELECT/EDA，比如 {sample_next} 或绘制对应字段的分布。"
-                    )
-                    if schema_only_repeat >= 2:
-                        violation_block = (
-                            "\n<Answer>\n已确认表结构后仍连续输出 sqlite_master 查询，任务被自动终止。"
-                            " 请重新发起会话，并在首轮之外直接针对真实表执行 SELECT/EDA。\n</Answer>\n"
-                        )
+                    if answer_waiting_rounds >= 2:
+                        violation_block = "\n<Answer>\n多次提醒后仍未输出 <Answer>，任务被终止。请使用现有结果自行总结或重新发起任务。\n</Answer>\n"
                         assistant_reply += violation_block
                         yield violation_block
                         return
-                    messages.append({"role": "user", "content": refresh_prompt})
-                    refund_iteration()
-                    continue
                 else:
-                    schema_only_repeat = 0
-                sql_tables_used = extract_sql_table_names(effective_code)
-                if sql_tables_used:
-                    recent_tables_used = sql_tables_used
-                invalid_tables = set()
-                if known_tables and sql_tables_used:
-                    invalid_tables = {
-                        tbl
-                        for tbl in sql_tables_used
-                        if tbl not in known_tables
-                        and tbl.lower() not in {"sqlite_master", "sqlite_sequence"}
+                    code_prompt = (
+                        "你的输出缺少 <Code> 段。请在 <Analyze> 后立刻提供完整的 Python 代码（含 import/连接/EDA/plt 保存/conn.close()），"
+                        "以便系统执行。"
+                    )
+                    messages.append({"role": "user", "content": code_prompt})
+                refund_iteration()
+                continue
+
+            if last_finish_reason in {"stop", "length"} and not finished:
+                if "<Code>" in cur_res and "</Code>" not in cur_res:
+                    missing_tag = "</Code>"
+                    cur_res += missing_tag
+                    assistant_reply += missing_tag
+                    yield missing_tag
+                elif "<Code>" not in cur_res:
+                    # 模型未输出 <Code>，向其追加纠错提示并进入下一轮
+                    messages.append({"role": "assistant", "content": cur_res})
+                    correction_prompt = (
+                        "你必须严格按如下结构输出：先用 <Analyze> 拆解任务，紧接着在 <Code> 中给出可执行的"
+                        " Python 代码（使用 ```python ... ``` 包裹），等待系统执行，再结合 <Execute>/<File> 结果"
+                        " 继续分析。不要重复欢迎语，立刻补充缺失的 <Code>。"
+                    )
+                    messages.append({"role": "user", "content": correction_prompt})
+                    continue
+
+            if "</Code>" in cur_res and not finished:
+                if answer_requested:
+                    messages.append({"role": "assistant", "content": cur_res})
+                    reminder = "分析已完成，请停止输出新的 <Code>。在下一轮直接编写 <Answer>，总结已得到的 <Execute>/<File> 结果并给出进一步建议。"
+                    messages.append({"role": "user", "content": reminder})
+                    answer_waiting_rounds += 1
+                    if answer_waiting_rounds >= 2:
+                        violation_block = "\n<Answer>\n多次提醒后仍未输出 <Answer>，任务被自动终止。请使用现有 <Execute>/<File> 结果手动总结或重新发起指令。\n</Answer>\n"
+                        assistant_reply += violation_block
+                        yield violation_block
+                        return
+                    continue
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": strip_model_file_blocks(cur_res),
                     }
-
-                if schema_confirmed and invalid_tables:
-                    invalid_msg = (
-                        "脚本中引用了当前 sqlite_master 中不存在的表："
-                        + ", ".join(sorted(invalid_tables))
-                        + "。请重新查看首轮表结构，只能对真实表执行 SQL/EDA。"
+                )
+                code_match = re.search(r"<Code>(.*?)</Code>", cur_res, re.DOTALL)
+                if code_match:
+                    code_content = code_match.group(1).strip()
+                    md_match = re.search(
+                        r"```(?:python)?(.*?)```", code_content, re.DOTALL
                     )
-                    messages.append({"role": "user", "content": invalid_msg})
-                    refund_iteration()
-                    continue
+                    code_str = md_match.group(1).strip() if md_match else code_content
+                    effective_code = extract_effective_code(code_str)
 
-                post_execute_prompts: list[str] = []
-
-                if not schema_confirmed and "sqlite_master" not in normalized_code:
-                    schema_prompt = (
-                        "请先在 <Code> 中执行 `SELECT name FROM sqlite_master WHERE type='table'` 并列出真实表结构，"
-                        "首轮必须完成表结构确认后才能继续 EDA。"
-                    )
-                    messages.append({"role": "user", "content": schema_prompt})
-                    refund_iteration()
-                    continue
-
-                missing_imports = []
-                if (
-                    "pd." in effective_code
-                    and "import pandas as pd" not in effective_code
-                ):
-                    missing_imports.append("import pandas as pd")
-                if (
-                    "plt." in effective_code
-                    and "import matplotlib.pyplot as plt" not in effective_code
-                ):
-                    missing_imports.append("import matplotlib.pyplot as plt")
-                if (
-                    "sns." in effective_code
-                    and "import seaborn as sns" not in effective_code
-                ):
-                    missing_imports.append("import seaborn as sns")
-                if missing_imports:
-                    import_prompt = (
-                        "检测到 <Code> 使用了 pandas/matplotlib/seaborn，但缺少以下导入："
-                        + ", ".join(missing_imports)
-                        + "。请补全导入后再执行。"
-                    )
-                    messages.append({"role": "user", "content": import_prompt})
-                    refund_iteration()
-                    continue
-
-                if "sqlite3.connect" not in effective_code:
-                    sqlite_prompt = (
-                        "每个 <Code> 脚本都需显式 `import sqlite3` 并建立数据库连接。"
-                        " 请将完整脚本补全（含 import / connect / 执行 / close）后再运行。"
-                    )
-                    messages.append({"role": "user", "content": sqlite_prompt})
-                    refund_iteration()
-                    continue
-
-                connect_paths = SQLITE_CONNECT_PATTERN.findall(effective_code)
-                if connect_paths:
-                    available_sqlite_files = iter_sqlite_files(workspace_path)
-                    available_resolved = {
-                        p.resolve(): p for p in available_sqlite_files
-                    }
-                    invalid_connects: list[str] = []
-                    for raw_path in connect_paths:
-                        try:
-                            candidate = Path(raw_path)
-                            if not candidate.is_absolute():
-                                candidate = (workspace_path / raw_path).resolve()
-                            else:
-                                candidate = candidate.resolve()
-                        except Exception:
-                            candidate = Path(raw_path)
-                        if candidate.resolve() not in available_resolved:
-                            invalid_connects.append(raw_path)
-                    if invalid_connects:
-                        sample_display = ""
-                        if available_sqlite_files:
-                            sample = available_sqlite_files[0]
-                            try:
-                                sample_rel = sample.resolve().relative_to(
-                                    workspace_path.resolve()
-                                )
-                                sample_display = sample_rel.as_posix()
-                            except Exception:
-                                sample_display = sample.name
-                        path_prompt = (
-                            "检测到 `sqlite3.connect` 指向 workspace 中不存在的文件："
-                            + ", ".join(invalid_connects)
-                            + "。"
+                    code_signature = "\n".join(
+                        line.strip() for line in effective_code.splitlines()
+                    ).strip()
+                    normalized_code = effective_code.lower()
+                    if DDL_TABLE_PATTERN.search(normalized_code):
+                        ddl_prompt = (
+                            "检测到脚本尝试执行 `CREATE/DROP/ALTER TABLE` 等操作。"
+                            " 出于数据安全考虑，本系统禁止修改数据库结构，请改为针对已有表进行查询或分析。"
                         )
-                        if sample_display:
-                            path_prompt += f" 请改为连接真实数据库（例如：`{sample_display}`），并确保路径与首轮 sqlite_master 输出一致。"
-                        else:
-                            path_prompt += " 请改为连接 workspace 中实际存在的 sqlite 文件，并确保路径与首轮 sqlite_master 输出一致。"
-                        messages.append({"role": "user", "content": path_prompt})
+                        messages.append({"role": "user", "content": ddl_prompt})
+                        refund_iteration()
+                        continue
+                    if code_signature and code_signature == last_code_signature:
+                        reminder = (
+                            "你的代码与上一轮完全相同。请根据已获取的表结构推进新的分析，"
+                            "不要重复列出 sqlite_master。"
+                        )
+                        messages.append({"role": "user", "content": reminder})
+                        refund_iteration()
+                        continue
+                    if (
+                        schema_confirmed
+                        and "sqlite_master" in normalized_code
+                        and "pragma" not in normalized_code
+                    ):
+                        schema_only_repeat += 1
+                        table_examples = sorted(known_tables)
+                        example_text = (
+                            ", ".join(table_examples[:3])
+                            if table_examples
+                            else "真实表"
+                        )
+                        sample_next = (
+                            f"例如：SELECT * FROM {table_examples[0]} LIMIT 5"
+                            if table_examples
+                            else "例如：SELECT * FROM 某个真实表 LIMIT 5"
+                        )
+                        refresh_prompt = (
+                            "表结构已经明确，无需再次查询 sqlite_master。请直接对真实表（如："
+                            + example_text
+                            + f"）执行 SELECT/EDA，比如 {sample_next} 或绘制对应字段的分布。"
+                        )
+                        if schema_only_repeat >= 2:
+                            violation_block = (
+                                "\n<Answer>\n已确认表结构后仍连续输出 sqlite_master 查询，任务被自动终止。"
+                                " 请重新发起会话，并在首轮之外直接针对真实表执行 SELECT/EDA。\n</Answer>\n"
+                            )
+                            assistant_reply += violation_block
+                            yield violation_block
+                            return
+                        messages.append({"role": "user", "content": refresh_prompt})
+                        refund_iteration()
+                        continue
+                    else:
+                        schema_only_repeat = 0
+                    sql_tables_used = extract_sql_table_names(effective_code)
+                    if sql_tables_used:
+                        recent_tables_used = sql_tables_used
+                    invalid_tables = set()
+                    if known_tables and sql_tables_used:
+                        invalid_tables = {
+                            tbl
+                            for tbl in sql_tables_used
+                            if tbl not in known_tables
+                            and tbl.lower() not in {"sqlite_master", "sqlite_sequence"}
+                        }
+
+                    if schema_confirmed and invalid_tables:
+                        invalid_msg = (
+                            "脚本中引用了当前 sqlite_master 中不存在的表："
+                            + ", ".join(sorted(invalid_tables))
+                            + "。请重新查看首轮表结构，只能对真实表执行 SQL/EDA。"
+                        )
+                        messages.append({"role": "user", "content": invalid_msg})
                         refund_iteration()
                         continue
 
-                if "sqlite3.connect" not in effective_code:
-                    connect_prompt = (
-                        "检测到代码缺少 `sqlite3.connect(...)`，而本系统每次执行都会在独立进程运行，"
-                        "不能复用上一轮连接。请在 <Code> 中创建并关闭连接后重新提交。"
-                    )
-                    messages.append({"role": "user", "content": connect_prompt})
-                    refund_iteration()
-                    continue
+                    post_execute_prompts: list[str] = []
 
-                uses_plot = "plt." in normalized_code or "sns." in normalized_code
-                if uses_plot and "plt.savefig" not in normalized_code:
-                    save_prompt = (
-                        "绘图脚本必须调用 `plt.savefig('generated/xxx.png')` 并写入实际文件，再在 <File> 中引用。"
-                        " 请补充 `plt.savefig` 后重新提交。"
-                    )
-                    messages.append({"role": "user", "content": save_prompt})
-                    refund_iteration()
-                    continue
-                if uses_plot and "plt.close" not in normalized_code:
-                    close_prompt = "绘图结束后需调用 `plt.close()` 释放资源，避免多轮叠加。请在 <Code> 末尾补充 `plt.close()`。"
-                    messages.append({"role": "user", "content": close_prompt})
-                    refund_iteration()
-                    continue
+                    if not schema_confirmed and "sqlite_master" not in normalized_code:
+                        schema_prompt = (
+                            "请先在 <Code> 中执行 `SELECT name FROM sqlite_master WHERE type='table'` 并列出真实表结构，"
+                            "首轮必须完成表结构确认后才能继续 EDA。"
+                        )
+                        messages.append({"role": "user", "content": schema_prompt})
+                        refund_iteration()
+                        continue
 
-                last_code_signature = code_signature
+                    missing_imports = []
+                    if (
+                        "pd." in effective_code
+                        and "import pandas as pd" not in effective_code
+                    ):
+                        missing_imports.append("import pandas as pd")
+                    if (
+                        "plt." in effective_code
+                        and "import matplotlib.pyplot as plt" not in effective_code
+                    ):
+                        missing_imports.append("import matplotlib.pyplot as plt")
+                    if (
+                        "sns." in effective_code
+                        and "import seaborn as sns" not in effective_code
+                    ):
+                        missing_imports.append("import seaborn as sns")
+                    if missing_imports:
+                        import_prompt = (
+                            "检测到 <Code> 使用了 pandas/matplotlib/seaborn，但缺少以下导入："
+                            + ", ".join(missing_imports)
+                            + "。请补全导入后再执行。"
+                        )
+                        messages.append({"role": "user", "content": import_prompt})
+                        refund_iteration()
+                        continue
 
-                print(
-                    f"[bot_stream] session={session_id} iteration={iteration} executing code, length={len(code_str)}"
-                )
-                try:
-                    before_state = {
-                        p.resolve(): (p.stat().st_size, p.stat().st_mtime_ns)
-                        for p in workspace_path.rglob("*")
-                        if p.is_file()
-                    }
-                except Exception:
-                    before_state = {}
+                    if "sqlite3.connect" not in effective_code:
+                        sqlite_prompt = (
+                            "每个 <Code> 脚本都需显式 `import sqlite3` 并建立数据库连接。"
+                            " 请将完整脚本补全（含 import / connect / 执行 / close）后再运行。"
+                        )
+                        messages.append({"role": "user", "content": sqlite_prompt})
+                        refund_iteration()
+                        continue
 
-                exe_output = execute_code_safe(
-                    effective_code or code_str, str(workspace_path)
-                )
-                code_executed = True
-
-                is_schema_code = (
-                    "sqlite_master" in normalized_code
-                    and "pragma" not in normalized_code
-                )
-
-                if not schema_confirmed and "sqlite_master" in normalized_code:
-                    schema_confirmed = True
-                    latest_tables = list_sqlite_tables(workspace_path)
-                    ensure_known_tables(latest_tables)
-                    if not schema_summary_injected:
-                        schema_hint = summarize_sqlite_schema(workspace_path)
-                        if schema_hint:
-                            schema_summary = (
-                                "系统已从实际 sqlite_master/PRAGMA 中解析到以下表结构，请在后续 <Analyze>/<Code> 中"
-                                " 直接引用这些真实名字，并按其中字段推进分析：\n"
-                                f"{schema_hint}\n"
-                                "下一步建议：从上述表中任选一个（如第一张表）执行 `SELECT * ... LIMIT 50` 做初步概览。"
+                    connect_paths = SQLITE_CONNECT_PATTERN.findall(effective_code)
+                    if connect_paths:
+                        available_sqlite_files = iter_sqlite_files(workspace_path)
+                        available_resolved = {
+                            p.resolve(): p for p in available_sqlite_files
+                        }
+                        invalid_connects: list[str] = []
+                        for raw_path in connect_paths:
+                            try:
+                                candidate = Path(raw_path)
+                                if not candidate.is_absolute():
+                                    candidate = (workspace_path / raw_path).resolve()
+                                else:
+                                    candidate = candidate.resolve()
+                            except Exception:
+                                candidate = Path(raw_path)
+                            if candidate.resolve() not in available_resolved:
+                                invalid_connects.append(raw_path)
+                        if invalid_connects:
+                            sample_display = ""
+                            if available_sqlite_files:
+                                sample = available_sqlite_files[0]
+                                try:
+                                    sample_rel = sample.resolve().relative_to(
+                                        workspace_path.resolve()
+                                    )
+                                    sample_display = sample_rel.as_posix()
+                                except Exception:
+                                    sample_display = sample.name
+                            path_prompt = (
+                                "检测到 `sqlite3.connect` 指向 workspace 中不存在的文件："
+                                + ", ".join(invalid_connects)
+                                + "。"
                             )
-                            messages.append({"role": "user", "content": schema_summary})
-                        schema_summary_injected = True
+                            if sample_display:
+                                path_prompt += f" 请改为连接真实数据库（例如：`{sample_display}`），并确保路径与首轮 sqlite_master 输出一致。"
+                            else:
+                                path_prompt += " 请改为连接 workspace 中实际存在的 sqlite 文件，并确保路径与首轮 sqlite_master 输出一致。"
+                            messages.append({"role": "user", "content": path_prompt})
+                            refund_iteration()
+                            continue
 
-                try:
-                    after_state = {
-                        p.resolve(): (p.stat().st_size, p.stat().st_mtime_ns)
+                    if "sqlite3.connect" not in effective_code:
+                        connect_prompt = (
+                            "检测到代码缺少 `sqlite3.connect(...)`，而本系统每次执行都会在独立进程运行，"
+                            "不能复用上一轮连接。请在 <Code> 中创建并关闭连接后重新提交。"
+                        )
+                        messages.append({"role": "user", "content": connect_prompt})
+                        refund_iteration()
+                        continue
+
+                    uses_plot = "plt." in normalized_code or "sns." in normalized_code
+                    if uses_plot and "plt.savefig" not in normalized_code:
+                        save_prompt = (
+                            "绘图脚本必须调用 `plt.savefig('generated/xxx.png')` 并写入实际文件，再在 <File> 中引用。"
+                            " 请补充 `plt.savefig` 后重新提交。"
+                        )
+                        messages.append({"role": "user", "content": save_prompt})
+                        refund_iteration()
+                        continue
+                    if uses_plot and "plt.close" not in normalized_code:
+                        close_prompt = "绘图结束后需调用 `plt.close()` 释放资源，避免多轮叠加。请在 <Code> 末尾补充 `plt.close()`。"
+                        messages.append({"role": "user", "content": close_prompt})
+                        refund_iteration()
+                        continue
+
+                    last_code_signature = code_signature
+
+                    print(
+                        f"[bot_stream] session={session_id} iteration={iteration} executing code, length={len(code_str)}"
+                    )
+                    try:
+                        before_state = {
+                            p.resolve(): (p.stat().st_size, p.stat().st_mtime_ns)
+                            for p in workspace_path.rglob("*")
+                            if p.is_file()
+                        }
+                    except Exception:
+                        before_state = {}
+
+                    exe_output = execute_code_safe(
+                        effective_code or code_str, str(workspace_path)
+                    )
+                    code_executed = True
+
+                    is_schema_code = (
+                        "sqlite_master" in normalized_code
+                        and "pragma" not in normalized_code
+                    )
+
+                    if not schema_confirmed and "sqlite_master" in normalized_code:
+                        schema_confirmed = True
+                        latest_tables = list_sqlite_tables(workspace_path)
+                        ensure_known_tables(latest_tables)
+                        if not schema_summary_injected:
+                            schema_hint = summarize_sqlite_schema(workspace_path)
+                            if schema_hint:
+                                schema_summary = (
+                                    "系统已从实际 sqlite_master/PRAGMA 中解析到以下表结构，请在后续 <Analyze>/<Code> 中"
+                                    " 直接引用这些真实名字，并按其中字段推进分析：\n"
+                                    f"{schema_hint}\n"
+                                    "下一步建议：从上述表中任选一个（如第一张表）执行 `SELECT * ... LIMIT 50` 做初步概览。"
+                                )
+                                messages.append(
+                                    {"role": "user", "content": schema_summary}
+                                )
+                            schema_summary_injected = True
+
+                    try:
+                        after_state = {
+                            p.resolve(): (p.stat().st_size, p.stat().st_mtime_ns)
+                            for p in workspace_path.rglob("*")
+                            if p.is_file()
+                        }
+                    except Exception:
+                        after_state = {}
+
+                    added_paths = [
+                        p for p in after_state.keys() if p not in before_state
+                    ]
+                    modified_paths = [
+                        p
+                        for p in after_state.keys()
+                        if p in before_state and after_state[p] != before_state[p]
+                    ]
+
+                    artifact_paths = []
+                    generated_dir_str = str(generated_dir.resolve())
+                    for p in added_paths:
+                        try:
+                            target_path = generated_dir / p.name
+                            dest_path = uniquify_path(target_path)
+                            if not str(p).startswith(generated_dir_str):
+                                shutil.copy2(p, dest_path)
+                            else:
+                                if dest_path != p:
+                                    shutil.copy2(p, dest_path)
+                            artifact_paths.append(dest_path.resolve())
+                        except Exception as e:
+                            print(f"Error moving file {p}: {e}")
+
+                    for p in modified_paths:
+                        try:
+                            dest_path = uniquify_path(
+                                generated_dir / f"{p.stem}_modified{p.suffix}"
+                            )
+                            shutil.copy2(p, dest_path)
+                            artifact_paths.append(dest_path.resolve())
+                        except Exception as e:
+                            print(f"Error copying modified file {p}: {e}")
+
+                    exe_str = f"\n<Execute>\n```\n{exe_output}\n```\n</Execute>\n"
+                    actual_files = {
+                        normalize_filename(Path(p).name) for p in artifact_paths
+                    }
+                    file_block_lines = ["<File>"]
+                    if artifact_paths:
+                        for p in artifact_paths:
+                            rel = workspace_relative_path(Path(p))
+                            url = build_download_url(rel)
+                            name = Path(p).name
+                            file_block_lines.append(f"- [{name}]({url})")
+                            if p.suffix.lower() in [
+                                ".png",
+                                ".jpg",
+                                ".jpeg",
+                                ".gif",
+                                ".webp",
+                                ".svg",
+                            ]:
+                                file_block_lines.append(f"![{name}]({url})")
+                    else:
+                        file_block_lines.append("暂无文件")
+                    file_block_lines.append("</File>")
+                    file_block = "\n" + "\n".join(file_block_lines) + "\n"
+
+                    full_execution_block = exe_str + file_block
+                    assistant_reply += full_execution_block
+                    yield full_execution_block
+                    messages.append({"role": "execute", "content": f"{exe_output}"})
+                    if claimed_files_in_round:
+                        unmatched_claims = sorted(
+                            claim
+                            for claim in claimed_files_in_round
+                            if claim not in actual_files
+                        )
+                        if unmatched_claims:
+                            warn_block = emit_file_claim_warning(
+                                "执行后未发现这些文件产物"
+                            )
+                            if warn_block:
+                                assistant_reply += warn_block
+                                yield warn_block
+                            warn_missing_file = (
+                                "系统未检测到你在 <File> 中声明的文件："
+                                + ", ".join(unmatched_claims)
+                                + "。请确保脚本真实写入这些文件，并依赖系统自动输出的 <File> 段，而不是手动杜撰。"
+                            )
+                            messages.append(
+                                {"role": "user", "content": warn_missing_file}
+                            )
+                    for prompt in post_execute_prompts:
+                        messages.append({"role": "user", "content": prompt})
+
+                    execute_rounds += 1
+                    if not is_schema_code:
+                        non_schema_exec_rounds += 1
+                    if answer_requested:
+                        answer_waiting_rounds = 0
+                    if (
+                        execute_rounds >= ANSWER_MIN_EXEC_ROUNDS
+                        and non_schema_exec_rounds >= ANSWER_MIN_NON_SCHEMA_ROUNDS
+                        and not answer_requested
+                    ):
+                        answer_requested = True
+                        answer_waiting_rounds = 0
+                        answer_prompt = (
+                            "你已完成至少两轮代码执行。请停止继续编写 <Code>，在下一轮直接输出 <Answer>，"
+                            "总结上述 <Execute>/<File> 结果并给出后续建议。"
+                        )
+                        messages.append({"role": "user", "content": answer_prompt})
+
+                    exe_signature = (
+                        re.sub(r"\s+", " ", exe_output.strip())
+                        if isinstance(exe_output, str)
+                        else ""
+                    )
+                    if (
+                        schema_confirmed
+                        and exe_signature
+                        and last_execute_signature
+                        and exe_signature == last_execute_signature
+                    ):
+                        repeat_prompt = "连续两轮的 <Execute> 输出完全一致（仍在列出 sqlite_master 结果）。请立即改用真实表进行 `SELECT *` 或统计分析。"
+                        messages.append({"role": "user", "content": repeat_prompt})
+                    last_execute_signature = exe_signature or last_execute_signature
+
+                    normalized_output = (
+                        exe_output.lower() if isinstance(exe_output, str) else ""
+                    )
+                    if "no such table" in normalized_output:
+                        missing_match = re.search(
+                            r"no such table:?\s*([\w\d_]+)", exe_output, re.IGNORECASE
+                        )
+                        missing_table = missing_match.group(1) if missing_match else ""
+                        schema_hint = summarize_sqlite_schema(workspace_path)
+                        hint_lines = [
+                            "执行结果显示引用了不存在的表。请复查 sqlite_master 输出，在下一轮 <Analyze> 中说明修复计划，并改用真实表名。"
+                        ]
+                        if missing_table:
+                            hint_lines.append(f"缺失的表：{missing_table}")
+                        if schema_hint:
+                            hint_lines.append(
+                                "当前 workspace 中 SQLite 表结构（系统实时扫描）："
+                            )
+                            hint_lines.append(schema_hint)
+                        messages.append(
+                            {"role": "user", "content": "\n\n".join(hint_lines)}
+                        )
+
+                    current_files = {
+                        str(p.resolve())
                         for p in workspace_path.rglob("*")
                         if p.is_file()
                     }
-                except Exception:
-                    after_state = {}
-
-                added_paths = [p for p in after_state.keys() if p not in before_state]
-                modified_paths = [
-                    p
-                    for p in after_state.keys()
-                    if p in before_state and after_state[p] != before_state[p]
-                ]
-
-                artifact_paths = []
-                generated_dir_str = str(generated_dir.resolve())
-                for p in added_paths:
-                    try:
-                        target_path = generated_dir / p.name
-                        dest_path = uniquify_path(target_path)
-                        if not str(p).startswith(generated_dir_str):
-                            shutil.copy2(p, dest_path)
-                        else:
-                            if dest_path != p:
-                                shutil.copy2(p, dest_path)
-                        artifact_paths.append(dest_path.resolve())
-                    except Exception as e:
-                        print(f"Error moving file {p}: {e}")
-
-                for p in modified_paths:
-                    try:
-                        dest_path = uniquify_path(
-                            generated_dir / f"{p.stem}_modified{p.suffix}"
-                        )
-                        shutil.copy2(p, dest_path)
-                        artifact_paths.append(dest_path.resolve())
-                    except Exception as e:
-                        print(f"Error copying modified file {p}: {e}")
-
-                exe_str = f"\n<Execute>\n```\n{exe_output}\n```\n</Execute>\n"
-                actual_files = {
-                    normalize_filename(Path(p).name) for p in artifact_paths
-                }
-                file_block_lines = ["<File>"]
-                if artifact_paths:
-                    for p in artifact_paths:
-                        rel = workspace_relative_path(Path(p))
-                        url = build_download_url(rel)
-                        name = Path(p).name
-                        file_block_lines.append(f"- [{name}]({url})")
-                        if p.suffix.lower() in [
-                            ".png",
-                            ".jpg",
-                            ".jpeg",
-                            ".gif",
-                            ".webp",
-                            ".svg",
-                        ]:
-                            file_block_lines.append(f"![{name}]({url})")
-                else:
-                    file_block_lines.append("暂无文件")
-                file_block_lines.append("</File>")
-                file_block = "\n" + "\n".join(file_block_lines) + "\n"
-
-                full_execution_block = exe_str + file_block
-                assistant_reply += full_execution_block
-                yield full_execution_block
-                messages.append({"role": "execute", "content": f"{exe_output}"})
-                if claimed_files_in_round:
-                    unmatched_claims = sorted(
-                        claim
-                        for claim in claimed_files_in_round
-                        if claim not in actual_files
-                    )
-                    if unmatched_claims:
-                        warn_block = emit_file_claim_warning("执行后未发现这些文件产物")
-                        if warn_block:
-                            assistant_reply += warn_block
-                            yield warn_block
-                        warn_missing_file = (
-                            "系统未检测到你在 <File> 中声明的文件："
-                            + ", ".join(unmatched_claims)
-                            + "。请确保脚本真实写入这些文件，并依赖系统自动输出的 <File> 段，而不是手动杜撰。"
-                        )
-                        messages.append({"role": "user", "content": warn_missing_file})
-                for prompt in post_execute_prompts:
-                    messages.append({"role": "user", "content": prompt})
-
-                execute_rounds += 1
-                if not is_schema_code:
-                    non_schema_exec_rounds += 1
-                if answer_requested:
-                    answer_waiting_rounds = 0
-                if (
-                    execute_rounds >= ANSWER_MIN_EXEC_ROUNDS
-                    and non_schema_exec_rounds >= ANSWER_MIN_NON_SCHEMA_ROUNDS
-                    and not answer_requested
-                ):
-                    answer_requested = True
-                    answer_waiting_rounds = 0
-                    answer_prompt = (
-                        "你已完成至少两轮代码执行。请停止继续编写 <Code>，在下一轮直接输出 <Answer>，"
-                        "总结上述 <Execute>/<File> 结果并给出后续建议。"
-                    )
-                    messages.append({"role": "user", "content": answer_prompt})
-
-                exe_signature = (
-                    re.sub(r"\s+", " ", exe_output.strip())
-                    if isinstance(exe_output, str)
-                    else ""
-                )
-                if (
-                    schema_confirmed
-                    and exe_signature
-                    and last_execute_signature
-                    and exe_signature == last_execute_signature
-                ):
-                    repeat_prompt = "连续两轮的 <Execute> 输出完全一致（仍在列出 sqlite_master 结果）。请立即改用真实表进行 `SELECT *` 或统计分析。"
-                    messages.append({"role": "user", "content": repeat_prompt})
-                last_execute_signature = exe_signature or last_execute_signature
-
-                normalized_output = (
-                    exe_output.lower() if isinstance(exe_output, str) else ""
-                )
-                if "no such table" in normalized_output:
-                    missing_match = re.search(
-                        r"no such table:?\s*([\w\d_]+)", exe_output, re.IGNORECASE
-                    )
-                    missing_table = missing_match.group(1) if missing_match else ""
-                    schema_hint = summarize_sqlite_schema(workspace_path)
-                    hint_lines = [
-                        "执行结果显示引用了不存在的表。请复查 sqlite_master 输出，在下一轮 <Analyze> 中说明修复计划，并改用真实表名。"
-                    ]
-                    if missing_table:
-                        hint_lines.append(f"缺失的表：{missing_table}")
-                    if schema_hint:
-                        hint_lines.append(
-                            "当前 workspace 中 SQLite 表结构（系统实时扫描）："
-                        )
-                        hint_lines.append(schema_hint)
-                    messages.append(
-                        {"role": "user", "content": "\n\n".join(hint_lines)}
-                    )
-
-                current_files = {
-                    str(p.resolve()) for p in workspace_path.rglob("*") if p.is_file()
-                }
-                new_files = current_files - initial_workspace
-                if new_files:
-                    initial_workspace.update(new_files)
+                    new_files = current_files - initial_workspace
+                    if new_files:
+                        initial_workspace.update(new_files)
+        finally:
+            if claimed_files_in_round and not code_executed:
+                warn_block = emit_file_claim_warning("本轮代码未执行或已被退票")
+                if warn_block:
+                    assistant_reply += warn_block
+                    yield warn_block
 
         if should_stop(session_id) and not forced_reason:
             forced_reason = "任务已根据用户的停止指令终止"
