@@ -1141,6 +1141,24 @@ def bot_stream(messages, workspace, session_id="default"):
             continue
 
         claimed_files_in_round = extract_file_claims(cur_res)
+        file_claim_warning_sent = False
+
+        def emit_file_claim_warning(reason: str) -> str:
+            nonlocal file_claim_warning_sent
+            if file_claim_warning_sent or not claimed_files_in_round:
+                return ""
+            names = ", ".join(sorted(claimed_files_in_round))
+            detail = f"原因：{reason}。" if reason else ""
+            file_claim_warning_sent = True
+            return (
+                "\n<Analyze>\n"
+                "系统检测到你在 <File> 中声明了以下文件："
+                + names
+                + f"。{detail}本轮脚本尚未执行或已被退票，这些链接没有对应的真实文件。"
+                "请等待系统执行成功后，由系统自动输出真实的 <File> 段，勿手动伪造。\n"
+                "</Analyze>\n"
+            )
+
         cur_res = strip_model_file_blocks(cur_res)
         cur_res = normalize_model_tags(cur_res)
         fixed_res = fix_tags_and_codeblock(cur_res)
@@ -1520,12 +1538,14 @@ def bot_stream(messages, workspace, session_id="default"):
                 generated_dir_str = str(generated_dir.resolve())
                 for p in added_paths:
                     try:
+                        target_path = generated_dir / p.name
+                        dest_path = uniquify_path(target_path)
                         if not str(p).startswith(generated_dir_str):
-                            dest_path = uniquify_path(generated_dir / p.name)
                             shutil.copy2(p, dest_path)
-                            artifact_paths.append(dest_path.resolve())
                         else:
-                            artifact_paths.append(p.resolve())
+                            if dest_path != p:
+                                shutil.copy2(p, dest_path)
+                        artifact_paths.append(dest_path.resolve())
                     except Exception as e:
                         print(f"Error moving file {p}: {e}")
 
@@ -1575,6 +1595,10 @@ def bot_stream(messages, workspace, session_id="default"):
                         if claim not in actual_files
                     )
                     if unmatched_claims:
+                        warn_block = emit_file_claim_warning("执行后未发现这些文件产物")
+                        if warn_block:
+                            assistant_reply += warn_block
+                            yield warn_block
                         warn_missing_file = (
                             "系统未检测到你在 <File> 中声明的文件："
                             + ", ".join(unmatched_claims)
