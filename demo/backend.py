@@ -1023,6 +1023,7 @@ def bot_stream(messages, workspace, session_id="default"):
     non_schema_exec_rounds = 0
     answer_requested = False
     answer_waiting_rounds = 0
+    premature_answer_rounds = 0
     baseline_tables = list_sqlite_tables(workspace_path)
     known_tables = set(baseline_tables)
     initial_tables_locked = bool(known_tables)
@@ -1072,6 +1073,7 @@ def bot_stream(messages, workspace, session_id="default"):
     ):
         raw_iterations += 1
         iteration += 1
+        premature_answer_detected = False
         print(
             f"[bot_stream] session={session_id} iteration={iteration} raw={raw_iterations} starting, messages={len(messages)}"
         )
@@ -1109,10 +1111,16 @@ def bot_stream(messages, workspace, session_id="default"):
                     break
                 if "</Answer>" in cur_res:
                     if non_schema_exec_rounds == 0:
+                        premature_answer_rounds += 1
                         messages.append({"role": "assistant", "content": cur_res})
                         warn_msg = "尚未基于真实表执行任何 EDA/可视化。请先按照要求运行 `SELECT *` 等分析，形成 <Execute>/<File> 结果后再给出 <Answer>。"
                         messages.append({"role": "user", "content": warn_msg})
                         cur_res = cur_res.replace("<Answer>", "<Answer (ignored)>")
+                        premature_answer_detected = True
+                        if premature_answer_rounds >= 3:
+                            forced_reason = "多次尝试直接输出 <Answer> 而未执行任何真实 SQL/EDA，任务被终止"
+                            finished = True
+                            break
                     else:
                         finished = True
                         break
@@ -1127,6 +1135,10 @@ def bot_stream(messages, workspace, session_id="default"):
             assistant_reply += error_block
             yield error_block
             break
+
+        if premature_answer_detected and not finished:
+            refund_iteration()
+            continue
 
         claimed_files_in_round = extract_file_claims(cur_res)
         cur_res = strip_model_file_blocks(cur_res)
