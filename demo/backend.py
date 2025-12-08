@@ -1102,7 +1102,8 @@ def bot_stream(messages, workspace, session_id="default"):
                 if chunk.choices and chunk.choices[0].delta.content is not None:
                     delta = chunk.choices[0].delta.content
                     raw_res += delta
-                    sanitized_full = strip_model_file_blocks(raw_res)
+                    normalized_stream = normalize_model_tags(raw_res)
+                    sanitized_full = strip_model_file_blocks(normalized_stream)
                     new_segment = sanitized_full[len(sanitized_stream) :]
                     if new_segment:
                         assistant_reply += new_segment
