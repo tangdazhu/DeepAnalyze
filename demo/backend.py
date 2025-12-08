@@ -1117,13 +1117,19 @@ def bot_stream(messages, workspace, session_id="default"):
                     forced_reason = "任务已根据用户的停止指令终止"
                     finished = True
                     break
-                if "</Answer>" in cur_res:
+                current_stream = sanitized_stream
+                if "</Answer>" in current_stream:
                     if non_schema_exec_rounds == 0:
                         premature_answer_rounds += 1
-                        messages.append({"role": "assistant", "content": cur_res})
+                        messages.append(
+                            {"role": "assistant", "content": current_stream}
+                        )
                         warn_msg = "尚未基于真实表执行任何 EDA/可视化。请先按照要求运行 `SELECT *` 等分析，形成 <Execute>/<File> 结果后再给出 <Answer>。"
                         messages.append({"role": "user", "content": warn_msg})
-                        cur_res = cur_res.replace("<Answer>", "<Answer (ignored)>")
+                        current_stream = current_stream.replace(
+                            "<Answer>", "<Answer (ignored)>"
+                        )
+                        sanitized_stream = current_stream
                         premature_answer_detected = True
                         if premature_answer_rounds >= 3:
                             forced_reason = "多次尝试直接输出 <Answer> 而未执行任何真实 SQL/EDA，任务被终止"
