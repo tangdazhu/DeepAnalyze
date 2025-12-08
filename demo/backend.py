@@ -813,6 +813,9 @@ FILE_TAG_CAPTURE_PATTERN = re.compile(r"<File>(.*?)</File>", re.DOTALL)
 FILES_OPEN_PATTERN = re.compile(r"<\s*Files\s*>", re.IGNORECASE)
 FILES_CLOSE_PATTERN = re.compile(r"<\s*/\s*Files\s*>", re.IGNORECASE)
 MODEL_FILE_TAG_PATTERN = re.compile(r"<File>.*?</File>", re.DOTALL)
+ASSISTANT_ECHO_PATTERN = re.compile(
+    r"(?:\bassistant\b[\s]*){2,}(?=(<|#|$))", re.IGNORECASE
+)
 FILE_NAME_PATTERN = re.compile(
     r"([\w\-.]+\.(?:csv|tsv|txt|md|json|png|jpg|jpeg|gif|svg|pdf|xlsx|xls|parquet))",
     re.IGNORECASE,
@@ -864,6 +867,7 @@ def normalize_model_tags(content: str) -> str:
     normalized = HEADING_TAG_PATTERN.sub(lambda m: f"<{m.group(1)}>", normalized)
     normalized = FILES_OPEN_PATTERN.sub("<File>", normalized)
     normalized = FILES_CLOSE_PATTERN.sub("</File>", normalized)
+    normalized = ASSISTANT_ECHO_PATTERN.sub("", normalized)
     return normalized
 
 
