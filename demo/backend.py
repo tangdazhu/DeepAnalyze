@@ -821,6 +821,9 @@ FILE_NAME_PATTERN = re.compile(
     re.IGNORECASE,
 )
 FILENAME_SUFFIX_CLEANER = re.compile(r"\s+\(\d+\)$")
+SQLITE_CONNECT_PATTERN = re.compile(
+    r"sqlite3\.connect\(\s*(?:r)?['\"]([^'\"]+)['\"]\s*\)", re.IGNORECASE
+)
 
 
 def normalize_filename(name: str) -> str:
@@ -1446,7 +1449,7 @@ def bot_stream(messages, workspace, session_id="default"):
                     refund_iteration()
                     continue
 
-                if "import sqlite3" not in effective_code:
+                if "sqlite3.connect" not in effective_code:
                     sqlite_prompt = (
                         "每个 <Code> 脚本都需显式 `import sqlite3` 并建立数据库连接。"
                         " 请将完整脚本补全（含 import / connect / 执行 / close）后再运行。"
@@ -1454,6 +1457,48 @@ def bot_stream(messages, workspace, session_id="default"):
                     messages.append({"role": "user", "content": sqlite_prompt})
                     refund_iteration()
                     continue
+
+                connect_paths = SQLITE_CONNECT_PATTERN.findall(effective_code)
+                if connect_paths:
+                    available_sqlite_files = iter_sqlite_files(workspace_path)
+                    available_resolved = {
+                        p.resolve(): p for p in available_sqlite_files
+                    }
+                    invalid_connects: list[str] = []
+                    for raw_path in connect_paths:
+                        try:
+                            candidate = Path(raw_path)
+                            if not candidate.is_absolute():
+                                candidate = (workspace_path / raw_path).resolve()
+                            else:
+                                candidate = candidate.resolve()
+                        except Exception:
+                            candidate = Path(raw_path)
+                        if candidate.resolve() not in available_resolved:
+                            invalid_connects.append(raw_path)
+                    if invalid_connects:
+                        sample_display = ""
+                        if available_sqlite_files:
+                            sample = available_sqlite_files[0]
+                            try:
+                                sample_rel = sample.resolve().relative_to(
+                                    workspace_path.resolve()
+                                )
+                                sample_display = sample_rel.as_posix()
+                            except Exception:
+                                sample_display = sample.name
+                        path_prompt = (
+                            "检测到 `sqlite3.connect` 指向 workspace 中不存在的文件："
+                            + ", ".join(invalid_connects)
+                            + "。"
+                        )
+                        if sample_display:
+                            path_prompt += f" 请改为连接真实数据库（例如：`{sample_display}`），并确保路径与首轮 sqlite_master 输出一致。"
+                        else:
+                            path_prompt += " 请改为连接 workspace 中实际存在的 sqlite 文件，并确保路径与首轮 sqlite_master 输出一致。"
+                        messages.append({"role": "user", "content": path_prompt})
+                        refund_iteration()
+                        continue
 
                 if "sqlite3.connect" not in effective_code:
                     connect_prompt = (
