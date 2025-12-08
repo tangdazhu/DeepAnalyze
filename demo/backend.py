@@ -132,24 +132,27 @@ ANSWER_MIN_NON_SCHEMA_ROUNDS = 2
 
 
 # Initialize OpenAI client
-client = openai.OpenAI(base_url=API_BASE, api_key="dummy")
+client = openai.OpenAI(
+    base_url=API_BASE, api_key=getattr(api_config, "OPENAI_API_KEY", "dummy")
+)
 
 # Workspace directory
-WORKSPACE_BASE_DIR = "workspace"
-HTTP_SERVER_PORT = 8100
-MAX_PROMPT_CHARS = getattr(api_config, "MAX_PROMPT_CHARS", 16000)
-HTTP_SERVER_BASE = (
-    f"http://localhost:{HTTP_SERVER_PORT}"  # you can replace localhost to your local ip
+WORKSPACE_BASE_DIR = getattr(api_config, "WORKSPACE_BASE_DIR", "workspace")
+HTTP_SERVER_PORT = getattr(api_config, "HTTP_SERVER_PORT", 8100)
+HTTP_SERVER_BASE = getattr(
+    api_config, "HTTP_SERVER_BASE", f"http://localhost:{HTTP_SERVER_PORT}"
 )
+WORKSPACE_ROOT = Path(WORKSPACE_BASE_DIR).resolve()
+# you can replace localhost to your local ip
 
 
 def get_session_workspace(session_id: str) -> str:
     """返回指定 session 的 workspace 路径（workspace/{session_id}/）。"""
     if not session_id:
         session_id = "default"
-    session_dir = os.path.join(WORKSPACE_BASE_DIR, session_id)
+    session_dir = WORKSPACE_ROOT / session_id
     os.makedirs(session_dir, exist_ok=True)
-    return session_dir
+    return str(session_dir)
 
 
 def build_download_url(rel_path: str) -> str:
@@ -158,6 +161,14 @@ def build_download_url(rel_path: str) -> str:
     except Exception:
         encoded = rel_path
     return f"{HTTP_SERVER_BASE}/{encoded}"
+
+
+def workspace_relative_path(path: Path) -> str:
+    """返回文件相对于 workspace 根目录的相对路径，用于静态服务器 URL。"""
+    try:
+        return path.resolve().relative_to(WORKSPACE_ROOT).as_posix()
+    except Exception:
+        return path.name
 
 
 # FastAPI app
@@ -315,14 +326,15 @@ def extract_table_mentions_from_text(
     text: str, known_tables: set[str]
 ) -> tuple[set[str], set[str]]:
     tokens = set(TABLE_TOKEN_PATTERN.findall(text or ""))
-    known = {tok for tok in tokens if tok in known_tables}
-    unknown = {
-        tok
-        for tok in tokens
-        if tok not in known_tables
-        and "_" in tok
-        and tok.lower() not in {"sqlite_master", "sqlite_sequence"}
-    }
+    normalized_known = {tbl.lower() for tbl in known_tables}
+    known: set[str] = set()
+    unknown: set[str] = set()
+    for tok in tokens:
+        tok_lower = tok.lower()
+        if tok_lower in normalized_known:
+            known.add(next(tbl for tbl in known_tables if tbl.lower() == tok_lower))
+        elif tok_lower not in {"sqlite_master", "sqlite_sequence"}:
+            unknown.add(tok)
     return known, unknown
 
 
@@ -1158,7 +1170,7 @@ def bot_stream(messages, workspace, session_id="default"):
 
         known_mentions = set()
         unknown_mentions = set()
-        require_known_reference = schema_confirmed and non_schema_exec_rounds == 0
+        require_known_reference = schema_confirmed
         if known_tables:
             known_mentions, unknown_mentions = extract_table_mentions_from_text(
                 analyze_content, known_tables
@@ -1498,12 +1510,9 @@ def bot_stream(messages, workspace, session_id="default"):
                 file_block_lines = ["<File>"]
                 if artifact_paths:
                     for p in artifact_paths:
-                        try:
-                            rel = p.resolve().relative_to(workspace_path).as_posix()
-                        except Exception:
-                            rel = p.name
-                        url = build_download_url(f"{session_id}/{rel}")
-                        name = p.name
+                        rel = workspace_relative_path(Path(p))
+                        url = build_download_url(rel)
+                        name = Path(p).name
                         file_block_lines.append(f"- [{name}]({url})")
                         if p.suffix.lower() in [
                             ".png",
