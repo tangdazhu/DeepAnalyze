@@ -1093,16 +1093,21 @@ def bot_stream(messages, workspace, session_id="default"):
                 "max_new_tokens": 4096,
             },
         )
-        cur_res = ""
+        raw_res = ""
+        sanitized_stream = ""
         claimed_files_in_round: set[str] = set()
         last_finish_reason = None
         try:
             for chunk in response:
                 if chunk.choices and chunk.choices[0].delta.content is not None:
                     delta = chunk.choices[0].delta.content
-                    cur_res += delta
-                    assistant_reply += delta
-                    yield delta
+                    raw_res += delta
+                    sanitized_full = strip_model_file_blocks(raw_res)
+                    new_segment = sanitized_full[len(sanitized_stream) :]
+                    if new_segment:
+                        assistant_reply += new_segment
+                        yield new_segment
+                        sanitized_stream = sanitized_full
                 if chunk.choices and chunk.choices[0].finish_reason:
                     last_finish_reason = chunk.choices[0].finish_reason
                 if should_stop(session_id):
@@ -1143,7 +1148,7 @@ def bot_stream(messages, workspace, session_id="default"):
             refund_iteration()
             continue
 
-        cur_res = normalize_model_tags(cur_res)
+        cur_res = normalize_model_tags(raw_res)
         claimed_files_in_round = extract_file_claims(cur_res)
         file_claim_warning_sent = False
 
