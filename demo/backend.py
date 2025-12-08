@@ -129,6 +129,7 @@ MODEL_PATH = "qwen2.5-3b-instruct"  # replace to your path to DeepAnalyze-8B
 MAX_ITERATIONS = 12
 ANSWER_MIN_EXEC_ROUNDS = 3
 ANSWER_MIN_NON_SCHEMA_ROUNDS = 2
+MAX_PROMPT_CHARS = getattr(api_config, "MAX_PROMPT_CHARS", 16000)
 
 
 # Initialize OpenAI client
