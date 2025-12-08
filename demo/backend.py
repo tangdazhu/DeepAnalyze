@@ -135,7 +135,11 @@ MAX_PROMPT_CHARS = getattr(api_config, "MAX_PROMPT_CHARS", 16000)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SQLITE_SEEDS = [
     (
-        PROJECT_ROOT / "example" / "analysis_on_student_loan" / "data" / "student_loan.sqlite",
+        PROJECT_ROOT
+        / "example"
+        / "analysis_on_student_loan"
+        / "data"
+        / "student_loan.sqlite",
         "student_loan.sqlite",
     )
 ]
@@ -1007,6 +1011,7 @@ def bot_stream(messages, workspace, session_id="default"):
     original_cwd = os.getcwd()
     workspace_path = Path(get_session_workspace(session_id)).resolve()
     workspace_path.mkdir(parents=True, exist_ok=True)
+    ensure_default_sqlite(workspace_path)
     generated_dir = workspace_path / "generated"
     generated_dir.mkdir(parents=True, exist_ok=True)
     reset_stop_flag(session_id)
@@ -1763,13 +1768,6 @@ def bot_stream(messages, workspace, session_id="default"):
                 new_files = current_files - initial_workspace
                 if new_files:
                     initial_workspace.update(new_files)
-
-        finally:
-            if claimed_files_in_round and not code_executed:
-                warn_block = emit_file_claim_warning("本轮代码未执行或已被退票")
-                if warn_block:
-                    assistant_reply += warn_block
-                    yield warn_block
 
         if should_stop(session_id) and not forced_reason:
             forced_reason = "任务已根据用户的停止指令终止"
