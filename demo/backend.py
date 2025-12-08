@@ -1140,6 +1140,7 @@ def bot_stream(messages, workspace, session_id="default"):
             refund_iteration()
             continue
 
+        cur_res = normalize_model_tags(cur_res)
         claimed_files_in_round = extract_file_claims(cur_res)
         file_claim_warning_sent = False
 
@@ -1160,7 +1161,6 @@ def bot_stream(messages, workspace, session_id="default"):
             )
 
         cur_res = strip_model_file_blocks(cur_res)
-        cur_res = normalize_model_tags(cur_res)
         fixed_res = fix_tags_and_codeblock(cur_res)
         if fixed_res != cur_res:
             extra_text = fixed_res[len(cur_res) :]
