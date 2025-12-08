@@ -854,10 +854,19 @@ def extract_file_claims(content: str) -> set[str]:
 
 
 def strip_model_file_blocks(content: str) -> str:
-    """移除模型原始响应中的 <File> 段，避免未校验链接直接展示给前端。"""
+    """移除模型原始响应中的 <File> 段（包含未闭合的尾部），避免未校验链接直接展示给前端。"""
     if not content:
         return content
-    return MODEL_FILE_TAG_PATTERN.sub("", content)
+    cleaned = MODEL_FILE_TAG_PATTERN.sub("", content)
+    last_open = cleaned.find("<File>")
+    while last_open != -1:
+        last_close = cleaned.find("</File>", last_open)
+        if last_close == -1:
+            cleaned = cleaned[:last_open]
+            break
+        cleaned = cleaned[:last_open] + cleaned[last_close + len("</File>") :]
+        last_open = cleaned.find("<File>")
+    return cleaned
 
 
 def normalize_model_tags(content: str) -> str:
