@@ -1629,15 +1629,6 @@ def bot_stream(messages, workspace, session_id="default"):
                             refund_iteration()
                             continue
 
-                    if "sqlite3.connect" not in effective_code:
-                        connect_prompt = (
-                            "检测到代码缺少 `sqlite3.connect(...)`，而本系统每次执行都会在独立进程运行，"
-                            "不能复用上一轮连接。请在 <Code> 中创建并关闭连接后重新提交。"
-                        )
-                        messages.append({"role": "user", "content": connect_prompt})
-                        refund_iteration()
-                        continue
-
                     uses_plot = "plt." in normalized_code or "sns." in normalized_code
                     if uses_plot and "plt.savefig" not in normalized_code:
                         save_prompt = (
