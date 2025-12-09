@@ -1672,6 +1672,22 @@ def bot_stream(messages, workspace, session_id="default"):
                     )
                     code_executed = True
 
+                    # 将执行输出写入日志文件
+                    try:
+                        log_file = (
+                            generated_dir / f"execute_round_{execute_rounds + 1}.txt"
+                        )
+                        with open(log_file, "w", encoding="utf-8") as f:
+                            f.write(f"=== Execution Round {execute_rounds + 1} ===\n")
+                            f.write(f"Session: {session_id}\n")
+                            f.write(f"Iteration: {iteration}\n\n")
+                            f.write("=== Code ===\n")
+                            f.write(effective_code or code_str)
+                            f.write("\n\n=== Output ===\n")
+                            f.write(exe_output)
+                    except Exception as log_err:
+                        print(f"[Warning] Failed to write execution log: {log_err}")
+
                     is_schema_code = (
                         "sqlite_master" in normalized_code
                         and "pragma" not in normalized_code
