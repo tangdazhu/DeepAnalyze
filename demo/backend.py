@@ -1069,6 +1069,8 @@ def bot_stream(messages, workspace, session_id="default"):
     answer_requested = False
     answer_waiting_rounds = 0
     premature_answer_rounds = 0
+    empty_code_rounds = 0  # 连续无有效代码的轮数
+    MAX_EMPTY_CODE_ROUNDS = 3
     baseline_tables = list_sqlite_tables(workspace_path)
     known_tables = set(baseline_tables)
     initial_tables_locked = bool(known_tables)
@@ -1396,6 +1398,36 @@ def bot_stream(messages, workspace, session_id="default"):
                     )
                     code_str = md_match.group(1).strip() if md_match else code_content
                     effective_code = extract_effective_code(code_str)
+
+                    # 检测连续无有效代码
+                    if not effective_code or not effective_code.strip():
+                        empty_code_rounds += 1
+                        if empty_code_rounds >= MAX_EMPTY_CODE_ROUNDS:
+                            forced_reason = (
+                                f"连续 {MAX_EMPTY_CODE_ROUNDS} 轮未输出有效 <Code>，"
+                                "系统判定模型未遵守提示词约束（每轮必须包含完整可运行脚本），强制终止任务。"
+                                "请检查提示词是否明确要求在 <Code> 中输出完整代码，或重新发起会话。"
+                            )
+                            violation_block = (
+                                f"\n<Answer>\n{forced_reason}\n</Answer>\n"
+                            )
+                            assistant_reply += violation_block
+                            yield violation_block
+                            return
+                        messages.append(
+                            {
+                                "role": "user",
+                                "content": (
+                                    f"你的 <Code> 块为空或无有效内容（已连续 {empty_code_rounds} 轮）。"
+                                    "请在 <Code> 中提供完整的 Python 脚本，包含 import、数据库连接、查询/分析逻辑、"
+                                    "以及 plt.savefig/DataFrame.to_csv 等文件写入语句。参考提示词中的代码模板。"
+                                ),
+                            }
+                        )
+                        refund_iteration()
+                        continue
+                    else:
+                        empty_code_rounds = 0  # 重置计数
 
                     code_signature = "\n".join(
                         line.strip() for line in effective_code.splitlines()
