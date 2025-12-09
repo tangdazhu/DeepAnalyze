@@ -1429,6 +1429,22 @@ def bot_stream(messages, workspace, session_id="default"):
                     else:
                         empty_code_rounds = 0  # 重置计数
 
+                    # 强制检查：代码必须包含 import sqlite3
+                    if "import sqlite3" not in effective_code:
+                        messages.append(
+                            {
+                                "role": "user",
+                                "content": (
+                                    "你的 <Code> 缺少 `import sqlite3`。每个脚本都必须是完整可独立运行的，"
+                                    "请在开头添加所有必要的 import 语句（import sqlite3, import pandas as pd, "
+                                    "import matplotlib.pyplot as plt 等），并定义所有变量（如 DB_PATH）。"
+                                    "参考提示词中的完整代码模板。"
+                                ),
+                            }
+                        )
+                        refund_iteration()
+                        continue
+
                     code_signature = "\n".join(
                         line.strip() for line in effective_code.splitlines()
                     ).strip()
