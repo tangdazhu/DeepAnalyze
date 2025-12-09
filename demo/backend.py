@@ -855,6 +855,7 @@ FILENAME_SUFFIX_CLEANER = re.compile(r"\s+\(\d+\)$")
 SQLITE_CONNECT_PATTERN = re.compile(
     r"sqlite3\.connect\(\s*(?:r)?['\"]([^'\"]+)['\"]\s*\)", re.IGNORECASE
 )
+PROHIBITED_TABLES = {"information_schema", "pg_catalog", "mysql", "sys"}
 
 
 def normalize_filename(name: str) -> str:
@@ -1462,6 +1463,25 @@ def bot_stream(messages, workspace, session_id="default"):
                             if tbl not in known_tables
                             and tbl.lower() not in {"sqlite_master", "sqlite_sequence"}
                         }
+
+                    invalid_lower = {tbl.lower() for tbl in invalid_tables}
+                    forbidden_refs = invalid_lower & PROHIBITED_TABLES
+                    if forbidden_refs:
+                        forbidden_prompt = (
+                            "检测到脚本尝试访问系统保留/不存在的表："
+                            + ", ".join(sorted(forbidden_refs))
+                            + "。请改用 sqlite_master 中真实存在的表（例如："
+                            + ", ".join(sorted(list(known_tables)[:3]))  # may be empty
+                            + "）。"
+                        )
+                        if not known_tables:
+                            forbidden_prompt = forbidden_prompt.replace(
+                                "（例如：）",
+                                "（请参考首轮 sqlite_master 返回的实际表名）",
+                            )
+                        messages.append({"role": "user", "content": forbidden_prompt})
+                        refund_iteration()
+                        continue
 
                     if schema_confirmed and invalid_tables:
                         invalid_msg = (
