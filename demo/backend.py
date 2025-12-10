@@ -1555,16 +1555,24 @@ def bot_stream(messages, workspace, session_id="default"):
                     }
                 )
                 code_match = re.search(r"<Code>(.*?)</Code>", cur_res, re.DOTALL)
+                print(f"[bot_stream] Code match result: {code_match is not None}")
                 if code_match:
                     code_content = code_match.group(1).strip()
+                    print(
+                        f"[bot_stream] Code content extracted, length={len(code_content)}"
+                    )
                     md_match = re.search(
                         r"```(?:python)?(.*?)```", code_content, re.DOTALL
                     )
                     code_str = md_match.group(1).strip() if md_match else code_content
                     effective_code = extract_effective_code(code_str)
+                    print(
+                        f"[bot_stream] Effective code extracted, length={len(effective_code) if effective_code else 0}"
+                    )
 
                     # 检测连续无有效代码
                     if not effective_code or not effective_code.strip():
+                        print(f"[bot_stream] Code rejected: empty effective code")
                         empty_code_rounds += 1
                         if empty_code_rounds >= MAX_EMPTY_CODE_ROUNDS:
                             forced_reason = (
@@ -1600,6 +1608,9 @@ def bot_stream(messages, workspace, session_id="default"):
                     normalized_code = effective_code.lower()
 
                     # 优先检测重复代码，避免无限循环
+                    print(
+                        f"[bot_stream] Code signature check: current={code_signature[:50] if code_signature else 'None'}..., last={last_code_signature[:50] if last_code_signature else 'None'}..."
+                    )
                     if code_signature and code_signature == last_code_signature:
                         print(f"[bot_stream] Code rejected: duplicate code")
                         reminder = (
