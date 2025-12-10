@@ -983,6 +983,11 @@ def run_schema_bootstrap(workspace_path: Path, session_id: str = None) -> str:
     block = build_schema_bootstrap_block(workspace_path)
     if not block:
         return ""
+
+    # 获取数据库绝对路径
+    db_path = find_primary_sqlite(workspace_path)
+    db_name = str(db_path.resolve()) if db_path else ""
+
     code_match = re.search(r"```python(.*?)```", block, re.DOTALL)
     script = code_match.group(1).strip() if code_match else ""
     if not script:
