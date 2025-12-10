@@ -1196,14 +1196,14 @@ def bot_stream(messages, workspace, session_id="default"):
                         finished = True
                         break
 
+                    # 流式阶段只做标签归一化，不过滤 <File> 标签（避免截断未闭合的标签）
                     normalized_stream = normalize_model_tags(raw_res)
-                    sanitized_full = strip_model_file_blocks(normalized_stream)
-                    new_segment = sanitized_full[len(sanitized_stream) :]
+                    new_segment = normalized_stream[len(sanitized_stream) :]
 
-                    # 调试日志：检查流式输出是否被过滤
+                    # 调试日志：检查流式输出
                     if len(raw_res) > 0 and len(new_segment) == 0 and len(delta) > 0:
                         print(
-                            f"[DEBUG] Stream filtered: delta_len={len(delta)}, raw_len={len(raw_res)}, sanitized_len={len(sanitized_full)}, prev_sanitized_len={len(sanitized_stream)}"
+                            f"[DEBUG] Stream no new segment: delta_len={len(delta)}, raw_len={len(raw_res)}, normalized_len={len(normalized_stream)}, prev_len={len(sanitized_stream)}"
                         )
 
                     if new_segment:
@@ -1233,7 +1233,7 @@ def bot_stream(messages, workspace, session_id="default"):
 
                         assistant_reply += new_segment
                         yield new_segment
-                        sanitized_stream = sanitized_full
+                        sanitized_stream = normalized_stream
                 if chunk.choices and chunk.choices[0].finish_reason:
                     last_finish_reason = chunk.choices[0].finish_reason
                 if should_stop(session_id):
