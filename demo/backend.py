@@ -948,11 +948,8 @@ def build_schema_bootstrap_block(workspace_path: Path) -> str:
     db_path = find_primary_sqlite(workspace_path)
     if not db_path:
         return ""
-    try:
-        rel_path = db_path.resolve().relative_to(workspace_path.resolve())
-        db_name = rel_path.as_posix()
-    except Exception:
-        db_name = db_path.name
+    # 使用绝对路径，确保代码执行时能找到数据库文件
+    db_name = str(db_path.resolve())
     analyze = (
         "<Analyze>\n"
         "系统检测到模型尚未正确进入首轮分析，已自动补充：当前目标=列出所有表结构，"
@@ -1724,22 +1721,17 @@ def bot_stream(messages, workspace, session_id="default"):
                             sample_display = ""
                             if available_sqlite_files:
                                 sample = available_sqlite_files[0]
-                                try:
-                                    sample_rel = sample.resolve().relative_to(
-                                        workspace_path.resolve()
-                                    )
-                                    sample_display = sample_rel.as_posix()
-                                except Exception:
-                                    sample_display = sample.name
+                                # 使用绝对路径，确保代码执行时能找到文件
+                                sample_display = str(sample.resolve())
                             path_prompt = (
                                 "检测到 `sqlite3.connect` 指向 workspace 中不存在的文件："
                                 + ", ".join(invalid_connects)
                                 + "。"
                             )
                             if sample_display:
-                                path_prompt += f" 请改为连接真实数据库（例如：`{sample_display}`），并确保路径与首轮 sqlite_master 输出一致。"
+                                path_prompt += f" 请改为连接真实数据库的绝对路径（例如：`sqlite3.connect(r'{sample_display}', timeout=30)`），并确保路径与首轮 sqlite_master 输出一致。"
                             else:
-                                path_prompt += " 请改为连接 workspace 中实际存在的 sqlite 文件，并确保路径与首轮 sqlite_master 输出一致。"
+                                path_prompt += " 请改为连接 workspace 中实际存在的 sqlite 文件的绝对路径，并确保路径与首轮 sqlite_master 输出一致。"
                             messages.append({"role": "user", "content": path_prompt})
                             refund_iteration()
                             continue
