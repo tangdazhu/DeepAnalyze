@@ -954,6 +954,9 @@ def build_schema_bootstrap_block(workspace_path: Path) -> str:
         return ""
     # 使用绝对路径，确保代码执行时能找到数据库文件
     db_name = str(db_path.resolve())
+    print(
+        f"[build_schema_bootstrap_block] workspace_path={workspace_path}, db_name={db_name}"
+    )
     analyze = (
         "<Analyze>\n"
         "系统检测到模型尚未正确进入首轮分析，已自动补充：当前目标=列出所有表结构，"
