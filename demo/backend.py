@@ -1628,6 +1628,7 @@ def bot_stream(messages, workspace, session_id="default"):
                         continue
 
                     if DDL_TABLE_PATTERN.search(normalized_code):
+                        print(f"[bot_stream] Code rejected: DDL operation detected")
                         ddl_prompt = (
                             "检测到脚本尝试执行 `CREATE/DROP/ALTER TABLE` 等操作。"
                             " 出于数据安全考虑，本系统禁止修改数据库结构，请改为针对已有表进行查询或分析。"
@@ -1776,6 +1777,9 @@ def bot_stream(messages, workspace, session_id="default"):
                             if candidate.resolve() not in available_resolved:
                                 invalid_connects.append(raw_path)
                         if invalid_connects:
+                            print(
+                                f"[bot_stream] Code rejected: invalid database path(s): {invalid_connects}"
+                            )
                             sample_display = ""
                             if available_sqlite_files:
                                 sample = available_sqlite_files[0]
@@ -1805,6 +1809,7 @@ def bot_stream(messages, workspace, session_id="default"):
 
                     uses_plot = "plt." in normalized_code or "sns." in normalized_code
                     if uses_plot and "plt.savefig" not in normalized_code:
+                        print(f"[bot_stream] Code rejected: missing plt.savefig")
                         save_prompt = (
                             "绘图脚本必须调用 `plt.savefig('generated/xxx.png')` 并写入实际文件，再在 <File> 中引用。"
                             " 请补充 `plt.savefig` 后重新提交。"
@@ -1826,6 +1831,9 @@ def bot_stream(messages, workspace, session_id="default"):
                             or ".savefig(" in normalized_code
                         )
                         if not has_csv_output and not has_png_output:
+                            print(
+                                f"[bot_stream] Code rejected: missing file output (CSV/PNG)"
+                            )
                             file_output_prompt = (
                                 "根据提示词要求，第 2 轮起每个 <Code> 必须同时生成 CSV 和 PNG 文件。"
                                 " 请在代码中添加：\n"
