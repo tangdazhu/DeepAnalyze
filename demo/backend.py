@@ -1431,6 +1431,7 @@ def bot_stream(messages, workspace, session_id="default"):
 
                     # 强制检查：代码必须包含 import sqlite3
                     if "import sqlite3" not in effective_code:
+                        print(f"[bot_stream] Code rejected: missing 'import sqlite3'")
                         messages.append(
                             {
                                 "role": "user",
@@ -1649,6 +1650,9 @@ def bot_stream(messages, workspace, session_id="default"):
                     print(
                         f"[bot_stream] session={session_id} iteration={iteration} executing code, length={len(code_str)}"
                     )
+                    print(
+                        f"[bot_stream] Code preview: {(effective_code or code_str)[:200]}..."
+                    )
                     try:
                         before_state = {
                             p.resolve(): (p.stat().st_size, p.stat().st_mtime_ns)
@@ -1722,18 +1726,28 @@ def bot_stream(messages, workspace, session_id="default"):
 
                     artifact_paths = []
                     generated_dir_str = str(generated_dir.resolve())
+                    print(f"[bot_stream] Added files: {[str(p) for p in added_paths]}")
+                    print(
+                        f"[bot_stream] Modified files: {[str(p) for p in modified_paths]}"
+                    )
                     for p in added_paths:
                         try:
                             target_path = generated_dir / p.name
                             dest_path = uniquify_path(target_path)
                             if not str(p).startswith(generated_dir_str):
+                                print(f"[bot_stream] Copying {p} -> {dest_path}")
                                 shutil.copy2(p, dest_path)
                             else:
                                 if dest_path != p:
+                                    print(
+                                        f"[bot_stream] Copying (already in generated) {p} -> {dest_path}"
+                                    )
                                     shutil.copy2(p, dest_path)
+                                else:
+                                    print(f"[bot_stream] File already in place: {p}")
                             artifact_paths.append(dest_path.resolve())
                         except Exception as e:
-                            print(f"Error moving file {p}: {e}")
+                            print(f"[bot_stream] Error moving file {p}: {e}")
 
                     for p in modified_paths:
                         try:
