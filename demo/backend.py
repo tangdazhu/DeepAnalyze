@@ -844,9 +844,7 @@ FILE_TAG_CAPTURE_PATTERN = re.compile(r"<File>(.*?)</File>", re.DOTALL)
 FILES_OPEN_PATTERN = re.compile(r"<\s*Files\s*>", re.IGNORECASE)
 FILES_CLOSE_PATTERN = re.compile(r"<\s*/\s*Files\s*>", re.IGNORECASE)
 MODEL_FILE_TAG_PATTERN = re.compile(r"<File>.*?</File>", re.DOTALL)
-ASSISTANT_ECHO_PATTERN = re.compile(
-    r"(?:\bassistant\b[\s]*){2,}(?=(<|#|$))", re.IGNORECASE
-)
+ASSISTANT_ECHO_PATTERN = re.compile(r"(?:\bassistant\b[\s\n]*){2,}", re.IGNORECASE)
 SEPARATOR_PATTERN = re.compile(r"(?:^|\n)([-=_*]{2,}\s*\n){3,}", re.MULTILINE)
 FILE_NAME_PATTERN = re.compile(
     r"([\w\-.]+\.(?:csv|tsv|txt|md|json|png|jpg|jpeg|gif|svg|pdf|xlsx|xls|parquet))",
@@ -1010,8 +1008,15 @@ def run_schema_bootstrap(workspace_path: Path, session_id: str = None) -> str:
             print(f"[Warning] Failed to write bootstrap log: {log_err}")
 
     exe_block = f"\n<Execute>\n```\n{output}\n```\n</Execute>\n"
+
+    # 明确告知模型数据库的绝对路径
+    db_path_reminder = (
+        f'\n**重要提示**：后续所有代码必须使用数据库的绝对路径：`r"{db_name}"`\n'
+        "请在第 2 轮起的每个 <Code> 中使用此路径，避免相对路径导致的执行失败。\n"
+    )
+
     file_block = "\n<File>\n暂无文件\n</File>\n"
-    return f"{block}{exe_block}{file_block}"
+    return f"{block}{exe_block}{db_path_reminder}{file_block}"
 
 
 def extract_effective_code(code_str: str) -> str:
@@ -1197,11 +1202,7 @@ def bot_stream(messages, workspace, session_id="default"):
                     normalized_stream = normalize_model_tags(raw_res)
                     new_segment = normalized_stream[len(sanitized_stream) :]
 
-                    # 调试日志：检查流式输出
-                    if len(raw_res) > 0 and len(new_segment) == 0 and len(delta) > 0:
-                        print(
-                            f"[DEBUG] Stream no new segment: delta_len={len(delta)}, raw_len={len(raw_res)}, normalized_len={len(normalized_stream)}, prev_len={len(sanitized_stream)}"
-                        )
+                    # 流式输出正常，无需调试日志
 
                     if new_segment:
                         # 检测重复内容（最近 500 字符）
