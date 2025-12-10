@@ -1304,6 +1304,12 @@ def bot_stream(messages, workspace, session_id="default"):
             claimed_files_in_round = extract_file_claims(cur_res)
 
             cur_res = strip_model_file_blocks(cur_res)
+
+            # 调试日志：记录处理后的内容
+            print(
+                f"[bot_stream] After normalization, cur_res length={len(cur_res)}, has_<Code>={'<Code>' in cur_res}, has_</Code>={'</Code>' in cur_res}"
+            )
+
             fixed_res = fix_tags_and_codeblock(cur_res)
             if fixed_res != cur_res:
                 extra_text = fixed_res[len(cur_res) :]
@@ -1411,6 +1417,12 @@ def bot_stream(messages, workspace, session_id="default"):
                 break
 
             has_code_block = "<Code>" in cur_res and "</Code>" in cur_res
+
+            # 调试日志：检查 Code 标签检测
+            if not has_code_block:
+                print(
+                    f"[bot_stream] No <Code> block detected. cur_res preview: {cur_res[:200]}"
+                )
 
             if not has_code_block:
                 messages.append({"role": "assistant", "content": cur_res})
@@ -1747,6 +1759,27 @@ def bot_stream(messages, workspace, session_id="default"):
                         refund_iteration()
                         continue
 
+                    # 强制检查：第2轮起必须包含文件写入操作
+                    if non_schema_exec_rounds > 0:  # 跳过首轮 schema 查询
+                        has_csv_output = ".to_csv(" in normalized_code
+                        has_png_output = (
+                            "plt.savefig(" in normalized_code
+                            or ".savefig(" in normalized_code
+                        )
+                        if not has_csv_output and not has_png_output:
+                            file_output_prompt = (
+                                "根据提示词要求，第 2 轮起每个 <Code> 必须同时生成 CSV 和 PNG 文件。"
+                                " 请在代码中添加：\n"
+                                "1. `summary.to_csv(OUTPUT_DIR / '<表名>_summary.csv', index=False, encoding='utf-8')`\n"
+                                "2. `plt.savefig(OUTPUT_DIR / '<表名>_<字段名>_dist.png', dpi=120)` 和 `plt.close()`\n"
+                                "确保每轮都有真实产物写入 `generated/` 目录。"
+                            )
+                            messages.append(
+                                {"role": "user", "content": file_output_prompt}
+                            )
+                            refund_iteration()
+                            continue
+
                     last_code_signature = code_signature
 
                     print(
@@ -1782,6 +1815,7 @@ def bot_stream(messages, workspace, session_id="default"):
                             f.write(effective_code or code_str)
                             f.write("\n\n=== Output ===\n")
                             f.write(exe_output)
+                        print(f"[bot_stream] Wrote execution log to {log_file}")
                     except Exception as log_err:
                         print(f"[Warning] Failed to write execution log: {log_err}")
 
