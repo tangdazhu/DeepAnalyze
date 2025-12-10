@@ -1009,10 +1009,22 @@ def run_schema_bootstrap(workspace_path: Path, session_id: str = None) -> str:
 
     exe_block = f"\n<Execute>\n```\n{output}\n```\n</Execute>\n"
 
-    # 明确告知模型数据库的绝对路径
+    # 明确告知模型数据库的绝对路径，并提供完整的代码模板
     db_path_reminder = (
-        f'\n**重要提示**：后续所有代码必须使用数据库的绝对路径：`r"{db_name}"`\n'
-        "请在第 2 轮起的每个 <Code> 中使用此路径，避免相对路径导致的执行失败。\n"
+        f'\n**【数据库路径】**：`r"{db_name}"`\n\n'
+        "**【重要】后续每轮代码必须使用上述绝对路径**，示例：\n"
+        "```python\n"
+        "import sqlite3\n"
+        "import pandas as pd\n"
+        "from pathlib import Path\n\n"
+        f'DB_PATH = r"{db_name}"\n'
+        'OUTPUT_DIR = Path("generated")\n'
+        "OUTPUT_DIR.mkdir(parents=True, exist_ok=True)\n\n"
+        "with sqlite3.connect(DB_PATH, timeout=30) as conn:\n"
+        '    conn.execute("PRAGMA busy_timeout = 30000;")\n'
+        '    df = pd.read_sql_query("SELECT * FROM <表名> LIMIT 1000", conn)\n'
+        "```\n"
+        "**禁止使用相对路径**（如 `student_loan.sqlite`），否则执行将失败。\n"
     )
 
     file_block = "\n<File>\n暂无文件\n</File>\n"
@@ -1708,12 +1720,12 @@ def bot_stream(messages, workspace, session_id="default"):
                         }
                         invalid_connects: list[str] = []
                         for raw_path in connect_paths:
+                            # 强制拒绝相对路径
+                            if not Path(raw_path).is_absolute():
+                                invalid_connects.append(raw_path)
+                                continue
                             try:
-                                candidate = Path(raw_path)
-                                if not candidate.is_absolute():
-                                    candidate = (workspace_path / raw_path).resolve()
-                                else:
-                                    candidate = candidate.resolve()
+                                candidate = Path(raw_path).resolve()
                             except Exception:
                                 candidate = Path(raw_path)
                             if candidate.resolve() not in available_resolved:
@@ -1725,14 +1737,23 @@ def bot_stream(messages, workspace, session_id="default"):
                                 # 使用绝对路径，确保代码执行时能找到文件
                                 sample_display = str(sample.resolve())
                             path_prompt = (
-                                "检测到 `sqlite3.connect` 指向 workspace 中不存在的文件："
-                                + ", ".join(invalid_connects)
-                                + "。"
+                                "❌ 错误：检测到 `sqlite3.connect` 使用了相对路径或不存在的文件："
+                                + ", ".join(f"`{p}`" for p in invalid_connects)
+                                + "。\n\n"
                             )
                             if sample_display:
-                                path_prompt += f" 请改为连接真实数据库的绝对路径（例如：`sqlite3.connect(r'{sample_display}', timeout=30)`），并确保路径与首轮 sqlite_master 输出一致。"
+                                path_prompt += (
+                                    f"✅ **必须使用绝对路径**：`DB_PATH = r'{sample_display}'`\n\n"
+                                    "请将代码中的 `sqlite3.connect(...)` 改为：\n"
+                                    f"```python\nDB_PATH = r'{sample_display}'\n"
+                                    "with sqlite3.connect(DB_PATH, timeout=30) as conn:\n"
+                                    '    conn.execute("PRAGMA busy_timeout = 30000;")\n'
+                                    "    # 你的查询代码\n"
+                                    "```\n"
+                                    "**禁止使用相对路径**，否则代码执行时无法找到数据库文件。"
+                                )
                             else:
-                                path_prompt += " 请改为连接 workspace 中实际存在的 sqlite 文件的绝对路径，并确保路径与首轮 sqlite_master 输出一致。"
+                                path_prompt += "请使用 workspace 中实际存在的 sqlite 文件的绝对路径。"
                             messages.append({"role": "user", "content": path_prompt})
                             refund_iteration()
                             continue
