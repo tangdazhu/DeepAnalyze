@@ -1193,6 +1193,13 @@ def bot_stream(messages, workspace, session_id="default"):
                     normalized_stream = normalize_model_tags(raw_res)
                     sanitized_full = strip_model_file_blocks(normalized_stream)
                     new_segment = sanitized_full[len(sanitized_stream) :]
+
+                    # 调试日志：检查流式输出是否被过滤
+                    if len(raw_res) > 0 and len(new_segment) == 0 and len(delta) > 0:
+                        print(
+                            f"[DEBUG] Stream filtered: delta_len={len(delta)}, raw_len={len(raw_res)}, sanitized_len={len(sanitized_full)}, prev_sanitized_len={len(sanitized_stream)}"
+                        )
+
                     if new_segment:
                         # 检测重复内容（最近 500 字符）
                         repetition_check_window += new_segment
