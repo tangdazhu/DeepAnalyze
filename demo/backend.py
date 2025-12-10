@@ -847,6 +847,7 @@ MODEL_FILE_TAG_PATTERN = re.compile(r"<File>.*?</File>", re.DOTALL)
 ASSISTANT_ECHO_PATTERN = re.compile(
     r"(?:\bassistant\b[\s]*){2,}(?=(<|#|$))", re.IGNORECASE
 )
+SEPARATOR_PATTERN = re.compile(r"(?:^|\n)([-=_*]{2,}\s*\n){3,}", re.MULTILINE)
 FILE_NAME_PATTERN = re.compile(
     r"([\w\-.]+\.(?:csv|tsv|txt|md|json|png|jpg|jpeg|gif|svg|pdf|xlsx|xls|parquet))",
     re.IGNORECASE,
@@ -902,7 +903,7 @@ def strip_model_file_blocks(content: str) -> str:
 
 
 def normalize_model_tags(content: str) -> str:
-    """将常见的 emoji 标签转换为标准 <Tag> 形式。"""
+    """将常见的 emoji 标签转换为标准 <Tag> 形式，并移除重复的分隔线和 assistant 回显。"""
     if not content:
         return content
     normalized = content
@@ -912,6 +913,8 @@ def normalize_model_tags(content: str) -> str:
     normalized = FILES_OPEN_PATTERN.sub("<File>", normalized)
     normalized = FILES_CLOSE_PATTERN.sub("</File>", normalized)
     normalized = ASSISTANT_ECHO_PATTERN.sub("", normalized)
+    # 移除连续 3 次以上的分隔线，保留最多 2 次
+    normalized = SEPARATOR_PATTERN.sub(lambda m: m.group(1) * 2, normalized)
     return normalized
 
 
@@ -1142,15 +1145,54 @@ def bot_stream(messages, workspace, session_id="default"):
         claimed_files_in_round: set[str] = set()
         last_finish_reason = None
         code_executed = False
+        MAX_STREAM_LENGTH = 50000  # 最大流式输出长度
+        repetition_check_window = ""  # 用于检测重复内容
         try:
             for chunk in response:
                 if chunk.choices and chunk.choices[0].delta.content is not None:
                     delta = chunk.choices[0].delta.content
                     raw_res += delta
+
+                    # 检测流式输出长度是否超限
+                    if len(raw_res) > MAX_STREAM_LENGTH:
+                        print(
+                            f"[bot_stream] Stream length exceeded {MAX_STREAM_LENGTH}, forcing stop"
+                        )
+                        forced_reason = f"模型输出超过 {MAX_STREAM_LENGTH} 字符，疑似陷入重复循环，已强制终止。请检查提示词或重新发起会话。"
+                        error_block = f"\n<Answer>\n{forced_reason}\n</Answer>\n"
+                        assistant_reply += error_block
+                        yield error_block
+                        finished = True
+                        break
+
                     normalized_stream = normalize_model_tags(raw_res)
                     sanitized_full = strip_model_file_blocks(normalized_stream)
                     new_segment = sanitized_full[len(sanitized_stream) :]
                     if new_segment:
+                        # 检测重复内容（最近 500 字符）
+                        repetition_check_window += new_segment
+                        if len(repetition_check_window) > 500:
+                            repetition_check_window = repetition_check_window[-500:]
+                        # 如果最近 500 字符中有超过 80% 是相同的字符（如 --），则判定为重复
+                        if len(repetition_check_window) >= 100:
+                            char_counts = {}
+                            for char in repetition_check_window:
+                                if char in ("-", "=", "_", "*", "\n", " "):
+                                    char_counts[char] = char_counts.get(char, 0) + 1
+                            max_count = max(char_counts.values()) if char_counts else 0
+                            if max_count > len(repetition_check_window) * 0.8:
+                                print(
+                                    f"[bot_stream] Detected repetitive output (char '{max(char_counts, key=char_counts.get)}' appears {max_count} times in {len(repetition_check_window)} chars)"
+                                )
+                                forced_reason = "检测到模型输出重复内容（如连续分隔线），已强制终止。请检查提示词或重新发起会话。"
+                                error_block = (
+                                    f"\n<Answer>\n{forced_reason}\n</Answer>\n"
+                                )
+                                assistant_reply += error_block
+                                yield error_block
+                                finished = True
+                                break
+
                         assistant_reply += new_segment
                         yield new_segment
                         sanitized_stream = sanitized_full
