@@ -1011,20 +1011,38 @@ def run_schema_bootstrap(workspace_path: Path, session_id: str = None) -> str:
 
     # 明确告知模型数据库的绝对路径，并提供完整的代码模板
     db_path_reminder = (
-        f'\n**【数据库路径】**：`r"{db_name}"`\n\n'
-        "**【重要】后续每轮代码必须使用上述绝对路径**，示例：\n"
+        f"\n{'='*80}\n"
+        f"**【数据库绝对路径】请在后续所有代码中使用以下路径**：\n\n"
+        f"```python\n"
+        f'DB_PATH = r"{db_name}"\n'
+        f"```\n\n"
+        f"{'='*80}\n\n"
+        "**【代码模板】第 2 轮起必须按以下结构编写**：\n"
         "```python\n"
         "import sqlite3\n"
         "import pandas as pd\n"
+        "import matplotlib.pyplot as plt\n"
+        "import seaborn as sns\n"
         "from pathlib import Path\n\n"
+        f"# 复制上方的数据库路径\n"
         f'DB_PATH = r"{db_name}"\n'
         'OUTPUT_DIR = Path("generated")\n'
         "OUTPUT_DIR.mkdir(parents=True, exist_ok=True)\n\n"
         "with sqlite3.connect(DB_PATH, timeout=30) as conn:\n"
         '    conn.execute("PRAGMA busy_timeout = 30000;")\n'
-        '    df = pd.read_sql_query("SELECT * FROM <表名> LIMIT 1000", conn)\n'
-        "```\n"
-        "**禁止使用相对路径**（如 `student_loan.sqlite`），否则执行将失败。\n"
+        '    df = pd.read_sql_query("SELECT * FROM <表名> LIMIT 1000", conn)\n\n'
+        "# 保存 CSV\n"
+        "summary = df.describe(include='all').transpose().reset_index()\n"
+        "summary.to_csv(OUTPUT_DIR / '<表名>_summary.csv', index=False, encoding='utf-8')\n\n"
+        "# 保存 PNG\n"
+        "plt.figure(figsize=(6, 4))\n"
+        "sns.countplot(x='<字段名>', data=df)\n"
+        "plt.title('<表名> <字段名> distribution')\n"
+        "plt.tight_layout()\n"
+        "plt.savefig(OUTPUT_DIR / '<表名>_<字段名>_dist.png', dpi=120)\n"
+        "plt.close()\n"
+        "```\n\n"
+        f"⚠️ **严禁使用相对路径或示例路径**，必须使用上方标注的真实绝对路径。\n"
     )
 
     file_block = "\n<File>\n暂无文件\n</File>\n"
