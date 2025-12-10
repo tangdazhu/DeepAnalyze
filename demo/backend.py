@@ -164,6 +164,7 @@ HTTP_SERVER_BASE = getattr(
     api_config, "HTTP_SERVER_BASE", f"http://localhost:{HTTP_SERVER_PORT}"
 )
 WORKSPACE_ROOT = Path(WORKSPACE_BASE_DIR).resolve()
+print(f"[启动] WORKSPACE_ROOT = {WORKSPACE_ROOT}")
 # you can replace localhost to your local ip
 
 
