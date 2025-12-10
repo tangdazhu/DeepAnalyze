@@ -1187,6 +1187,19 @@ def bot_stream(messages, workspace, session_id="default"):
         ]
         return lead + trimmed
 
+    # 【强制首轮 bootstrap】在第一轮迭代前，无论如何都先执行 schema bootstrap
+    if not schema_bootstrap_used:
+        print(f"[bot_stream] Forcing schema bootstrap for session={session_id}")
+        auto_block = run_schema_bootstrap(workspace_path, session_id)
+        if auto_block:
+            schema_bootstrap_used = True
+            schema_confirmed = True
+            # 将 bootstrap 结果注入到消息中，作为 assistant 的首轮输出
+            messages.append({"role": "assistant", "content": auto_block})
+            assistant_reply = auto_block
+            yield auto_block
+            print(f"[bot_stream] Schema bootstrap completed, injected into messages")
+
     while (
         not finished
         and iteration < MAX_ITERATIONS
