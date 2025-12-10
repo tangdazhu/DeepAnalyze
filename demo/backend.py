@@ -983,7 +983,7 @@ def build_schema_bootstrap_block(workspace_path: Path) -> str:
     return analyze + "\n" + code
 
 
-def run_schema_bootstrap(workspace_path: Path) -> str:
+def run_schema_bootstrap(workspace_path: Path, session_id: str = None) -> str:
     """执行首轮 schema 查询并返回完整 <Analyze>/<Code>/<Execute> 块。"""
     block = build_schema_bootstrap_block(workspace_path)
     if not block:
@@ -993,6 +993,25 @@ def run_schema_bootstrap(workspace_path: Path) -> str:
     if not script:
         return block
     output = execute_code_safe(script, str(workspace_path))
+
+    # 写入执行日志到 generated 目录
+    if session_id:
+        generated_dir = workspace_path / "generated"
+        generated_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            log_file = generated_dir / "execute_round_0_bootstrap.txt"
+            with open(log_file, "w", encoding="utf-8") as f:
+                f.write("=== Schema Bootstrap Execution ===\n")
+                f.write(f"Session: {session_id}\n")
+                f.write(f"Workspace: {workspace_path}\n\n")
+                f.write("=== Code ===\n")
+                f.write(script)
+                f.write("\n\n=== Output ===\n")
+                f.write(output)
+            print(f"[run_schema_bootstrap] Wrote bootstrap log to {log_file}")
+        except Exception as log_err:
+            print(f"[Warning] Failed to write bootstrap log: {log_err}")
+
     exe_block = f"\n<Execute>\n```\n{output}\n```\n</Execute>\n"
     file_block = "\n<File>\n暂无文件\n</File>\n"
     return f"{block}{exe_block}{file_block}"
@@ -1293,7 +1312,7 @@ def bot_stream(messages, workspace, session_id="default"):
             if not analyze_content:
                 messages.append({"role": "assistant", "content": cur_res})
                 if not schema_confirmed and not schema_bootstrap_used:
-                    auto_block = run_schema_bootstrap(workspace_path)
+                    auto_block = run_schema_bootstrap(workspace_path, session_id)
                     if auto_block:
                         schema_bootstrap_used = True
                         schema_confirmed = True
