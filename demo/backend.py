@@ -1078,6 +1078,8 @@ def bot_stream(messages, workspace, session_id="default"):
     premature_answer_rounds = 0
     empty_code_rounds = 0  # 连续无有效代码的轮数
     MAX_EMPTY_CODE_ROUNDS = 3
+    missing_code_rounds = 0  # 连续缺少 <Code> 标签的轮数
+    MAX_MISSING_CODE_ROUNDS = 3
     baseline_tables = list_sqlite_tables(workspace_path)
     known_tables = set(baseline_tables)
     initial_tables_locked = bool(known_tables)
@@ -1393,9 +1395,23 @@ def bot_stream(messages, workspace, session_id="default"):
                         yield violation_block
                         return
                 else:
+                    missing_code_rounds += 1
+                    print(
+                        f"[bot_stream] Code block missing (round {missing_code_rounds}/{MAX_MISSING_CODE_ROUNDS})"
+                    )
+                    if missing_code_rounds >= MAX_MISSING_CODE_ROUNDS:
+                        forced_reason = (
+                            f"连续 {MAX_MISSING_CODE_ROUNDS} 轮未输出 <Code> 标签，"
+                            "系统判定模型未遵守提示词约束（每轮必须包含 <Analyze> + <Code>），强制终止任务。"
+                            "请检查提示词是否明确要求输出 <Code>，或重新发起会话。"
+                        )
+                        violation_block = f"\n<Answer>\n{forced_reason}\n</Answer>\n"
+                        assistant_reply += violation_block
+                        yield violation_block
+                        return
                     code_prompt = (
-                        "你的输出缺少 <Code> 段。请在 <Analyze> 后立刻提供完整的 Python 代码（含 import/连接/EDA/plt 保存/conn.close()），"
-                        "以便系统执行。"
+                        f"你的输出缺少 <Code> 段（已连续 {missing_code_rounds} 轮）。请在 <Analyze> 后立刻提供完整的 Python 代码（含 import/连接/EDA/plt 保存/conn.close()），"
+                        "以便系统执行。参考提示词中的代码模板，必须输出 <Code>...</Code> 标签。"
                     )
                     messages.append({"role": "user", "content": code_prompt})
                 refund_iteration()
@@ -1417,6 +1433,9 @@ def bot_stream(messages, workspace, session_id="default"):
                     )
                     messages.append({"role": "user", "content": correction_prompt})
                     continue
+
+            # 重置缺少 <Code> 的计数器
+            missing_code_rounds = 0
 
             if "</Code>" in cur_res and not finished:
                 if answer_requested:
