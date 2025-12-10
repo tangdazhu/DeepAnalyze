@@ -1358,6 +1358,10 @@ def bot_stream(messages, workspace, session_id="default"):
             cur_res = normalize_model_tags(raw_res)
             claimed_files_in_round = extract_file_claims(cur_res)
 
+            print(
+                f"[bot_stream] Before strip_model_file_blocks: raw_res length={len(raw_res)}, cur_res length={len(cur_res)}, has_<File>={'<File>' in cur_res}, has_</File>={'</File>' in cur_res}"
+            )
+
             cur_res = strip_model_file_blocks(cur_res)
 
             # 调试日志：记录处理后的内容
