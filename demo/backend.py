@@ -153,7 +153,12 @@ client = openai.OpenAI(
 )
 
 # Workspace directory
+# 确保 workspace 目录相对于 backend.py 所在目录解析
+_BACKEND_DIR = Path(__file__).parent.resolve()
 WORKSPACE_BASE_DIR = getattr(api_config, "WORKSPACE_BASE_DIR", "workspace")
+# 如果是相对路径，则相对于 backend.py 所在目录
+if not Path(WORKSPACE_BASE_DIR).is_absolute():
+    WORKSPACE_BASE_DIR = str(_BACKEND_DIR / WORKSPACE_BASE_DIR)
 HTTP_SERVER_PORT = getattr(api_config, "HTTP_SERVER_PORT", 8100)
 HTTP_SERVER_BASE = getattr(
     api_config, "HTTP_SERVER_BASE", f"http://localhost:{HTTP_SERVER_PORT}"
