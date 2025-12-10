@@ -1173,10 +1173,16 @@ def bot_stream(messages, workspace, session_id="default"):
         MAX_STREAM_LENGTH = 50000  # 最大流式输出长度
         repetition_check_window = ""  # 用于检测重复内容
         try:
+            chunk_index = 0
             for chunk in response:
                 if chunk.choices and chunk.choices[0].delta.content is not None:
                     delta = chunk.choices[0].delta.content
                     raw_res += delta
+                    chunk_index += 1
+                    if chunk_index <= 5:
+                        print(
+                            f"[bot_stream] Received chunk #{chunk_index}, delta_len={len(delta)}, raw_total={len(raw_res)}"
+                        )
 
                     # 检测流式输出长度是否超限
                     if len(raw_res) > MAX_STREAM_LENGTH:
@@ -2002,8 +2008,13 @@ async def chat(body: dict = Body(...)):
     session_id = body.get("session_id", "default")
 
     def generate():
+        chunk_count = 0
         for delta_content in bot_stream(messages, workspace, session_id):
-            # print(delta_content)
+            chunk_count += 1
+            if chunk_count <= 3 or chunk_count % 10 == 0:
+                print(
+                    f"[chat] Yielding chunk #{chunk_count}, len={len(delta_content)}, preview={delta_content[:100] if delta_content else 'EMPTY'}"
+                )
             chunk = {
                 "id": "chatcmpl-stream",
                 "object": "chat.completion.chunk",  # 标识为流式块
