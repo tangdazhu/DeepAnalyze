@@ -1652,6 +1652,9 @@ def bot_stream(messages, workspace, session_id="default"):
                         and "sqlite_master" in normalized_code
                         and "pragma" not in normalized_code
                     ):
+                        print(
+                            f"[bot_stream] Code rejected: repeated sqlite_master query after schema confirmed"
+                        )
                         schema_only_repeat += 1
                         table_examples = sorted(known_tables)
                         example_text = (
@@ -1714,6 +1717,9 @@ def bot_stream(messages, workspace, session_id="default"):
                         continue
 
                     if schema_confirmed and invalid_tables:
+                        print(
+                            f"[bot_stream] Code rejected: invalid tables {invalid_tables}"
+                        )
                         invalid_msg = (
                             "脚本中引用了当前 sqlite_master 中不存在的表："
                             + ", ".join(sorted(invalid_tables))
@@ -1726,6 +1732,9 @@ def bot_stream(messages, workspace, session_id="default"):
                     post_execute_prompts: list[str] = []
 
                     if not schema_confirmed and "sqlite_master" not in normalized_code:
+                        print(
+                            f"[bot_stream] Code rejected: schema not confirmed and no sqlite_master query (schema_confirmed={schema_confirmed})"
+                        )
                         schema_prompt = (
                             "请先在 <Code> 中执行 `SELECT name FROM sqlite_master WHERE type='table'` 并列出真实表结构，"
                             "首轮必须完成表结构确认后才能继续 EDA。"
@@ -1751,6 +1760,9 @@ def bot_stream(messages, workspace, session_id="default"):
                     ):
                         missing_imports.append("import seaborn as sns")
                     if missing_imports:
+                        print(
+                            f"[bot_stream] Code rejected: missing imports {missing_imports}"
+                        )
                         import_prompt = (
                             "检测到 <Code> 使用了 pandas/matplotlib/seaborn，但缺少以下导入："
                             + ", ".join(missing_imports)
@@ -1761,6 +1773,7 @@ def bot_stream(messages, workspace, session_id="default"):
                         continue
 
                     if "sqlite3.connect" not in effective_code:
+                        print(f"[bot_stream] Code rejected: missing sqlite3.connect")
                         sqlite_prompt = (
                             "每个 <Code> 脚本都需显式 `import sqlite3` 并建立数据库连接。"
                             " 请将完整脚本补全（含 import / connect / 执行 / close）后再运行。"
@@ -1840,6 +1853,9 @@ def bot_stream(messages, workspace, session_id="default"):
                         has_png_output = (
                             "plt.savefig(" in normalized_code
                             or ".savefig(" in normalized_code
+                        )
+                        print(
+                            f"[bot_stream] File output check: non_schema_exec_rounds={non_schema_exec_rounds}, has_csv={has_csv_output}, has_png={has_png_output}"
                         )
                         if not has_csv_output and not has_png_output:
                             print(
