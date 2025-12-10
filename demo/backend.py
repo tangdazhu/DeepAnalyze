@@ -915,6 +915,10 @@ def normalize_model_tags(content: str) -> str:
     normalized = ASSISTANT_ECHO_PATTERN.sub("", normalized)
     # 移除连续 3 次以上的分隔线，保留最多 2 次
     normalized = SEPARATOR_PATTERN.sub(lambda m: m.group(1) * 2, normalized)
+    # 修复错误的代码块格式：Codepython -> ```python
+    normalized = re.sub(r"\bCodepython\b", "```python", normalized)
+    # 移除噪音词（如 assistant、unicorn、acer 等重复出现的无意义词）
+    normalized = re.sub(r"\b(unicorn|acer)\b\s*", "", normalized, flags=re.IGNORECASE)
     return normalized
 
 
@@ -1471,6 +1475,23 @@ def bot_stream(messages, workspace, session_id="default"):
                     else:
                         empty_code_rounds = 0  # 重置计数
 
+                    # 计算代码签名，用于重复检测
+                    code_signature = "\n".join(
+                        line.strip() for line in effective_code.splitlines()
+                    ).strip()
+                    normalized_code = effective_code.lower()
+
+                    # 优先检测重复代码，避免无限循环
+                    if code_signature and code_signature == last_code_signature:
+                        print(f"[bot_stream] Code rejected: duplicate code")
+                        reminder = (
+                            "你的代码与上一轮完全相同。请根据已获取的表结构推进新的分析，"
+                            "不要重复列出 sqlite_master。如果上一轮代码被拦截，请仔细阅读系统提示并修正问题。"
+                        )
+                        messages.append({"role": "user", "content": reminder})
+                        refund_iteration()
+                        continue
+
                     # 强制检查：代码必须包含 import sqlite3
                     if "import sqlite3" not in effective_code:
                         print(f"[bot_stream] Code rejected: missing 'import sqlite3'")
@@ -1488,24 +1509,12 @@ def bot_stream(messages, workspace, session_id="default"):
                         refund_iteration()
                         continue
 
-                    code_signature = "\n".join(
-                        line.strip() for line in effective_code.splitlines()
-                    ).strip()
-                    normalized_code = effective_code.lower()
                     if DDL_TABLE_PATTERN.search(normalized_code):
                         ddl_prompt = (
                             "检测到脚本尝试执行 `CREATE/DROP/ALTER TABLE` 等操作。"
                             " 出于数据安全考虑，本系统禁止修改数据库结构，请改为针对已有表进行查询或分析。"
                         )
                         messages.append({"role": "user", "content": ddl_prompt})
-                        refund_iteration()
-                        continue
-                    if code_signature and code_signature == last_code_signature:
-                        reminder = (
-                            "你的代码与上一轮完全相同。请根据已获取的表结构推进新的分析，"
-                            "不要重复列出 sqlite_master。"
-                        )
-                        messages.append({"role": "user", "content": reminder})
                         refund_iteration()
                         continue
                     if (
