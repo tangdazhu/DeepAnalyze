@@ -380,9 +380,52 @@ def extract_table_mentions_from_text(
 
 
 def extract_sql_table_names(code: str) -> set[str]:
+    """从代码中提取 SQL 语句中引用的表名，过滤掉 Python 模块名和常见标识符。"""
     tables = set(SQL_TABLE_PATTERN.findall(code or ""))
     tables.update(SQL_PRAGMA_PATTERN.findall(code or ""))
-    return tables
+
+    # 过滤掉 Python 标准库模块名和常见变量名
+    PYTHON_KEYWORDS = {
+        "pathlib",
+        "sqlite3",
+        "pandas",
+        "matplotlib",
+        "seaborn",
+        "numpy",
+        "pd",
+        "plt",
+        "sns",
+        "np",
+        "conn",
+        "cursor",
+        "df",
+        "summary",
+        "Path",
+        "OUTPUT_DIR",
+        "DB_PATH",
+        "data",
+        "result",
+        "query",
+        "include",
+        "all",
+        "transpose",
+        "reset_index",
+        "index",
+        "False",
+        "True",
+        "None",
+        "encoding",
+        "utf",
+        "parents",
+        "exist_ok",
+        "timeout",
+        "dpi",
+        "figsize",
+        "tight_layout",
+        "countplot",
+    }
+
+    return {tbl for tbl in tables if tbl.lower() not in PYTHON_KEYWORDS}
 
 
 def snapshot_workspace_files(directory: str) -> set[str]:
