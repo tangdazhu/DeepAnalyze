@@ -991,7 +991,7 @@ def find_primary_sqlite(workspace_path: Path) -> Path | None:
 
 
 def build_schema_bootstrap_block(workspace_path: Path) -> str:
-    """生成首轮自动列出 sqlite_master 的模板响应。"""
+    """生成首轮自动列出 sqlite_master 和每个表字段信息的模板响应。"""
     db_path = find_primary_sqlite(workspace_path)
     if not db_path:
         return ""
@@ -1002,8 +1002,8 @@ def build_schema_bootstrap_block(workspace_path: Path) -> str:
     )
     analyze = (
         "<Analyze>\n"
-        "系统检测到模型尚未正确进入首轮分析，已自动补充：当前目标=列出所有表结构，"
-        "并在同轮 <Execute> 中打印 sqlite_master 结果，供后续引用。\n"
+        "系统检测到模型尚未正确进入首轮分析，已自动补充：当前目标=列出所有表结构和字段信息，"
+        "并在同轮 <Execute> 中打印 sqlite_master 结果和每个表的字段列表，供后续引用。\n"
         "</Analyze>\n"
     )
     query_lines = "\n".join(
@@ -1023,6 +1023,15 @@ def build_schema_bootstrap_block(workspace_path: Path) -> str:
         f'query = """\n{query_lines}\n"""\n'
         "schema_df = pd.read_sql_query(query, conn)\n"
         "print(schema_df)\n"
+        "print('\\n' + '='*80)\n"
+        "print('【表字段详情】')\n"
+        "print('='*80)\n"
+        "for table_name in schema_df['table_name']:\n"
+        "    cursor = conn.cursor()\n"
+        "    cursor.execute(f'PRAGMA table_info({table_name})')\n"
+        "    columns = cursor.fetchall()\n"
+        "    print(f'\\n表名: {table_name}')\n"
+        "    print(f'字段: {\", \".join([col[1] for col in columns])}')\n"
         "conn.close()\n"
         "```\n"
         "</Code>"
