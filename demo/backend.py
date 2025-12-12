@@ -1538,19 +1538,20 @@ def bot_stream(messages, workspace, session_id="default"):
             has_code_block = "<Code>" in cur_res and "</Code>" in cur_res
             has_execute_block = "<Execute>" in cur_res
 
-            # 检测伪造 Execute：如果有 Execute 但没有 Code，说明模型在伪造执行结果
-            if has_execute_block and not has_code_block:
+            # 检测伪造 Execute：模型不能在自己的输出中包含 <Execute> 标签
+            # <Execute> 只能由系统在执行代码后自动生成并注入到消息历史中
+            if has_execute_block:
                 messages.append({"role": "assistant", "content": cur_res})
                 fake_execute_warning = (
-                    "检测到你在输出中包含了 <Execute> 标签，但没有提供 <Code> 标签。"
-                    "<Execute> 块只能由系统在执行你的代码后自动生成，你不能手动伪造。"
-                    "请严格按照提示词要求：先输出 <Analyze> 说明分析目标，然后输出 <Code> 提供完整的 Python 代码，"
-                    "系统会自动执行代码并生成 <Execute> 和 <File> 块。"
-                    "禁止在 <Analyze> 或 <Code> 之外输出任何 <Execute> 内容。"
+                    "检测到你在输出中包含了 <Execute> 标签。"
+                    "<Execute> 块只能由系统在执行你的代码后自动生成，你不能在自己的输出中包含 <Execute> 标签。"
+                    "请严格按照提示词要求：只输出 <Analyze> 和 <Code> 两个标签，"
+                    "系统会自动执行代码并在下一轮消息中注入 <Execute> 和 <File> 块供你引用。"
+                    "禁止在你的输出中包含任何 <Execute> 或 <File> 内容。"
                 )
                 messages.append({"role": "user", "content": fake_execute_warning})
                 print(
-                    f"[bot_stream] Detected fake <Execute> without <Code>, rejecting iteration {iteration}"
+                    f"[bot_stream] Detected fake <Execute> in model output, rejecting iteration {iteration}"
                 )
                 refund_iteration()
                 continue
