@@ -1536,6 +1536,24 @@ def bot_stream(messages, workspace, session_id="default"):
                 break
 
             has_code_block = "<Code>" in cur_res and "</Code>" in cur_res
+            has_execute_block = "<Execute>" in cur_res
+
+            # 检测伪造 Execute：如果有 Execute 但没有 Code，说明模型在伪造执行结果
+            if has_execute_block and not has_code_block:
+                messages.append({"role": "assistant", "content": cur_res})
+                fake_execute_warning = (
+                    "检测到你在输出中包含了 <Execute> 标签，但没有提供 <Code> 标签。"
+                    "<Execute> 块只能由系统在执行你的代码后自动生成，你不能手动伪造。"
+                    "请严格按照提示词要求：先输出 <Analyze> 说明分析目标，然后输出 <Code> 提供完整的 Python 代码，"
+                    "系统会自动执行代码并生成 <Execute> 和 <File> 块。"
+                    "禁止在 <Analyze> 或 <Code> 之外输出任何 <Execute> 内容。"
+                )
+                messages.append({"role": "user", "content": fake_execute_warning})
+                print(
+                    f"[bot_stream] Detected fake <Execute> without <Code>, rejecting iteration {iteration}"
+                )
+                refund_iteration()
+                continue
 
             # 调试日志：检查 Code 标签检测
             if not has_code_block:
