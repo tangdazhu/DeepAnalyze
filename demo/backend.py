@@ -1518,6 +1518,25 @@ def bot_stream(messages, workspace, session_id="default"):
                     refund_iteration()
                     continue
 
+            # 检测伪造 Execute：模型不能在自己的输出中包含 <Execute> 标签
+            # <Execute> 只能由系统在执行代码后自动生成并注入到消息历史中
+            # 注意：必须在更新 last_analyze_signature 之前检测，避免重复内容检测失效
+            if has_execute_in_raw:
+                messages.append({"role": "assistant", "content": cur_res})
+                fake_execute_warning = (
+                    "检测到你在输出中包含了 <Execute> 标签。"
+                    "<Execute> 块只能由系统在执行你的代码后自动生成，你不能在自己的输出中包含 <Execute> 标签。"
+                    "请严格按照提示词要求：只输出 <Analyze> 和 <Code> 两个标签，"
+                    "系统会自动执行代码并在下一轮消息中注入 <Execute> 和 <File> 块供你引用。"
+                    "禁止在你的输出中包含任何 <Execute> 或 <File> 内容。"
+                )
+                messages.append({"role": "user", "content": fake_execute_warning})
+                print(
+                    f"[bot_stream] Detected fake <Execute> in model output, rejecting iteration {iteration}"
+                )
+                refund_iteration()
+                continue
+
             last_analyze_signature = analyze_signature
 
             if not cur_res.strip() and not finished:
@@ -1539,25 +1558,6 @@ def bot_stream(messages, workspace, session_id="default"):
                 break
 
             has_code_block = "<Code>" in cur_res and "</Code>" in cur_res
-
-            # 检测伪造 Execute：模型不能在自己的输出中包含 <Execute> 标签
-            # <Execute> 只能由系统在执行代码后自动生成并注入到消息历史中
-            # 注意：这里使用之前保存的 has_execute_in_raw，因为 cur_res 已经被 strip_model_file_blocks 处理过
-            if has_execute_in_raw:
-                messages.append({"role": "assistant", "content": cur_res})
-                fake_execute_warning = (
-                    "检测到你在输出中包含了 <Execute> 标签。"
-                    "<Execute> 块只能由系统在执行你的代码后自动生成，你不能在自己的输出中包含 <Execute> 标签。"
-                    "请严格按照提示词要求：只输出 <Analyze> 和 <Code> 两个标签，"
-                    "系统会自动执行代码并在下一轮消息中注入 <Execute> 和 <File> 块供你引用。"
-                    "禁止在你的输出中包含任何 <Execute> 或 <File> 内容。"
-                )
-                messages.append({"role": "user", "content": fake_execute_warning})
-                print(
-                    f"[bot_stream] Detected fake <Execute> in model output, rejecting iteration {iteration}"
-                )
-                refund_iteration()
-                continue
 
             # 调试日志：检查 Code 标签检测
             if not has_code_block:
