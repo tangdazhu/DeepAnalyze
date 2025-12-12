@@ -893,7 +893,12 @@ FILE_TAG_CAPTURE_PATTERN = re.compile(r"<File>(.*?)</File>", re.DOTALL)
 FILES_OPEN_PATTERN = re.compile(r"<\s*Files\s*>", re.IGNORECASE)
 FILES_CLOSE_PATTERN = re.compile(r"<\s*/\s*Files\s*>", re.IGNORECASE)
 MODEL_FILE_TAG_PATTERN = re.compile(r"<File>.*?</File>", re.DOTALL)
+# 匹配连续出现的 assistant（包括后面跟任意字符的情况）
 ASSISTANT_ECHO_PATTERN = re.compile(r"(?:\bassistant\b[\s\n]*){2,}", re.IGNORECASE)
+# 匹配 assistant 开头的重复文本段落（如 "assistant 根据第 2 轮 <Execute </Analyze>"）
+ASSISTANT_PARAGRAPH_PATTERN = re.compile(
+    r"(\bassistant\b[^\n<]{10,100}?)(\1){1,}", re.IGNORECASE
+)
 SEPARATOR_PATTERN = re.compile(r"(?:^|\n)([-=_*]{2,}\s*\n){3,}", re.MULTILINE)
 FILE_NAME_PATTERN = re.compile(
     r"([\w\-.]+\.(?:csv|tsv|txt|md|json|png|jpg|jpeg|gif|svg|pdf|xlsx|xls|parquet))",
@@ -959,6 +964,9 @@ def normalize_model_tags(content: str) -> str:
     normalized = HEADING_TAG_PATTERN.sub(lambda m: f"<{m.group(1)}>", normalized)
     normalized = FILES_OPEN_PATTERN.sub("<File>", normalized)
     normalized = FILES_CLOSE_PATTERN.sub("</File>", normalized)
+    # 先移除 assistant 开头的重复段落（如 "assistant 根据第 2 轮 <Execute </Analyze>"）
+    normalized = ASSISTANT_PARAGRAPH_PATTERN.sub(r"\1", normalized)
+    # 再移除连续的 assistant 词
     normalized = ASSISTANT_ECHO_PATTERN.sub("", normalized)
     # 移除连续 3 次以上的分隔线，保留最多 2 次
     normalized = SEPARATOR_PATTERN.sub(lambda m: m.group(1) * 2, normalized)
