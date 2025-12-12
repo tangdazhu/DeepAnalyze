@@ -1422,11 +1422,14 @@ def bot_stream(messages, workspace, session_id="default"):
                 f"[bot_stream] Before strip_model_file_blocks: raw_res length={len(raw_res)}, cur_res length={len(cur_res)}, has_<File>={'<File>' in cur_res}, has_</File>={'</File>' in cur_res}"
             )
 
+            # 先检测伪造 Execute（在 strip 之前检测原始输出）
+            has_execute_in_raw = "<Execute>" in cur_res
+
             cur_res = strip_model_file_blocks(cur_res)
 
             # 调试日志：记录处理后的内容
             print(
-                f"[bot_stream] After normalization, cur_res length={len(cur_res)}, has_<Code>={'<Code>' in cur_res}, has_</Code>={'</Code>' in cur_res}"
+                f"[bot_stream] After normalization, cur_res length={len(cur_res)}, has_<Code>={'<Code>' in cur_res}, has_</Code>={'</Code>' in cur_res}, had_<Execute>_in_raw={has_execute_in_raw}"
             )
 
             fixed_res = fix_tags_and_codeblock(cur_res)
@@ -1536,11 +1539,11 @@ def bot_stream(messages, workspace, session_id="default"):
                 break
 
             has_code_block = "<Code>" in cur_res and "</Code>" in cur_res
-            has_execute_block = "<Execute>" in cur_res
 
             # 检测伪造 Execute：模型不能在自己的输出中包含 <Execute> 标签
             # <Execute> 只能由系统在执行代码后自动生成并注入到消息历史中
-            if has_execute_block:
+            # 注意：这里使用之前保存的 has_execute_in_raw，因为 cur_res 已经被 strip_model_file_blocks 处理过
+            if has_execute_in_raw:
                 messages.append({"role": "assistant", "content": cur_res})
                 fake_execute_warning = (
                     "检测到你在输出中包含了 <Execute> 标签。"
