@@ -57,6 +57,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+logger.info(f"[启动] 日志文件: {LOG_DIR / 'backend.log'}")
+
 
 def execute_code(code_str):
     import io
