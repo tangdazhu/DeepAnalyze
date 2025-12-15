@@ -1267,7 +1267,7 @@ def bot_stream(messages, workspace, session_id="default"):
 
     # 【强制首轮 bootstrap】在第一轮迭代前，无论如何都先执行 schema bootstrap
     if not schema_bootstrap_used:
-        print(f"[bot_stream] Forcing schema bootstrap for session={session_id}")
+        logger.info(f"[bot_stream] Forcing schema bootstrap for session={session_id}")
         auto_block = run_schema_bootstrap(workspace_path, session_id)
         if auto_block:
             schema_bootstrap_used = True
@@ -1276,7 +1276,9 @@ def bot_stream(messages, workspace, session_id="default"):
             messages.append({"role": "assistant", "content": auto_block})
             assistant_reply = auto_block
             yield auto_block
-            print(f"[bot_stream] Schema bootstrap completed, injected into messages")
+            logger.info(
+                f"[bot_stream] Schema bootstrap completed, injected into messages"
+            )
 
     while (
         not finished
@@ -1286,7 +1288,7 @@ def bot_stream(messages, workspace, session_id="default"):
         raw_iterations += 1
         iteration += 1
         premature_answer_detected = False
-        print(
+        logger.info(
             f"[bot_stream] session={session_id} iteration={iteration} raw={raw_iterations} starting, messages={len(messages)}"
         )
         safe_messages = trim_messages(messages)
@@ -1317,13 +1319,13 @@ def bot_stream(messages, workspace, session_id="default"):
                     raw_res += delta
                     chunk_index += 1
                     if chunk_index <= 5:
-                        print(
+                        logger.info(
                             f"[bot_stream] Received chunk #{chunk_index}, delta_len={len(delta)}, raw_total={len(raw_res)}"
                         )
 
                     # 检测流式输出长度是否超限
                     if len(raw_res) > MAX_STREAM_LENGTH:
-                        print(
+                        logger.warning(
                             f"[bot_stream] Stream length exceeded {MAX_STREAM_LENGTH}, forcing stop"
                         )
                         forced_reason = f"模型输出超过 {MAX_STREAM_LENGTH} 字符，疑似陷入重复循环，已强制终止。请检查提示词或重新发起会话。"
@@ -1352,7 +1354,7 @@ def bot_stream(messages, workspace, session_id="default"):
                                     char_counts[char] = char_counts.get(char, 0) + 1
                             max_count = max(char_counts.values()) if char_counts else 0
                             if max_count > len(repetition_check_window) * 0.8:
-                                print(
+                                logger.warning(
                                     f"[bot_stream] Detected repetitive output (char '{max(char_counts, key=char_counts.get)}' appears {max_count} times in {len(repetition_check_window)} chars)"
                                 )
                                 forced_reason = "检测到模型输出重复内容（如连续分隔线），已强制终止。请检查提示词或重新发起会话。"
@@ -1436,7 +1438,7 @@ def bot_stream(messages, workspace, session_id="default"):
             cur_res = normalize_model_tags(raw_res)
             claimed_files_in_round = extract_file_claims(cur_res)
 
-            print(
+            logger.info(
                 f"[bot_stream] Before strip_model_file_blocks: raw_res length={len(raw_res)}, cur_res length={len(cur_res)}, has_<File>={'<File>' in cur_res}, has_</File>={'</File>' in cur_res}"
             )
 
@@ -1446,7 +1448,7 @@ def bot_stream(messages, workspace, session_id="default"):
             cur_res = strip_model_file_blocks(cur_res)
 
             # 调试日志：记录处理后的内容
-            print(
+            logger.info(
                 f"[bot_stream] After normalization, cur_res length={len(cur_res)}, has_<Code>={'<Code>' in cur_res}, has_</Code>={'</Code>' in cur_res}, had_<Execute>_in_raw={has_execute_in_raw}"
             )
 
@@ -1458,7 +1460,7 @@ def bot_stream(messages, workspace, session_id="default"):
                     yield extra_text
                 cur_res = fixed_res
 
-            print(
+            logger.info(
                 f"[bot_stream] session={session_id} iteration={iteration} finish_reason={last_finish_reason} has_code={'<Code>' in cur_res} closed={'</Code>' in cur_res} len={len(cur_res)}"
             )
 
@@ -1573,7 +1575,9 @@ def bot_stream(messages, workspace, session_id="default"):
             # 这样可以避免空响应被计入有效迭代，导致模型在下一轮复制提示词模板
             if not cur_res.strip() and not finished:
                 empty_retry += 1
-                print(f"[bot_stream] Empty response detected (retry {empty_retry}/3)")
+                logger.warning(
+                    f"[bot_stream] Empty response detected (retry {empty_retry}/3)"
+                )
                 if empty_retry < 3:
                     retry_prompt = (
                         "检测到你的输出为空。请严格按照要求输出：\n"
@@ -1599,7 +1603,7 @@ def bot_stream(messages, workspace, session_id="default"):
 
             # 调试日志：检查 Code 标签检测
             if not has_code_block:
-                print(
+                logger.warning(
                     f"[bot_stream] No <Code> block detected. cur_res preview: {cur_res[:200]}"
                 )
 
@@ -1619,7 +1623,7 @@ def bot_stream(messages, workspace, session_id="default"):
                         return
                 else:
                     missing_code_rounds += 1
-                    print(
+                    logger.warning(
                         f"[bot_stream] Code block missing (round {missing_code_rounds}/{MAX_MISSING_CODE_ROUNDS})"
                     )
                     if missing_code_rounds >= MAX_MISSING_CODE_ROUNDS:
@@ -1679,10 +1683,10 @@ def bot_stream(messages, workspace, session_id="default"):
                     }
                 )
                 code_match = re.search(r"<Code>(.*?)</Code>", cur_res, re.DOTALL)
-                print(f"[bot_stream] Code match result: {code_match is not None}")
+                logger.info(f"[bot_stream] Code match result: {code_match is not None}")
                 if code_match:
                     code_content = code_match.group(1).strip()
-                    print(
+                    logger.info(
                         f"[bot_stream] Code content extracted, length={len(code_content)}"
                     )
                     md_match = re.search(
@@ -1690,13 +1694,15 @@ def bot_stream(messages, workspace, session_id="default"):
                     )
                     code_str = md_match.group(1).strip() if md_match else code_content
                     effective_code = extract_effective_code(code_str)
-                    print(
+                    logger.info(
                         f"[bot_stream] Effective code extracted, length={len(effective_code) if effective_code else 0}"
                     )
 
                     # 检测连续无有效代码
                     if not effective_code or not effective_code.strip():
-                        print(f"[bot_stream] Code rejected: empty effective code")
+                        logger.warning(
+                            f"[bot_stream] Code rejected: empty effective code"
+                        )
                         empty_code_rounds += 1
                         if empty_code_rounds >= MAX_EMPTY_CODE_ROUNDS:
                             forced_reason = (
@@ -1732,11 +1738,11 @@ def bot_stream(messages, workspace, session_id="default"):
                     normalized_code = effective_code.lower()
 
                     # 优先检测重复代码，避免无限循环
-                    print(
+                    logger.info(
                         f"[bot_stream] Code signature check: current={code_signature[:50] if code_signature else 'None'}..., last={last_code_signature[:50] if last_code_signature else 'None'}..."
                     )
                     if code_signature and code_signature == last_code_signature:
-                        print(f"[bot_stream] Code rejected: duplicate code")
+                        logger.warning(f"[bot_stream] Code rejected: duplicate code")
                         reminder = (
                             "你的代码与上一轮完全相同。请根据已获取的表结构推进新的分析，"
                             "不要重复列出 sqlite_master。如果上一轮代码被拦截，请仔细阅读系统提示并修正问题。"
@@ -1747,7 +1753,9 @@ def bot_stream(messages, workspace, session_id="default"):
 
                     # 强制检查：代码必须包含 import sqlite3
                     if "import sqlite3" not in effective_code:
-                        print(f"[bot_stream] Code rejected: missing 'import sqlite3'")
+                        logger.warning(
+                            f"[bot_stream] Code rejected: missing 'import sqlite3'"
+                        )
                         messages.append(
                             {
                                 "role": "user",
@@ -1763,7 +1771,9 @@ def bot_stream(messages, workspace, session_id="default"):
                         continue
 
                     if DDL_TABLE_PATTERN.search(normalized_code):
-                        print(f"[bot_stream] Code rejected: DDL operation detected")
+                        logger.warning(
+                            f"[bot_stream] Code rejected: DDL operation detected"
+                        )
                         ddl_prompt = (
                             "检测到脚本尝试执行 `CREATE/DROP/ALTER TABLE` 等操作。"
                             " 出于数据安全考虑，本系统禁止修改数据库结构，请改为针对已有表进行查询或分析。"
@@ -1776,7 +1786,7 @@ def bot_stream(messages, workspace, session_id="default"):
                         and "sqlite_master" in normalized_code
                         and "pragma" not in normalized_code
                     ):
-                        print(
+                        logger.warning(
                             f"[bot_stream] Code rejected: repeated sqlite_master query after schema confirmed"
                         )
                         schema_only_repeat += 1
@@ -1841,7 +1851,7 @@ def bot_stream(messages, workspace, session_id="default"):
                         continue
 
                     if schema_confirmed and invalid_tables:
-                        print(
+                        logger.warning(
                             f"[bot_stream] Code rejected: invalid tables {invalid_tables}"
                         )
                         invalid_msg = (
@@ -1856,7 +1866,7 @@ def bot_stream(messages, workspace, session_id="default"):
                     post_execute_prompts: list[str] = []
 
                     if not schema_confirmed and "sqlite_master" not in normalized_code:
-                        print(
+                        logger.warning(
                             f"[bot_stream] Code rejected: schema not confirmed and no sqlite_master query (schema_confirmed={schema_confirmed})"
                         )
                         schema_prompt = (
@@ -1884,7 +1894,7 @@ def bot_stream(messages, workspace, session_id="default"):
                     ):
                         missing_imports.append("import seaborn as sns")
                     if missing_imports:
-                        print(
+                        logger.warning(
                             f"[bot_stream] Code rejected: missing imports {missing_imports}"
                         )
                         import_prompt = (
@@ -1897,7 +1907,9 @@ def bot_stream(messages, workspace, session_id="default"):
                         continue
 
                     if "sqlite3.connect" not in effective_code:
-                        print(f"[bot_stream] Code rejected: missing sqlite3.connect")
+                        logger.warning(
+                            f"[bot_stream] Code rejected: missing sqlite3.connect"
+                        )
                         sqlite_prompt = (
                             "每个 <Code> 脚本都需显式 `import sqlite3` 并建立数据库连接。"
                             " 请将完整脚本补全（含 import / connect / 执行 / close）后再运行。"
@@ -1925,7 +1937,7 @@ def bot_stream(messages, workspace, session_id="default"):
                             if candidate.resolve() not in available_resolved:
                                 invalid_connects.append(raw_path)
                         if invalid_connects:
-                            print(
+                            logger.warning(
                                 f"[bot_stream] Code rejected: invalid database path(s): {invalid_connects}"
                             )
                             sample_display = ""
@@ -1957,7 +1969,9 @@ def bot_stream(messages, workspace, session_id="default"):
 
                     uses_plot = "plt." in normalized_code or "sns." in normalized_code
                     if uses_plot and "plt.savefig" not in normalized_code:
-                        print(f"[bot_stream] Code rejected: missing plt.savefig")
+                        logger.warning(
+                            f"[bot_stream] Code rejected: missing plt.savefig"
+                        )
                         save_prompt = (
                             "绘图脚本必须调用 `plt.savefig('generated/xxx.png')` 并写入实际文件，再在 <File> 中引用。"
                             " 请补充 `plt.savefig` 后重新提交。"
@@ -1978,11 +1992,11 @@ def bot_stream(messages, workspace, session_id="default"):
                             "plt.savefig(" in normalized_code
                             or ".savefig(" in normalized_code
                         )
-                        print(
+                        logger.info(
                             f"[bot_stream] File output check: non_schema_exec_rounds={non_schema_exec_rounds}, has_csv={has_csv_output}, has_png={has_png_output}"
                         )
                         if not has_csv_output and not has_png_output:
-                            print(
+                            logger.warning(
                                 f"[bot_stream] Code rejected: missing file output (CSV/PNG)"
                             )
                             file_output_prompt = (
@@ -2000,10 +2014,10 @@ def bot_stream(messages, workspace, session_id="default"):
 
                     last_code_signature = code_signature
 
-                    print(
+                    logger.info(
                         f"[bot_stream] session={session_id} iteration={iteration} executing code, length={len(code_str)}"
                     )
-                    print(
+                    logger.info(
                         f"[bot_stream] Code preview: {(effective_code or code_str)[:200]}..."
                     )
                     try:
@@ -2033,9 +2047,11 @@ def bot_stream(messages, workspace, session_id="default"):
                             f.write(effective_code or code_str)
                             f.write("\n\n=== Output ===\n")
                             f.write(exe_output)
-                        print(f"[bot_stream] Wrote execution log to {log_file}")
+                        logger.info(f"[bot_stream] Wrote execution log to {log_file}")
                     except Exception as log_err:
-                        print(f"[Warning] Failed to write execution log: {log_err}")
+                        logger.warning(
+                            f"[Warning] Failed to write execution log: {log_err}"
+                        )
 
                     is_schema_code = (
                         "sqlite_master" in normalized_code
@@ -2080,8 +2096,10 @@ def bot_stream(messages, workspace, session_id="default"):
 
                     artifact_paths = []
                     generated_dir_str = str(generated_dir.resolve())
-                    print(f"[bot_stream] Added files: {[str(p) for p in added_paths]}")
-                    print(
+                    logger.info(
+                        f"[bot_stream] Added files: {[str(p) for p in added_paths]}"
+                    )
+                    logger.info(
                         f"[bot_stream] Modified files: {[str(p) for p in modified_paths]}"
                     )
                     for p in added_paths:
@@ -2089,19 +2107,21 @@ def bot_stream(messages, workspace, session_id="default"):
                             target_path = generated_dir / p.name
                             dest_path = uniquify_path(target_path)
                             if not str(p).startswith(generated_dir_str):
-                                print(f"[bot_stream] Copying {p} -> {dest_path}")
+                                logger.info(f"[bot_stream] Copying {p} -> {dest_path}")
                                 shutil.copy2(p, dest_path)
                             else:
                                 if dest_path != p:
-                                    print(
+                                    logger.info(
                                         f"[bot_stream] Copying (already in generated) {p} -> {dest_path}"
                                     )
                                     shutil.copy2(p, dest_path)
                                 else:
-                                    print(f"[bot_stream] File already in place: {p}")
+                                    logger.info(
+                                        f"[bot_stream] File already in place: {p}"
+                                    )
                             artifact_paths.append(dest_path.resolve())
                         except Exception as e:
-                            print(f"[bot_stream] Error moving file {p}: {e}")
+                            logger.error(f"[bot_stream] Error moving file {p}: {e}")
 
                     for p in modified_paths:
                         try:
@@ -2111,7 +2131,7 @@ def bot_stream(messages, workspace, session_id="default"):
                             shutil.copy2(p, dest_path)
                             artifact_paths.append(dest_path.resolve())
                         except Exception as e:
-                            print(f"Error copying modified file {p}: {e}")
+                            logger.error(f"Error copying modified file {p}: {e}")
 
                     exe_str = f"\n<Execute>\n```\n{exe_output}\n```\n</Execute>\n"
                     actual_files = {
@@ -2123,7 +2143,7 @@ def bot_stream(messages, workspace, session_id="default"):
                             rel = workspace_relative_path(Path(p))
                             url = build_download_url(rel)
                             name = Path(p).name
-                            print(
+                            logger.info(
                                 f"[bot_stream] File URL: path={p}, rel={rel}, url={url}"
                             )
                             file_block_lines.append(f"- [{name}]({url})")
@@ -2183,7 +2203,7 @@ def bot_stream(messages, workspace, session_id="default"):
                             for keyword in ["traceback", "error:", "exception"]
                         )
                         if has_error:
-                            print(
+                            logger.warning(
                                 f"[bot_stream] Code execution error detected (files generated: {len(artifact_paths)})"
                             )
                             # 提取错误类型和关键信息
@@ -2225,7 +2245,7 @@ def bot_stream(messages, workspace, session_id="default"):
                         messages.append(
                             {"role": "user", "content": fake_execute_warning}
                         )
-                        print(
+                        logger.warning(
                             f"[bot_stream] Detected fake <Execute> in model output after code execution, warning sent"
                         )
                         refund_iteration()  # 退还迭代计数，避免伪造输出被计入有效迭代
