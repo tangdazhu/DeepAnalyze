@@ -46,7 +46,7 @@ os.environ.setdefault("MPLBACKEND", "Agg")
 
 # 配置物理日志文件
 LOG_DIR = Path(__file__).resolve().parent / "logs"
-LOG_DIR.mkdir(exist_ok=True)
+LOG_DIR.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
