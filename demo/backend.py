@@ -2108,24 +2108,21 @@ def bot_stream(messages, workspace, session_id="default"):
                     )
                     for p in added_paths:
                         try:
-                            target_path = generated_dir / p.name
-                            dest_path = uniquify_path(target_path)
-                            if not str(p).startswith(generated_dir_str):
+                            # 如果文件已经在 generated 目录下,直接使用,不要创建副本
+                            if str(p.resolve()).startswith(generated_dir_str):
+                                logger.info(
+                                    f"[bot_stream] File already in generated: {p}"
+                                )
+                                artifact_paths.append(p.resolve())
+                            else:
+                                # 文件在其他位置,需要复制到 generated 目录
+                                target_path = generated_dir / p.name
+                                dest_path = uniquify_path(target_path)
                                 logger.info(f"[bot_stream] Copying {p} -> {dest_path}")
                                 shutil.copy2(p, dest_path)
-                            else:
-                                if dest_path != p:
-                                    logger.info(
-                                        f"[bot_stream] Copying (already in generated) {p} -> {dest_path}"
-                                    )
-                                    shutil.copy2(p, dest_path)
-                                else:
-                                    logger.info(
-                                        f"[bot_stream] File already in place: {p}"
-                                    )
-                            artifact_paths.append(dest_path.resolve())
+                                artifact_paths.append(dest_path.resolve())
                         except Exception as e:
-                            logger.error(f"[bot_stream] Error moving file {p}: {e}")
+                            logger.error(f"[bot_stream] Error processing file {p}: {e}")
 
                     for p in modified_paths:
                         try:
