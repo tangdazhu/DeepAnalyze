@@ -2072,6 +2072,9 @@ def bot_stream(messages, workspace, session_id="default"):
                             rel = workspace_relative_path(Path(p))
                             url = build_download_url(rel)
                             name = Path(p).name
+                            print(
+                                f"[bot_stream] File URL: path={p}, rel={rel}, url={url}"
+                            )
                             file_block_lines.append(f"- [{name}]({url})")
                             if p.suffix.lower() in [
                                 ".png",
@@ -2174,6 +2177,8 @@ def bot_stream(messages, workspace, session_id="default"):
                         print(
                             f"[bot_stream] Detected fake <Execute> in model output after code execution, warning sent"
                         )
+                        refund_iteration()  # 退还迭代计数，避免伪造输出被计入有效迭代
+                        continue
                     if (
                         execute_rounds >= ANSWER_MIN_EXEC_ROUNDS
                         and non_schema_exec_rounds >= ANSWER_MIN_NON_SCHEMA_ROUNDS
