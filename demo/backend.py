@@ -1276,7 +1276,7 @@ def bot_stream(messages, workspace, session_id="default"):
         response = client.chat.completions.create(
             model=MODEL_PATH,
             messages=safe_messages,
-            temperature=0.0,
+            temperature=0.3,
             stream=True,
             extra_body={
                 "add_generation_prompt": False,
