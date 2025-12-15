@@ -2121,26 +2121,36 @@ def bot_stream(messages, workspace, session_id="default"):
                     if answer_requested:
                         answer_waiting_rounds = 0
 
-                    # 检测代码执行失败：非 schema 代码执行后没有生成任何文件
-                    if (
-                        not is_schema_code
-                        and non_schema_exec_rounds > 0
-                        and not artifact_paths
-                    ):
+                    # 检测代码执行错误：只要有 Traceback/Error/Exception 就警告模型
+                    # 不管是否生成了文件，因为部分成功的代码仍可能包含严重错误
+                    if not is_schema_code and non_schema_exec_rounds > 0:
                         has_error = any(
                             keyword in exe_output.lower()
-                            for keyword in ["error", "traceback", "exception"]
+                            for keyword in ["traceback", "error:", "exception"]
                         )
                         if has_error:
                             print(
-                                f"[bot_stream] Code execution failed: no files generated and error detected"
+                                f"[bot_stream] Code execution error detected (files generated: {len(artifact_paths)})"
                             )
+                            # 提取错误类型和关键信息
+                            error_lines = [
+                                line
+                                for line in exe_output.split("\n")
+                                if any(
+                                    kw in line.lower()
+                                    for kw in ["error", "exception", "traceback"]
+                                )
+                            ]
+                            error_hint = error_lines[-1] if error_lines else "未知错误"
+
                             error_warning = (
-                                "代码执行失败，没有生成任何文件。请仔细检查上方 <Execute> 块中的错误信息：\n"
-                                "1. 确认 SQL 查询中使用的字段名是否真实存在于目标表中\n"
-                                "2. 不要把其他表的名字当成当前表的字段名\n"
-                                "3. 参考首轮 bootstrap 输出的表结构，确保字段名正确\n"
-                                "请修正代码后重新提交。"
+                                f"代码执行过程中出现错误：{error_hint}\n\n"
+                                "请仔细检查上方 <Execute> 块中的完整错误信息，常见问题包括：\n"
+                                "1. 对字符串字段调用数值计算方法（如 df.corr()）\n"
+                                "2. 使用不存在的字段名或表名\n"
+                                "3. 数据类型不匹配\n"
+                                "4. 缺少必要的数据预处理步骤\n\n"
+                                "请修正代码后重新提交。如果部分代码已成功执行，可以基于已生成的文件继续分析。"
                             )
                             messages.append({"role": "user", "content": error_warning})
                             refund_iteration()
