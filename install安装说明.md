@@ -33,6 +33,7 @@ pip install -r requirements.txt
 ## 10. 三终端并行启动示例
 
 1. **模型服务**
+--seed 42：固定随机种子（可以是任意整数，42 是常用值）
    ```bash
    (deepanalyze) tdz@tangdazhu:~$
    conda activate deepanalyze
@@ -40,6 +41,7 @@ pip install -r requirements.txt
      --host 0.0.0.0 --port 8000 \
      --served-model-name qwen2.5-3b-instruct \
      --trust-remote-code
+      --seed 42
    ```
 2. **后端服务**（使用 demo/backend.py，提供 `/workspace/*` 等接口）
    ```bash

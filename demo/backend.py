@@ -1276,7 +1276,7 @@ def bot_stream(messages, workspace, session_id="default"):
         response = client.chat.completions.create(
             model=MODEL_PATH,
             messages=safe_messages,
-            temperature=0.4,
+            temperature=0.0,
             stream=True,
             extra_body={
                 "add_generation_prompt": False,
@@ -2114,6 +2114,31 @@ def bot_stream(messages, workspace, session_id="default"):
                         non_schema_exec_rounds += 1
                     if answer_requested:
                         answer_waiting_rounds = 0
+
+                    # 检测代码执行失败：非 schema 代码执行后没有生成任何文件
+                    if (
+                        not is_schema_code
+                        and non_schema_exec_rounds > 0
+                        and not artifact_paths
+                    ):
+                        has_error = any(
+                            keyword in exe_output.lower()
+                            for keyword in ["error", "traceback", "exception"]
+                        )
+                        if has_error:
+                            print(
+                                f"[bot_stream] Code execution failed: no files generated and error detected"
+                            )
+                            error_warning = (
+                                "代码执行失败，没有生成任何文件。请仔细检查上方 <Execute> 块中的错误信息：\n"
+                                "1. 确认 SQL 查询中使用的字段名是否真实存在于目标表中\n"
+                                "2. 不要把其他表的名字当成当前表的字段名\n"
+                                "3. 参考首轮 bootstrap 输出的表结构，确保字段名正确\n"
+                                "请修正代码后重新提交。"
+                            )
+                            messages.append({"role": "user", "content": error_warning})
+                            refund_iteration()
+                            continue
 
                     # 检测伪造 Execute：模型不能在自己的输出中包含 <Execute> 标签
                     # <Execute> 只能由系统在执行代码后自动生成并注入到消息历史中
