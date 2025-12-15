@@ -1500,35 +1500,8 @@ def bot_stream(messages, workspace, session_id="default"):
                 f"last_signature={last_analyze_signature[:200] if last_analyze_signature else 'None'}"
             )
 
-            if not analyze_content:
-                messages.append({"role": "assistant", "content": cur_res})
-                if not schema_confirmed and not schema_bootstrap_used:
-                    auto_block = run_schema_bootstrap(workspace_path, session_id)
-                    if auto_block:
-                        schema_bootstrap_used = True
-                        schema_confirmed = True
-                        latest_tables = list_sqlite_tables(workspace_path)
-                        ensure_known_tables(latest_tables)
-                        assistant_reply += auto_block
-                        yield auto_block
-                        messages.append({"role": "assistant", "content": auto_block})
-                        continue
-                analyze_prompt = "你的输出缺少 <Analyze> 段，必须先在 <Analyze> 中说明当前目标与依据，再给出 <Code>。"
-                messages.append({"role": "user", "content": analyze_prompt})
-                refund_iteration()
-                continue
-
-            if (
-                schema_confirmed
-                and "列出" in analyze_content
-                and "表结构" in analyze_content
-            ):
-                messages.append({"role": "assistant", "content": cur_res})
-                advance_prompt = "表结构已在首轮列出，请基于已知表/字段提出新的分析目标，换用真实查询或 EDA 任务。"
-                messages.append({"role": "user", "content": advance_prompt})
-                refund_iteration()
-                continue
-
+            # 【关键】在所有拦截逻辑之前检测重复 <Analyze>
+            # 这样可以在模型被拦截并 refund_iteration 后，下次循环时检测到重复
             if last_analyze_signature and analyze_signature == last_analyze_signature:
                 duplicate_analyze_rounds += 1
                 logger.warning(
@@ -1562,6 +1535,39 @@ def bot_stream(messages, workspace, session_id="default"):
             else:
                 duplicate_analyze_rounds = 0
 
+            # 【关键】在所有拦截逻辑之前更新 last_analyze_signature
+            # 这样即使后续逻辑 continue，下次循环也能检测到重复
+            last_analyze_signature = analyze_signature
+
+            if not analyze_content:
+                messages.append({"role": "assistant", "content": cur_res})
+                if not schema_confirmed and not schema_bootstrap_used:
+                    auto_block = run_schema_bootstrap(workspace_path, session_id)
+                    if auto_block:
+                        schema_bootstrap_used = True
+                        schema_confirmed = True
+                        latest_tables = list_sqlite_tables(workspace_path)
+                        ensure_known_tables(latest_tables)
+                        assistant_reply += auto_block
+                        yield auto_block
+                        messages.append({"role": "assistant", "content": auto_block})
+                        continue
+                analyze_prompt = "你的输出缺少 <Analyze> 段，必须先在 <Analyze> 中说明当前目标与依据，再给出 <Code>。"
+                messages.append({"role": "user", "content": analyze_prompt})
+                refund_iteration()
+                continue
+
+            if (
+                schema_confirmed
+                and "列出" in analyze_content
+                and "表结构" in analyze_content
+            ):
+                messages.append({"role": "assistant", "content": cur_res})
+                advance_prompt = "表结构已在首轮列出，请基于已知表/字段提出新的分析目标，换用真实查询或 EDA 任务。"
+                messages.append({"role": "user", "content": advance_prompt})
+                refund_iteration()
+                continue
+
             known_mentions = set()
             unknown_mentions = set()
             require_known_reference = schema_confirmed
@@ -1593,8 +1599,6 @@ def bot_stream(messages, workspace, session_id="default"):
                     messages.append({"role": "user", "content": ref_prompt})
                     refund_iteration()
                     continue
-
-            last_analyze_signature = analyze_signature
 
             if finished:
                 break
