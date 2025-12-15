@@ -8,6 +8,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import logging
 from pathlib import Path
 from typing import Iterable
 
@@ -42,6 +43,19 @@ for path_candidate in (str(PROJECT_ROOT), str(API_DIR)):
 import config as api_config
 
 os.environ.setdefault("MPLBACKEND", "Agg")
+
+# 配置物理日志文件
+LOG_DIR = Path(__file__).resolve().parent / "logs"
+LOG_DIR.mkdir(exist_ok=True)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.FileHandler(LOG_DIR / "backend.log", encoding="utf-8"),
+        logging.StreamHandler(),
+    ],
+)
+logger = logging.getLogger(__name__)
 
 
 def execute_code(code_str):
@@ -1205,6 +1219,8 @@ def bot_stream(messages, workspace, session_id="default"):
     MAX_EMPTY_CODE_ROUNDS = 3
     missing_code_rounds = 0  # 连续缺少 <Code> 标签的轮数
     MAX_MISSING_CODE_ROUNDS = 3
+    duplicate_analyze_rounds = 0  # 连续重复 <Analyze> 的轮数
+    MAX_DUPLICATE_ANALYZE_ROUNDS = 3  # 最多允许 3 轮重复
     baseline_tables = list_sqlite_tables(workspace_path)
     known_tables = set(baseline_tables)
     initial_tables_locked = bool(known_tables)
@@ -1450,6 +1466,13 @@ def bot_stream(messages, workspace, session_id="default"):
                 re.sub(r"\s+", " ", analyze_content) if analyze_content else ""
             )
 
+            # 记录 analyze_signature 用于调试重复检测
+            logger.info(
+                f"[bot_stream] session={session_id} iteration={iteration} "
+                f"analyze_signature={analyze_signature[:200]} "
+                f"last_signature={last_analyze_signature[:200] if last_analyze_signature else 'None'}"
+            )
+
             if not analyze_content:
                 messages.append({"role": "assistant", "content": cur_res})
                 if not schema_confirmed and not schema_bootstrap_used:
@@ -1480,11 +1503,37 @@ def bot_stream(messages, workspace, session_id="default"):
                 continue
 
             if last_analyze_signature and analyze_signature == last_analyze_signature:
+                duplicate_analyze_rounds += 1
+                logger.warning(
+                    f"[bot_stream] session={session_id} iteration={iteration} "
+                    f"Detected duplicate <Analyze> signature (round {duplicate_analyze_rounds}/{MAX_DUPLICATE_ANALYZE_ROUNDS}): "
+                    f"{analyze_signature[:100]}"
+                )
+
+                if duplicate_analyze_rounds >= MAX_DUPLICATE_ANALYZE_ROUNDS:
+                    forced_reason = (
+                        f"连续 {MAX_DUPLICATE_ANALYZE_ROUNDS} 轮输出相同的 <Analyze> 内容，"
+                        "系统判定模型陷入重复循环，强制终止任务。"
+                    )
+                    violation_block = f"\n<Answer>\n{forced_reason}\n</Answer>\n"
+                    assistant_reply += violation_block
+                    yield violation_block
+                    logger.error(
+                        f"[bot_stream] session={session_id} Force terminated due to duplicate <Analyze>"
+                    )
+                    return
+
                 messages.append({"role": "assistant", "content": cur_res})
-                diff_prompt = "你的 <Analyze> 内容与上一轮完全相同，请结合最新的 <Execute>/<File> 结果提出不同的分析步骤。"
+                diff_prompt = (
+                    f"你的 <Analyze> 内容与上一轮完全相同（已连续 {duplicate_analyze_rounds} 轮）。"
+                    "请结合最新的 <Execute>/<File> 结果提出**完全不同**的分析步骤，"
+                    "或者如果分析已完成，请直接输出 <Answer> 总结结论。"
+                )
                 messages.append({"role": "user", "content": diff_prompt})
                 refund_iteration()
                 continue
+            else:
+                duplicate_analyze_rounds = 0
 
             known_mentions = set()
             unknown_mentions = set()
