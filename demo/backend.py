@@ -1464,6 +1464,29 @@ def bot_stream(messages, workspace, session_id="default"):
                 f"[bot_stream] session={session_id} iteration={iteration} finish_reason={last_finish_reason} has_code={'<Code>' in cur_res} closed={'</Code>' in cur_res} len={len(cur_res)}"
             )
 
+            # 【空响应检测】必须在所有其他检测之前执行
+            # 这样可以避免空响应被计入有效迭代，导致模型在下一轮复制提示词模板
+            if not cur_res.strip() and not finished:
+                empty_retry += 1
+                logger.warning(
+                    f"[bot_stream] Empty response detected (retry {empty_retry}/3)"
+                )
+                if empty_retry < 3:
+                    retry_prompt = (
+                        "检测到你的输出为空。请严格按照要求输出：\n"
+                        "1. <Analyze> 段：说明当前分析目标和依据\n"
+                        "2. <Code> 段：提供可执行的 Python 代码（不要使用 <表名>、<字段名> 等占位符）\n"
+                        "请基于首轮 bootstrap 输出的真实表结构，生成可直接执行的代码。"
+                    )
+                    messages.append({"role": "user", "content": retry_prompt})
+                    refund_iteration()  # 关键：退还迭代计数
+                    continue
+                forced_reason = "连续 3 轮输出为空，已终止任务"
+                finished = True
+                break
+            else:
+                empty_retry = 0
+
             analyze_match = re.search(r"<Analyze>(.*?)</Analyze>", cur_res, re.DOTALL)
             analyze_content = analyze_match.group(1).strip() if analyze_match else ""
             analyze_signature = (
@@ -1570,29 +1593,6 @@ def bot_stream(messages, workspace, session_id="default"):
                     messages.append({"role": "user", "content": ref_prompt})
                     refund_iteration()
                     continue
-
-            # 【空响应检测】必须在 last_analyze_signature 更新之前检测
-            # 这样可以避免空响应被计入有效迭代，导致模型在下一轮复制提示词模板
-            if not cur_res.strip() and not finished:
-                empty_retry += 1
-                logger.warning(
-                    f"[bot_stream] Empty response detected (retry {empty_retry}/3)"
-                )
-                if empty_retry < 3:
-                    retry_prompt = (
-                        "检测到你的输出为空。请严格按照要求输出：\n"
-                        "1. <Analyze> 段：说明当前分析目标和依据\n"
-                        "2. <Code> 段：提供可执行的 Python 代码（不要使用 <表名>、<字段名> 等占位符）\n"
-                        "请基于首轮 bootstrap 输出的真实表结构，生成可直接执行的代码。"
-                    )
-                    messages.append({"role": "user", "content": retry_prompt})
-                    refund_iteration()  # 关键：退还迭代计数
-                    continue
-                forced_reason = "连续 3 轮输出为空，已终止任务"
-                finished = True
-                break
-            else:
-                empty_retry = 0
 
             last_analyze_signature = analyze_signature
 
