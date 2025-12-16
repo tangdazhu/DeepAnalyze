@@ -37,11 +37,12 @@ pip install -r requirements.txt
    ```bash
    (deepanalyze) tdz@tangdazhu:~$
    conda activate deepanalyze
-   vllm serve ~/models/qwen2.5-3b-instruct \
-     --host 0.0.0.0 --port 8000 \
-     --served-model-name qwen2.5-3b-instruct \
-     --trust-remote-code
-      --seed 42
+vllm serve ~/models/qwen3-4b-instruct \
+  --host 0.0.0.0 --port 8000 \
+  --served-model-name qwen3-4b-instruct \
+  --trust-remote-code \
+  --seed 42 \
+  --max-model-len 32768
    ```
 2. **后端服务**（使用 demo/backend.py，提供 `/workspace/*` 等接口）
    ```bash

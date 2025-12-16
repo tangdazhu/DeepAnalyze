@@ -145,7 +145,7 @@ def execute_code_safe(
 
 # API endpoint and model path
 API_BASE = "http://localhost:8000/v1"  # this localhost is for vllm api, do not change
-MODEL_PATH = "qwen2.5-3b-instruct"  # replace to your path to DeepAnalyze-8B
+MODEL_PATH = "qwen3-4b-instruct"  # replace to your path to DeepAnalyze-8B
 MAX_ITERATIONS = 12
 ANSWER_MIN_EXEC_ROUNDS = 3
 ANSWER_MIN_NON_SCHEMA_ROUNDS = 2
