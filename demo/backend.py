@@ -389,7 +389,7 @@ def extract_table_mentions_from_text(
     COMMON_WORDS = {
         "sqlite_master",
         "sqlite_sequence",
-        # SQL 关键字
+        # SQL 关键字和函数
         "select",
         "from",
         "where",
@@ -410,11 +410,28 @@ def extract_table_mentions_from_text(
         "avg",
         "min",
         "max",
+        "median",
         "as",
         "on",
         "and",
         "or",
         "not",
+        "pragma",
+        "table_info",
+        "create",
+        "drop",
+        "alter",
+        "insert",
+        "update",
+        "delete",
+        # 系统标签和关键词
+        "execute",
+        "analyze",
+        "code",
+        "file",
+        "answer",
+        "eda",
+        "sqlite",
         # 常见字段名
         "name",
         "id",
@@ -448,7 +465,7 @@ def extract_table_mentions_from_text(
         "address",
         "email",
         "phone",
-        # 文件相关
+        # 文件相关（包含下划线的文件名模式）
         "csv",
         "png",
         "jpg",
@@ -465,6 +482,13 @@ def extract_table_mentions_from_text(
         "report",
         "output",
         "generated",
+        "dist",
+        "enrolled_month_dist",
+        "enrolled_school_count",
+        "person_summary",
+        "person_dist",
+        "longest_absense",
+        "absense",
         # 分析相关
         "analysis",
         "distribution",
