@@ -2648,4 +2648,4 @@ if __name__ == "__main__":
     print("🚀 启动后端服务...")
     print(f"   - API服务: http://localhost:8200")
     print(f"   - 文件服务: http://localhost:8100")
-    uvicorn.run(app, host="0.0.0.0", port=8200)
+    uvicorn.run(app, host="0.0.0.0", port=8200, log_config=None)
