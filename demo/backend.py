@@ -1588,6 +1588,9 @@ def bot_stream(messages, workspace, session_id="default"):
                     refund_iteration()
                     continue
                 if require_known_reference and not known_mentions:
+                    logger.warning(
+                        f"[bot_stream] Code rejected: no known table mentions in <Analyze>"
+                    )
                     messages.append({"role": "assistant", "content": cur_res})
                     table_samples = sorted(known_tables)
                     sample_hint = (
@@ -1909,58 +1912,6 @@ def bot_stream(messages, workspace, session_id="default"):
                             + "。请补全导入后再执行。"
                         )
                         messages.append({"role": "user", "content": import_prompt})
-                        refund_iteration()
-                        continue
-
-                    # 检测 DB_PATH 和 OUTPUT_DIR 是否被定义
-                    uses_db_path = "DB_PATH" in effective_code
-                    uses_output_dir = "OUTPUT_DIR" in effective_code
-                    defines_db_path = (
-                        "DB_PATH = " in effective_code or "DB_PATH=" in effective_code
-                    )
-                    defines_output_dir = (
-                        "OUTPUT_DIR = " in effective_code
-                        or "OUTPUT_DIR=" in effective_code
-                    )
-
-                    if uses_db_path and not defines_db_path:
-                        logger.warning(
-                            f"[bot_stream] Code rejected: uses DB_PATH but not defined"
-                        )
-                        available_sqlite_files = iter_sqlite_files(workspace_path)
-                        sample_display = ""
-                        if available_sqlite_files:
-                            sample = available_sqlite_files[0]
-                            sample_display = str(sample.resolve())
-
-                        db_path_prompt = "❌ 错误：代码中使用了 `DB_PATH` 变量，但未在代码开头定义。\n\n"
-                        if sample_display:
-                            db_path_prompt += (
-                                f"✅ **必须在代码开头定义**：\n"
-                                f"```python\nDB_PATH = r'{sample_display}'\n```\n\n"
-                                "请在所有 import 语句之后、使用 DB_PATH 之前添加上述定义。"
-                            )
-                        else:
-                            db_path_prompt += "请在代码开头定义 DB_PATH 变量，指向 workspace 中实际存在的 sqlite 文件的绝对路径。"
-                        messages.append({"role": "user", "content": db_path_prompt})
-                        refund_iteration()
-                        continue
-
-                    if uses_output_dir and not defines_output_dir:
-                        logger.warning(
-                            f"[bot_stream] Code rejected: uses OUTPUT_DIR but not defined"
-                        )
-                        output_dir_prompt = (
-                            "❌ 错误：代码中使用了 `OUTPUT_DIR` 变量，但未在代码开头定义。\n\n"
-                            "✅ **必须在代码开头定义**：\n"
-                            "```python\n"
-                            "from pathlib import Path\n"
-                            "OUTPUT_DIR = Path('generated')\n"
-                            "OUTPUT_DIR.mkdir(parents=True, exist_ok=True)\n"
-                            "```\n\n"
-                            "请在所有 import 语句之后、使用 OUTPUT_DIR 之前添加上述定义。"
-                        )
-                        messages.append({"role": "user", "content": output_dir_prompt})
                         refund_iteration()
                         continue
 
