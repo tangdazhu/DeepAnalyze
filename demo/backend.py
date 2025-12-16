@@ -1573,10 +1573,24 @@ def bot_stream(messages, workspace, session_id="default"):
             known_mentions = set()
             unknown_mentions = set()
             require_known_reference = schema_confirmed
+            logger.info(
+                f"[bot_stream] Extracting table mentions: known_tables={len(known_tables)}, analyze_content_len={len(analyze_content)}"
+            )
             if known_tables:
-                known_mentions, unknown_mentions = extract_table_mentions_from_text(
-                    analyze_content, known_tables
-                )
+                try:
+                    known_mentions, unknown_mentions = extract_table_mentions_from_text(
+                        analyze_content, known_tables
+                    )
+                    logger.info(
+                        f"[bot_stream] Table mentions extracted: known={known_mentions}, unknown={unknown_mentions}"
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"[bot_stream] Error extracting table mentions: {e}",
+                        exc_info=True,
+                    )
+                    known_mentions = set()
+                    unknown_mentions = set()
                 if schema_confirmed and unknown_mentions:
                     messages.append({"role": "assistant", "content": cur_res})
                     warn_unknown = (
@@ -1606,9 +1620,12 @@ def bot_stream(messages, workspace, session_id="default"):
                     continue
 
             if finished:
+                logger.info(f"[bot_stream] Finished flag detected, breaking loop")
                 break
 
+            logger.info(f"[bot_stream] Checking for <Code> block in response")
             has_code_block = "<Code>" in cur_res and "</Code>" in cur_res
+            logger.info(f"[bot_stream] has_code_block={has_code_block}")
 
             # 调试日志：检查 Code 标签检测
             if not has_code_block:
