@@ -1350,7 +1350,25 @@ def bot_stream(messages, workspace, session_id="default"):
                         if len(repetition_check_window) >= 100:
                             char_counts = {}
                             for char in repetition_check_window:
-                                if char in ("-", "=", "_", "*", "\n", " "):
+                                # 检测重复的分隔符、空白符和数字
+                                if char in (
+                                    "-",
+                                    "=",
+                                    "_",
+                                    "*",
+                                    "\n",
+                                    " ",
+                                    "0",
+                                    "1",
+                                    "2",
+                                    "3",
+                                    "4",
+                                    "5",
+                                    "6",
+                                    "7",
+                                    "8",
+                                    "9",
+                                ):
                                     char_counts[char] = char_counts.get(char, 0) + 1
                             max_count = max(char_counts.values()) if char_counts else 0
                             if max_count > len(repetition_check_window) * 0.8:
@@ -1943,6 +1961,58 @@ def bot_stream(messages, workspace, session_id="default"):
                             + "。请补全导入后再执行。"
                         )
                         messages.append({"role": "user", "content": import_prompt})
+                        refund_iteration()
+                        continue
+
+                    # 检测是否使用了 DB_PATH 或 OUTPUT_DIR 但未定义
+                    uses_db_path = "DB_PATH" in effective_code
+                    uses_output_dir = "OUTPUT_DIR" in effective_code
+                    defines_db_path = (
+                        "DB_PATH = " in effective_code or "DB_PATH=" in effective_code
+                    )
+                    defines_output_dir = (
+                        "OUTPUT_DIR = " in effective_code
+                        or "OUTPUT_DIR=" in effective_code
+                    )
+
+                    if uses_db_path and not defines_db_path:
+                        logger.warning(
+                            f"[bot_stream] Code rejected: uses DB_PATH but not defined"
+                        )
+                        available_sqlite_files = iter_sqlite_files(workspace_path)
+                        sample_display = ""
+                        if available_sqlite_files:
+                            sample = available_sqlite_files[0]
+                            sample_display = str(sample.resolve())
+
+                        db_path_prompt = "❌ 错误：代码中使用了 `DB_PATH` 变量，但未在代码开头定义。\n\n"
+                        if sample_display:
+                            db_path_prompt += (
+                                f"✅ **必须在代码开头定义**：\n"
+                                f"```python\nDB_PATH = r'{sample_display}'\n```\n\n"
+                                "请在所有 import 语句之后、使用 DB_PATH 之前添加上述定义。"
+                            )
+                        else:
+                            db_path_prompt += "请在代码开头定义 DB_PATH 变量，指向 workspace 中实际存在的 sqlite 文件的绝对路径。"
+                        messages.append({"role": "user", "content": db_path_prompt})
+                        refund_iteration()
+                        continue
+
+                    if uses_output_dir and not defines_output_dir:
+                        logger.warning(
+                            f"[bot_stream] Code rejected: uses OUTPUT_DIR but not defined"
+                        )
+                        output_dir_prompt = (
+                            "❌ 错误：代码中使用了 `OUTPUT_DIR` 变量，但未在代码开头定义。\n\n"
+                            "✅ **必须在代码开头定义**：\n"
+                            "```python\n"
+                            "from pathlib import Path\n"
+                            "OUTPUT_DIR = Path('generated')\n"
+                            "OUTPUT_DIR.mkdir(parents=True, exist_ok=True)\n"
+                            "```\n\n"
+                            "请在所有 import 语句之后、使用 OUTPUT_DIR 之前添加上述定义。"
+                        )
+                        messages.append({"role": "user", "content": output_dir_prompt})
                         refund_iteration()
                         continue
 
