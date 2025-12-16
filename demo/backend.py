@@ -1222,7 +1222,7 @@ def bot_stream(messages, workspace, session_id="default"):
     missing_code_rounds = 0  # 连续缺少 <Code> 标签的轮数
     MAX_MISSING_CODE_ROUNDS = 3
     duplicate_analyze_rounds = 0  # 连续重复 <Analyze> 的轮数
-    MAX_DUPLICATE_ANALYZE_ROUNDS = 3  # 最多允许 3 轮重复
+    MAX_DUPLICATE_ANALYZE_ROUNDS = 5  # 最多允许 5 轮重复（增加容忍度）
     baseline_tables = list_sqlite_tables(workspace_path)
     known_tables = set(baseline_tables)
     initial_tables_locked = bool(known_tables)
@@ -1473,10 +1473,10 @@ def bot_stream(messages, workspace, session_id="default"):
                 )
                 if empty_retry < 3:
                     retry_prompt = (
-                        "检测到你的输出为空。请严格按照要求输出：\n"
-                        "1. <Analyze> 段：说明当前分析目标和依据\n"
-                        "2. <Code> 段：提供可执行的 Python 代码（不要使用 <表名>、<字段名> 等占位符）\n"
-                        "请基于首轮 bootstrap 输出的真实表结构，生成可直接执行的代码。"
+                        "检测到你的输出为空。请立即输出：\n"
+                        "<Analyze>\n当前目标=（说明本轮要做什么，基于哪些表/字段）\n</Analyze>\n\n"
+                        "<Code>\nimport sqlite3\nimport pandas as pd\n# 编写完整可执行代码\n</Code>\n\n"
+                        "注意：不要重复上一轮的分析目标，必须提出新的分析步骤或直接输出 <Answer>。"
                     )
                     messages.append({"role": "user", "content": retry_prompt})
                     refund_iteration()  # 关键：退还迭代计数
@@ -1525,9 +1525,11 @@ def bot_stream(messages, workspace, session_id="default"):
 
                 messages.append({"role": "assistant", "content": cur_res})
                 diff_prompt = (
-                    f"你的 <Analyze> 内容与上一轮完全相同（已连续 {duplicate_analyze_rounds} 轮）。"
-                    "请结合最新的 <Execute>/<File> 结果提出**完全不同**的分析步骤，"
-                    "或者如果分析已完成，请直接输出 <Answer> 总结结论。"
+                    f"【警告】你的 <Analyze> 内容与上一轮完全相同（已连续 {duplicate_analyze_rounds} 轮）。\n\n"
+                    "请立即采取以下行动之一：\n"
+                    "1. 如果已完成所有分析，直接输出 <Answer> 总结结论（包含 2+ 条定量发现和后续建议）\n"
+                    "2. 如果还需继续分析，必须提出**完全不同**的分析目标（例如：分析其他表、其他字段、不同维度的聚合等）\n\n"
+                    "禁止重复相同的分析步骤。"
                 )
                 messages.append({"role": "user", "content": diff_prompt})
                 refund_iteration()
