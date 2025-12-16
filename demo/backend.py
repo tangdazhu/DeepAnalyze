@@ -2432,6 +2432,9 @@ def bot_stream(messages, workspace, session_id="default"):
     if not finished and forced_reason == "" and iteration >= MAX_ITERATIONS:
         forced_reason = f"已达到最大迭代次数（{MAX_ITERATIONS}），自动结束当前任务"
 
+    if not finished and forced_reason == "" and raw_iterations >= max_raw_iterations:
+        forced_reason = f"模型经过 {raw_iterations} 次尝试仍无法生成有效输出，已达到重试上限。可能原因：模型质量不足或提示词过于复杂。建议使用更强大的模型或简化任务"
+
     if forced_reason and "</Answer>" not in assistant_reply:
         answer_block = f"\n<Answer>\n{forced_reason}。请参考以上 <Execute>/<File> 输出，必要时重新发起指令。\n</Answer>\n"
         assistant_reply += answer_block
