@@ -1427,6 +1427,7 @@ def bot_stream(messages, workspace, session_id="default"):
             forced_reason = "模型流式输出失败"
             assistant_reply += error_block
             yield error_block
+            finished = True  # 标记为完成，继续执行后续的报告生成逻辑
             break
 
         if premature_answer_detected and not finished:
