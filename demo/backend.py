@@ -1807,13 +1807,26 @@ def bot_stream(messages, workspace, session_id="default"):
                         messages.append({"role": "user", "content": ddl_prompt})
                         refund_iteration()
                         continue
+                    # 检测是否只查询 sqlite_master 而不查询真实表
+                    has_sqlite_master_query = "sqlite_master" in normalized_code
+                    has_real_table_query = (
+                        any(
+                            f"from {tbl}" in normalized_code.lower()
+                            or f"from `{tbl}`" in normalized_code.lower()
+                            for tbl in known_tables
+                        )
+                        if known_tables
+                        else False
+                    )
+
                     if (
                         schema_confirmed
-                        and "sqlite_master" in normalized_code
+                        and has_sqlite_master_query
+                        and not has_real_table_query
                         and "pragma" not in normalized_code
                     ):
                         logger.warning(
-                            f"[bot_stream] Code rejected: repeated sqlite_master query after schema confirmed"
+                            f"[bot_stream] Code rejected: only sqlite_master query after schema confirmed"
                         )
                         schema_only_repeat += 1
                         table_examples = sorted(known_tables)
@@ -1828,13 +1841,14 @@ def bot_stream(messages, workspace, session_id="default"):
                             else "例如：SELECT * FROM 某个真实表 LIMIT 5"
                         )
                         refresh_prompt = (
-                            "表结构已经明确，无需再次查询 sqlite_master。请直接对真实表（如："
+                            "表结构已经明确，无需再次**单独**查询 sqlite_master。请直接对真实表（如："
                             + example_text
-                            + f"）执行 SELECT/EDA，比如 {sample_next} 或绘制对应字段的分布。"
+                            + f"）执行 SELECT/EDA，比如 {sample_next} 或绘制对应字段的分布。\n\n"
+                            "如果需要动态获取表名列表，可以在代码中查询 sqlite_master 后立即对真实表执行分析。"
                         )
-                        if schema_only_repeat >= 2:
+                        if schema_only_repeat >= 3:
                             violation_block = (
-                                "\n<Answer>\n已确认表结构后仍连续输出 sqlite_master 查询，任务被自动终止。"
+                                "\n<Answer>\n已确认表结构后仍连续 3 轮只查询 sqlite_master 而不分析真实表，任务被自动终止。"
                                 " 请重新发起会话，并在首轮之外直接针对真实表执行 SELECT/EDA。\n</Answer>\n"
                             )
                             assistant_reply += violation_block
