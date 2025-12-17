@@ -688,6 +688,18 @@ def extract_sql_table_names(code: str) -> set[str]:
         "generating",
         "saving",
         "printing",
+        # SQLite 元数据字段名（sqlite_master 的列名，不是表名）
+        "table_name",
+        "sql",
+        "schema",
+        "rows",
+        "SQL",
+        "type",
+        "name",
+        "tbl_name",
+        "rootpage",
+        "sqlite_master",
+        "sqlite_sequence",
     }
 
     return {tbl for tbl in tables if tbl.lower() not in PYTHON_KEYWORDS}
