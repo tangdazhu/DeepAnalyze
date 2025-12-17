@@ -556,13 +556,34 @@ def extract_table_mentions_from_text(
         "with",
     }
 
+    # 文件名后缀模式（用于过滤文件名）
+    FILE_SUFFIXES = {
+        "summary",
+        "dist",
+        "distribution",
+        "count",
+        "info",
+        "data",
+        "result",
+        "chart",
+        "plot",
+        "graph",
+    }
+
     known: set[str] = set()
     unknown: set[str] = set()
     for tok in tokens:
         tok_lower = tok.lower()
         if tok_lower in normalized_known:
             known.add(next(tbl for tbl in known_tables if tbl.lower() == tok_lower))
-        elif tok_lower not in COMMON_WORDS:
+        elif tok_lower in COMMON_WORDS:
+            continue
+        else:
+            # 过滤掉文件名模式：如果 token 包含下划线且以文件后缀结尾，跳过
+            if "_" in tok_lower:
+                parts = tok_lower.split("_")
+                if len(parts) >= 2 and parts[-1] in FILE_SUFFIXES:
+                    continue
             unknown.add(tok)
     return known, unknown
 
