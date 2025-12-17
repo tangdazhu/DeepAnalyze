@@ -593,8 +593,9 @@ def extract_sql_table_names(code: str) -> set[str]:
     tables = set(SQL_TABLE_PATTERN.findall(code or ""))
     tables.update(SQL_PRAGMA_PATTERN.findall(code or ""))
 
-    # 过滤掉 Python 标准库模块名和常见变量名
+    # 过滤掉 Python 标准库模块名、常见变量名、以及可能出现在注释/字符串中的词
     PYTHON_KEYWORDS = {
+        # Python 模块和库
         "pathlib",
         "sqlite3",
         "pandas",
@@ -605,6 +606,7 @@ def extract_sql_table_names(code: str) -> set[str]:
         "plt",
         "sns",
         "np",
+        # 常见变量名
         "conn",
         "cursor",
         "df",
@@ -615,6 +617,20 @@ def extract_sql_table_names(code: str) -> set[str]:
         "data",
         "result",
         "query",
+        "stats",
+        "merged",
+        "merged_df",
+        "school_counts",
+        "school_top3",
+        "bankrupt_absence",
+        "non_bankrupt_absence",
+        "absence_stats",
+        "bankrupcy_df",
+        "absence_df",
+        "enrolled_df",
+        "filed_for_bankrupcy_df",
+        "longest_absense_df",
+        # Pandas/Matplotlib 方法和参数
         "include",
         "all",
         "transpose",
@@ -632,6 +648,46 @@ def extract_sql_table_names(code: str) -> set[str]:
         "figsize",
         "tight_layout",
         "countplot",
+        "barplot",
+        "head",
+        "tail",
+        "describe",
+        "value_counts",
+        "fillna",
+        "astype",
+        "merge",
+        "crosstab",
+        "margins",
+        # 常见的分析相关词汇（可能出现在注释或字符串中）
+        "analysis",
+        "completed",
+        "distribution",
+        "joint",
+        "bankrupt",
+        "non",
+        "vs",
+        "top",
+        "top3",
+        "absence",
+        "duration",
+        "error",
+        "connecting",
+        "database",
+        "validating",
+        "validation",
+        "available",
+        "columns",
+        "required",
+        "tables",
+        "exist",
+        "correctly",
+        "named",
+        "proceeding",
+        "reading",
+        "executing",
+        "generating",
+        "saving",
+        "printing",
     }
 
     return {tbl for tbl in tables if tbl.lower() not in PYTHON_KEYWORDS}
