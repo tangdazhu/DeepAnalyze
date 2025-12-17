@@ -1658,6 +1658,14 @@ def bot_stream(messages, workspace, session_id="default"):
                     finished = True
                     break
                 current_stream = sanitized_stream
+
+                # 检测到 </Code> 标签时立即停止流式接收，防止模型在 </Code> 后继续输出
+                if "</Code>" in current_stream:
+                    logger.info(
+                        f"[bot_stream] Detected </Code>, stopping stream reception"
+                    )
+                    break
+
                 if "</Answer>" in current_stream:
                     if non_schema_exec_rounds == 0:
                         premature_answer_rounds += 1
