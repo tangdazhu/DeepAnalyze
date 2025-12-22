@@ -82,52 +82,53 @@
 - **第 9 轮**：生成多表关联 HTML 报告（汇总第 7 轮结果）
 - **第 10 轮**：输出最终答案
 
-### 4. 第 2-6 轮：CSV 单表分析（必须完成）
+### 4. 第 2-6 轮：单表数据分析（必须完成）
 
 **强制要求**：
-- 必须完成 **5 轮 CSV 文件分析**
-- 分析以下 5 个主要数据集（**统一使用 `.csv` 格式**）：
-  - 第 2 轮：`enrolled.csv`（入学记录，name/school/month）
-  - 第 3 轮：`male.csv`（性别信息，name）
-  - 第 4 轮：`unemployed.csv`（失业情况，name）
-  - 第 5 轮：`no_payment_due.csv`（还款情况，name/bool）
-  - 第 6 轮：`disabled.csv` 或 `filed_for_bankrupcy.csv`（残疾/破产，name）
+- 必须完成 **5 轮单表分析**
+- **严格按照第 1 轮 Bootstrap 输出的表结构进行分析**
+- 分析以下 5 个表（按顺序）：
+  - **第 2 轮**：`enrolled` 表（字段：name, school, month）→ 分析学校分布和入学时间分布
+  - **第 3 轮**：`no_payment_due` 表（字段：name, bool）→ 分析还款状态分布
+  - **第 4 轮**：`longest_absense_from_school` 表（字段：name, month）→ 分析缺勤时长分布
+  - **第 5 轮**：`enlist` 表（字段：name, organ）→ 分析服役单位分布
+  - **第 6 轮**：`disabled` 表（字段：name）→ 统计残疾学生数量并与总人数对比
 - 每轮必须生成至少 1 个 CSV 文件和 1 个 PNG 图表
 - 所有文件保存到 `generated/` 目录
 
-**为什么使用 CSV 而不是 SQLite？**
-- ✅ 更轻量，读取速度快
-- ✅ 代码简洁，适合单表分析
-- ✅ 避免数据库路径问题
-- ✅ 第 7 轮会使用 SQLite 进行多表关联分析
+**重要提醒**：
+- ❌ **禁止使用第 1 轮 Bootstrap 中不存在的字段**（如 `male` 表没有 `bool` 字段）
+- ✅ 使用 SQLite 数据库读取数据（已在第 1 轮提供绝对路径）
+- ✅ 第 7 轮会进行多表关联分析
 
-**示例：第 2 轮分析 enrolled.csv 文件**
+**示例：第 2 轮分析 enrolled 表**
 
 ```
 <Analyze>
-分析 enrolled.csv 的学校分布
+分析 enrolled 表的学校分布和入学时间
 </Analyze>
 
 <Code>
+import sqlite3
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
 
+# 使用第 1 轮提供的数据库路径
+DB_PATH = r"/home/tdz/DeepAnalyze/demo/workspace/session_xxx/student_loan.sqlite"
 OUTPUT_DIR = Path("generated")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-# 读取 CSV 文件
-df = pd.read_csv("enrolled.csv")
+with sqlite3.connect(DB_PATH, timeout=30) as conn:
+    df = pd.read_sql_query("SELECT * FROM enrolled LIMIT 1000", conn)
 
 # 统计学校分布
 school_counts = df['school'].value_counts().reset_index()
 school_counts.columns = ['school', 'count']
-
-# 保存统计结果
 school_counts.to_csv(OUTPUT_DIR / "enrolled_school_summary.csv", index=False, encoding='utf-8')
 
-# 可视化
+# 可视化学校分布
 plt.figure(figsize=(10, 6))
 sns.barplot(data=school_counts.head(15), x='count', y='school', palette='viridis')
 plt.title("前15所入学学校学生数量分布")
@@ -137,52 +138,45 @@ plt.tight_layout()
 plt.savefig(OUTPUT_DIR / "enrolled_school_dist.png", dpi=120)
 plt.close()
 
-print(f"分析完成：enrolled.csv 共 {len(df)} 条记录，{len(school_counts)} 所学校")
+print(f"分析完成：enrolled 表共 {len(df)} 条记录，{len(school_counts)} 所学校")
 </Code>
 ```
 
-**第 3 轮示例：分析 male.xlsx 文件**
+**第 3 轮示例：分析 no_payment_due 表**
 
 ```
 <Analyze>
-分析 male.xlsx 的性别分布
+分析 no_payment_due 表的还款状态分布
 </Analyze>
 
 <Code>
+import sqlite3
 import pandas as pd
 import matplotlib.pyplot as plt
 from pathlib import Path
 
+DB_PATH = r"/home/tdz/DeepAnalyze/demo/workspace/session_xxx/student_loan.sqlite"
 OUTPUT_DIR = Path("generated")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-# 读取 Excel 文件
-df_male = pd.read_excel("male.xlsx")
-df_person = pd.read_csv("person.csv")
+with sqlite3.connect(DB_PATH, timeout=30) as conn:
+    df = pd.read_sql_query("SELECT * FROM no_payment_due LIMIT 1000", conn)
 
-# 统计性别分布
-total = len(df_person)
-male_count = len(df_male)
-female_count = total - male_count
-
-gender_stats = pd.DataFrame({
-    'gender': ['男性', '女性'],
-    'count': [male_count, female_count],
-    'percentage': [male_count/total*100, female_count/total*100]
-})
-
-# 保存统计结果
-gender_stats.to_csv(OUTPUT_DIR / "gender_distribution.csv", index=False, encoding='utf-8')
+# 统计还款状态
+payment_stats = df['bool'].value_counts().reset_index()
+payment_stats.columns = ['status', 'count']
+payment_stats['percentage'] = payment_stats['count'] / len(df) * 100
+payment_stats.to_csv(OUTPUT_DIR / "payment_status_summary.csv", index=False, encoding='utf-8')
 
 # 可视化
-plt.figure(figsize=(8, 6))
-plt.pie(gender_stats['count'], labels=gender_stats['gender'], autopct='%1.1f%%', startangle=90)
-plt.title("学生性别分布")
+plt.figure(figsize=(6, 4))
+plt.pie(payment_stats['count'], labels=payment_stats['status'], autopct='%1.1f%%')
+plt.title("学生还款状态分布")
 plt.tight_layout()
-plt.savefig(OUTPUT_DIR / "gender_distribution.png", dpi=120)
+plt.savefig(OUTPUT_DIR / "payment_status_dist.png", dpi=120)
 plt.close()
 
-print(f"分析完成：总人数 {total}，男性 {male_count}，女性 {female_count}")
+print(f"分析完成：no_payment_due 表共 {len(df)} 条记录")
 </Code>
 ```
 
@@ -553,47 +547,125 @@ print("多表关联 HTML 报告已生成：generated/multi_table_analysis.html")
 
 ## 开始分析
 
-**完整流程总结**：
-- **第 1 轮**：系统自动 bootstrap（已完成）
-- **第 2-6 轮**：CSV 单表分析
-  - 第 2 轮：分析 `enrolled.csv`，生成 CSV + PNG
-  - 第 3 轮：分析 `male.csv`，生成 CSV + PNG
-  - 第 4 轮：分析 `unemployed.csv`，生成 CSV + PNG
-  - 第 5 轮：分析 `no_payment_due.csv`，生成 CSV + PNG
-  - 第 6 轮：分析 `disabled.csv` 或 `filed_for_bankrupcy.csv`，生成 CSV + PNG
-- **第 7 轮**：SQLite 多表关联分析，生成 CSV + PNG
-- **第 8 轮**：生成单表分析 HTML 报告（`single_table_analysis.html`）
-- **第 9 轮**：生成多表关联 HTML 报告（`multi_table_analysis.html`）
-- **第 10 轮**：输出 `<Answer>`
+**⚠️ 强制执行流程 - 必须严格按照以下顺序执行，禁止跳过或调整顺序 ⚠️**
 
-**分析策略说明**：
-- 第 2-6 轮：使用 CSV 文件进行单表分析（每个数据源独立分析）
-- 第 7 轮：使用 SQLite 数据库进行多表 JOIN 分析（发现数据关联）
-- 第 8 轮：汇总单表分析结果，生成第一份 HTML 报告
-- 第 9 轮：汇总多表关联结果，生成第二份 HTML 报告
-- 不重复分析相同数据，CSV 和 SQLite 各取所长，两份报告各有侧重
+### 第 2 轮（当前轮次）：分析 enrolled 表
+**任务**：分析 `enrolled` 表的学校分布
+**表名**：`enrolled`
+**字段**：name, school, month
+**输出文件**：
+- `enrolled_summary.csv`
+- `enrolled_school_dist.png`
 
-**现在立即开始第 2 轮**：
+### 第 3 轮：分析 no_payment_due 表
+**任务**：分析 `no_payment_due` 表的还款状态分布
+**表名**：`no_payment_due`
+**字段**：name, bool
+**输出文件**：
+- `payment_status_summary.csv`
+- `payment_status_dist.png`
 
-你必须立即输出以下格式：
+### 第 4 轮：分析 longest_absense_from_school 表
+**任务**：分析 `longest_absense_from_school` 表的缺勤时长分布
+**表名**：`longest_absense_from_school`
+**字段**：name, month
+**输出文件**：
+- `absense_summary.csv`
+- `absense_month_dist.png`
+
+### 第 5 轮：分析 enlist 表
+**任务**：分析 `enlist` 表的服役单位分布
+**表名**：`enlist`
+**字段**：name, organ
+**输出文件**：
+- `enlist_summary.csv`
+- `enlist_organ_dist.png`
+
+### 第 6 轮：分析 disabled 表
+**任务**：统计 `disabled` 表的残疾学生数量
+**表名**：`disabled`
+**字段**：name
+**输出文件**：
+- `disabled_count.csv`
+- `disabled_vs_total.png`
+
+### 第 7 轮：多表关联分析
+**任务**：使用 SQL JOIN 关联多个表，分析失业学生的性别和还款情况
+**表名**：`unemployed`, `male`, `no_payment_due`
+**输出文件**：
+- `unemployed_gender_payment.csv`
+- `unemployed_gender_payment.png`
+
+### 第 8 轮：生成单表分析 HTML 报告
+**任务**：汇总第 2-6 轮的单表分析结果
+**输出文件**：
+- `single_table_analysis.html`
+
+### 第 9 轮：生成多表关联 HTML 报告
+**任务**：汇总第 7 轮的多表关联分析结果
+**输出文件**：
+- `multi_table_analysis.html`
+
+### 第 10 轮：输出最终答案
+**任务**：输出 `<Answer>` 标签，总结分析结果
+
+---
+
+**❌ 绝对禁止的行为**：
+1. 禁止跳过任何轮次（必须完成第 2-10 轮）
+2. 禁止调整轮次顺序（必须按 2→3→4→5→6→7→8→9→10 执行）
+3. 禁止分析未指定的表（如第 3 轮必须分析 `no_payment_due`，不能分析 `enlist`）
+4. 禁止在第 10 轮之前输出 `<Answer>`
+5. 禁止在第 8、9 轮之前生成 HTML 报告
+6. 禁止自己创造分析任务（如 `male` 和 `disabled` 重叠分析）
+
+---
+
+## 🚀 现在立即开始第 2 轮分析
+
+**当前轮次**：第 2 轮
+**任务**：分析 `enrolled` 表的学校分布
+**必须生成的文件**：
+- `enrolled_summary.csv`
+- `enrolled_school_dist.png`
+
+**你必须立即输出以下格式（不要输出任何解释性文字）**：
 
 ```
 <Analyze>
-分析 enrolled.csv 的学校分布
+第 2 轮：分析 enrolled 表的学校分布
 </Analyze>
 
 <Code>
+import sqlite3
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
 
+# 使用第 1 轮提供的数据库路径
+DB_PATH = r"/home/tdz/DeepAnalyze/demo/workspace/session_xxx/student_loan.sqlite"
 OUTPUT_DIR = Path("generated")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-df = pd.read_csv("enrolled.csv")
-...
+with sqlite3.connect(DB_PATH, timeout=30) as conn:
+    df = pd.read_sql_query("SELECT * FROM enrolled LIMIT 1000", conn)
+
+# 统计学校分布
+school_counts = df['school'].value_counts().reset_index()
+school_counts.columns = ['school', 'count']
+school_counts.to_csv(OUTPUT_DIR / "enrolled_summary.csv", index=False, encoding='utf-8')
+
+# 可视化
+plt.figure(figsize=(10, 6))
+sns.barplot(data=school_counts.head(15), x='count', y='school', palette='viridis')
+plt.title("学校分布")
+plt.tight_layout()
+plt.savefig(OUTPUT_DIR / "enrolled_school_dist.png", dpi=120)
+plt.close()
+
+print(f"第 2 轮完成：enrolled 表共 {len(df)} 条记录")
 </Code>
 ```
 
-**禁止输出任何解释性文字，禁止询问用户需求，禁止等待用户指令，立即开始分析！**
+**⚠️ 完成第 2 轮后，立即开始第 3 轮，分析 `no_payment_due` 表，禁止跳过！**
