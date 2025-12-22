@@ -2181,6 +2181,28 @@ def bot_stream(messages, workspace, session_id="default"):
                     continue
 
             if finished:
+                # 检查是否提前输出 Answer（在完成足够轮次之前）
+                MIN_REQUIRED_ROUNDS = 8  # 至少需要 8 轮（2-9 轮分析 + HTML 生成）
+                if execute_rounds < MIN_REQUIRED_ROUNDS:
+                    logger.warning(
+                        f"[bot_stream] Premature <Answer> detected: execute_rounds={execute_rounds}, required={MIN_REQUIRED_ROUNDS}"
+                    )
+                    messages.append({"role": "assistant", "content": cur_res})
+                    reject_msg = (
+                        f"⚠️ 检测到提前终止：当前仅完成 {execute_rounds} 轮分析，但任务要求完成至少 {MIN_REQUIRED_ROUNDS} 轮。\n\n"
+                        "**必须继续执行以下轮次**：\n"
+                        "- 第 2-6 轮：单表分析（enrolled, no_payment_due, longest_absense_from_school, enlist, disabled）\n"
+                        "- 第 7 轮：多表关联分析\n"
+                        "- 第 8 轮：生成单表分析 HTML 报告（single_table_analysis.html）\n"
+                        "- 第 9 轮：生成多表关联 HTML 报告（multi_table_analysis.html）\n"
+                        "- 第 10 轮：输出最终 <Answer>\n\n"
+                        f"**请立即继续第 {execute_rounds + 1} 轮分析，禁止输出 <Answer>。**"
+                    )
+                    messages.append({"role": "user", "content": reject_msg})
+                    refund_iteration()
+                    finished = False
+                    continue
+
                 logger.info(f"[bot_stream] Finished flag detected, breaking loop")
                 break
 
