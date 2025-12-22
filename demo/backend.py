@@ -2033,11 +2033,59 @@ def bot_stream(messages, workspace, session_id="default"):
                     f"[bot_stream] Empty response detected (retry {empty_retry}/3)"
                 )
                 if empty_retry < 3:
+                    # 根据当前轮次给出具体指导
+                    next_round = execute_rounds + 1
+                    if next_round == 2:
+                        table_hint = "enrolled（必须分析字段：name, school, month）"
+                        file_hint = "enrolled_summary.csv, enrolled_school_dist.png"
+                    elif next_round == 3:
+                        table_hint = "no_payment_due（必须分析字段：name, bool）"
+                        file_hint = (
+                            "no_payment_due_summary.csv, no_payment_due_bool_dist.png"
+                        )
+                    elif next_round == 4:
+                        table_hint = (
+                            "longest_absense_from_school（必须分析字段：name, month）"
+                        )
+                        file_hint = "longest_absense_summary.csv, longest_absense_month_dist.png"
+                    elif next_round == 5:
+                        table_hint = "enlist（必须分析字段：name, organ）"
+                        file_hint = "enlist_summary.csv, enlist_organ_dist.png"
+                    elif next_round == 6:
+                        table_hint = "disabled（必须分析字段：name）"
+                        file_hint = "disabled_summary.csv, disabled_count.png"
+                    elif next_round == 7:
+                        table_hint = "多表关联分析（JOIN enrolled, no_payment_due, disabled 等表）"
+                        file_hint = (
+                            "multi_table_join_result.csv, correlation_analysis.png"
+                        )
+                    elif next_round == 8:
+                        table_hint = "生成单表分析 HTML 报告"
+                        file_hint = "single_table_analysis.html"
+                    elif next_round == 9:
+                        table_hint = "生成多表关联 HTML 报告"
+                        file_hint = "multi_table_analysis.html"
+                    else:
+                        table_hint = "完成剩余分析或输出最终 <Answer>"
+                        file_hint = "根据任务要求生成相应文件"
+
                     retry_prompt = (
-                        "检测到你的输出为空。请立即输出：\n"
-                        "<Analyze>\n当前目标=（说明本轮要做什么，基于哪些表/字段）\n</Analyze>\n\n"
-                        "<Code>\nimport sqlite3\nimport pandas as pd\n# 编写完整可执行代码\n</Code>\n\n"
-                        "注意：不要重复上一轮的分析目标，必须提出新的分析步骤或直接输出 <Answer>。"
+                        f"⚠️ 检测到第 {next_round} 轮输出为空（已重试 {empty_retry}/3 次）。\n\n"
+                        f"**第 {next_round} 轮任务**：\n"
+                        f"- 必须分析的表/任务：{table_hint}\n"
+                        f"- 必须生成的文件：{file_hint}\n\n"
+                        "**立即输出以下格式**：\n"
+                        "<Analyze>\n"
+                        f"当前目标=第 {next_round} 轮分析，分析 {table_hint}，生成 {file_hint}\n"
+                        "</Analyze>\n\n"
+                        "<Code>\n"
+                        "import sqlite3\n"
+                        "import pandas as pd\n"
+                        "import matplotlib.pyplot as plt\n"
+                        "from pathlib import Path\n"
+                        "# 编写完整可执行代码\n"
+                        "</Code>\n\n"
+                        f"**禁止跳过第 {next_round} 轮，禁止提前输出 <Answer>。**"
                     )
                     messages.append({"role": "user", "content": retry_prompt})
                     refund_iteration()  # 关键：退还迭代计数

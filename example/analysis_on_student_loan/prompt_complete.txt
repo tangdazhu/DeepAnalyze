@@ -630,52 +630,28 @@ print("多表关联 HTML 报告已生成：generated/multi_table_analysis.html")
 
 ## 🚀 现在立即开始第 2 轮分析
 
-**当前轮次**：第 2 轮
-**任务**：分析 `enrolled` 表的学校分布
-**必须生成的文件**：
-- `enrolled_summary.csv`
-- `enrolled_school_dist.png`
-
-**你必须立即输出以下格式（不要输出任何解释性文字）**：
-
+**立即输出**：
 ```
-<Analyze>
-第 2 轮：分析 enrolled 表的学校分布
-</Analyze>
-
+<Analyze>第 2 轮：分析 enrolled 表</Analyze>
 <Code>
 import sqlite3
 import pandas as pd
 import matplotlib.pyplot as plt
-import seaborn as sns
 from pathlib import Path
 
-# 使用第 1 轮提供的数据库路径
-DB_PATH = r"/home/tdz/DeepAnalyze/demo/workspace/session_xxx/student_loan.sqlite"
+DB_PATH = r"<使用第1轮显示的绝对路径>"
 OUTPUT_DIR = Path("generated")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 with sqlite3.connect(DB_PATH, timeout=30) as conn:
-    df = pd.read_sql_query("SELECT * FROM enrolled LIMIT 1000", conn)
+    df = pd.read_sql_query("SELECT * FROM enrolled", conn)
 
-# 统计学校分布
-school_counts = df['school'].value_counts().reset_index()
-school_counts.columns = ['school', 'count']
-school_counts.to_csv(OUTPUT_DIR / "enrolled_summary.csv", index=False, encoding='utf-8')
-
-# 可视化
-plt.figure(figsize=(10, 6))
-sns.barplot(data=school_counts.head(15), x='count', y='school', palette='viridis')
-plt.title("学校分布")
-plt.tight_layout()
+df.describe(include='all').to_csv(OUTPUT_DIR / "enrolled_summary.csv")
+df['school'].value_counts().plot(kind='bar')
 plt.savefig(OUTPUT_DIR / "enrolled_school_dist.png", dpi=120)
 plt.close()
-
-print(f"第 2 轮完成：enrolled 表共 {len(df)} 条记录")
 </Code>
 ```
-
-**⚠️ 完成第 2 轮后，立即开始第 3 轮，分析 `no_payment_due` 表，禁止跳过！**
 
 ---
 
