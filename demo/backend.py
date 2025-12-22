@@ -1396,8 +1396,26 @@ def run_schema_bootstrap(workspace_path: Path, session_id: str = None) -> str:
         f"⚠️ **严禁使用相对路径或示例路径**，必须使用上方标注的真实绝对路径。\n"
     )
 
+    # 添加强制执行指令，防止模型输出解释性文字
+    next_step_instruction = (
+        "\n\n"
+        "=" * 80 + "\n"
+        "**【重要】现在立即开始第 2 轮分析**\n"
+        "=" * 80 + "\n\n"
+        "你必须立即输出以下格式，不要输出任何解释性文字：\n\n"
+        "```\n"
+        "<Analyze>\n"
+        "一句话说明本轮分析目标（不超过30字）\n"
+        "</Analyze>\n\n"
+        "<Code>\n"
+        "完整的 Python 代码\n"
+        "</Code>\n"
+        "```\n\n"
+        "**禁止输出任何解释性文字、问候语、询问语句。立即开始分析！**\n"
+    )
+
     file_block = "\n<File>\n暂无文件\n</File>\n"
-    return f"{block}{exe_block}{db_path_reminder}{file_block}"
+    return f"{block}{exe_block}{db_path_reminder}{next_step_instruction}{file_block}"
 
 
 def extract_effective_code(code_str: str) -> str:
