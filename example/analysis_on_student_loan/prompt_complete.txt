@@ -1,0 +1,599 @@
+# 数据分析任务 - Student Loan 数据分析
+
+**你的任务**：对学生贷款数据进行完整的数据分析。数据包含 **CSV/Excel 文件** 和 **SQLite 数据库**。
+
+**重要**：系统已完成第 1 轮 bootstrap，你现在必须立即开始第 2 轮分析，不要等待用户指令。
+
+## 数据背景
+
+这是一个关于学生贷款的数据集，包含学生的人口统计信息、教育记录、财务状况和就业状态等信息。
+
+## 数据文件清单
+
+**重要说明**：
+- 每个数据集都有 **CSV 和 XLSX 两个版本**，内容相同，可任选其一
+- SQLite 数据库包含所有数据，表名与文件名对应（如 `enrolled` 表 = `enrolled.csv`）
+
+**10 个数据集**（每个都有 `.csv` 和 `.xlsx` 两个文件）：
+1. `bool` - 布尔标记（仅包含 name 列，3 条记录）
+2. `person` - 学生名单（仅包含 name 列，1000 名学生）
+3. `disabled` - 残疾学生（name 列）
+4. `enlist` - 入伍记录（name, organ 列）
+5. `filed_for_bankrupcy` - 破产记录（name 列）
+6. `longest_absense_from_school` - 最长缺勤记录（name, month 列）
+7. `male` - 男性学生（name 列，存在即为男性）
+8. `no_payment_due` - 还款记录（name, bool 列）
+9. `unemployed` - 失业学生（name 列）
+10. `enrolled` - 入学记录（name, school, month 列，最大文件）
+
+**SQLite 数据库**：
+- `student_loan.sqlite` (300KB) - 包含上述 10 个表，表名与文件名一致
+
+**数据关系**：
+- 所有表通过 `name` 字段关联（学生姓名）
+- `person` 表是主表，包含所有学生
+- 其他表是子集，只包含特定条件的学生
+
+**重要**：第一轮执行后，系统会显示所有表的完整字段列表。**必须严格使用第一轮结果中的字段名**，不要根据文件名推测字段。
+
+## 必须遵守的核心流程
+
+### 1. 输出格式（每一轮必须严格遵守）
+
+**你必须立即输出以下格式，不要输出任何其他内容**：
+
+```
+<Analyze>
+一句话说明本轮分析目标（不超过30字）
+</Analyze>
+
+<Code>
+完整的 Python 代码
+</Code>
+```
+
+**关键规则**：
+- ✅ 第一轮 bootstrap 后，**立即输出 `<Analyze>` 和 `<Code>`**
+- ✅ `<Analyze>` 只写分析目标，不解释错误、不讨论方法
+- ✅ 输出 `</Code>` 后**立即停止**，不输出任何内容
+- ❌ **禁止输出任何解释性文字、问候语、询问语句**
+- ❌ **禁止说"已成功获取"、"请提出需求"等话**
+- ❌ 禁止在 `<Analyze>` 中解释上一轮错误
+- ❌ 禁止在 `</Code>` 后继续输出
+- ❌ 禁止输出 `<Execute>` 或 `<File>` 标签
+
+### 2. 第一轮：系统自动完成
+
+**重要**：第一轮由系统自动执行 bootstrap，已在 `<Execute>` 块中显示所有表的完整结构和数据库绝对路径。
+
+**你的任务**：仔细阅读第一轮的 `<Execute>` 输出，记住：
+- 数据库绝对路径（`DB_PATH`）
+- 所有表名和字段名
+- 禁止使用不存在的表名或字段名
+
+**第一轮后，立即开始第二轮分析，不要等待用户指令，不要询问用户需求**。
+
+### 3. 分析策略总览
+
+**整体策略**：
+- **第 2-6 轮**：使用 CSV 文件进行单表分析（每个数据源独立分析）
+- **第 7 轮**：使用 SQLite 数据库进行多表关联分析（发现数据关系）
+- **第 8 轮**：生成单表分析 HTML 报告（汇总第 2-6 轮结果）
+- **第 9 轮**：生成多表关联 HTML 报告（汇总第 7 轮结果）
+- **第 10 轮**：输出最终答案
+
+### 4. 第 2-6 轮：CSV 单表分析（必须完成）
+
+**强制要求**：
+- 必须完成 **5 轮 CSV 文件分析**
+- 分析以下 5 个主要数据集（**统一使用 `.csv` 格式**）：
+  - 第 2 轮：`enrolled.csv`（入学记录，name/school/month）
+  - 第 3 轮：`male.csv`（性别信息，name）
+  - 第 4 轮：`unemployed.csv`（失业情况，name）
+  - 第 5 轮：`no_payment_due.csv`（还款情况，name/bool）
+  - 第 6 轮：`disabled.csv` 或 `filed_for_bankrupcy.csv`（残疾/破产，name）
+- 每轮必须生成至少 1 个 CSV 文件和 1 个 PNG 图表
+- 所有文件保存到 `generated/` 目录
+
+**为什么使用 CSV 而不是 SQLite？**
+- ✅ 更轻量，读取速度快
+- ✅ 代码简洁，适合单表分析
+- ✅ 避免数据库路径问题
+- ✅ 第 7 轮会使用 SQLite 进行多表关联分析
+
+**示例：第 2 轮分析 enrolled.csv 文件**
+
+```
+<Analyze>
+分析 enrolled.csv 的学校分布
+</Analyze>
+
+<Code>
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from pathlib import Path
+
+OUTPUT_DIR = Path("generated")
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+# 读取 CSV 文件
+df = pd.read_csv("enrolled.csv")
+
+# 统计学校分布
+school_counts = df['school'].value_counts().reset_index()
+school_counts.columns = ['school', 'count']
+
+# 保存统计结果
+school_counts.to_csv(OUTPUT_DIR / "enrolled_school_summary.csv", index=False, encoding='utf-8')
+
+# 可视化
+plt.figure(figsize=(10, 6))
+sns.barplot(data=school_counts.head(15), x='count', y='school', palette='viridis')
+plt.title("前15所入学学校学生数量分布")
+plt.xlabel("学生数量")
+plt.ylabel("学校")
+plt.tight_layout()
+plt.savefig(OUTPUT_DIR / "enrolled_school_dist.png", dpi=120)
+plt.close()
+
+print(f"分析完成：enrolled.csv 共 {len(df)} 条记录，{len(school_counts)} 所学校")
+</Code>
+```
+
+**第 3 轮示例：分析 male.xlsx 文件**
+
+```
+<Analyze>
+分析 male.xlsx 的性别分布
+</Analyze>
+
+<Code>
+import pandas as pd
+import matplotlib.pyplot as plt
+from pathlib import Path
+
+OUTPUT_DIR = Path("generated")
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+# 读取 Excel 文件
+df_male = pd.read_excel("male.xlsx")
+df_person = pd.read_csv("person.csv")
+
+# 统计性别分布
+total = len(df_person)
+male_count = len(df_male)
+female_count = total - male_count
+
+gender_stats = pd.DataFrame({
+    'gender': ['男性', '女性'],
+    'count': [male_count, female_count],
+    'percentage': [male_count/total*100, female_count/total*100]
+})
+
+# 保存统计结果
+gender_stats.to_csv(OUTPUT_DIR / "gender_distribution.csv", index=False, encoding='utf-8')
+
+# 可视化
+plt.figure(figsize=(8, 6))
+plt.pie(gender_stats['count'], labels=gender_stats['gender'], autopct='%1.1f%%', startangle=90)
+plt.title("学生性别分布")
+plt.tight_layout()
+plt.savefig(OUTPUT_DIR / "gender_distribution.png", dpi=120)
+plt.close()
+
+print(f"分析完成：总人数 {total}，男性 {male_count}，女性 {female_count}")
+</Code>
+```
+
+**第 4-6 轮**：继续分析其他 CSV/Excel 文件，每个文件生成对应的统计结果和可视化图表。
+
+### 5. 第 7 轮：SQLite 多表关联分析
+
+**目的**：合并多个表，发现数据之间的关联。
+
+**示例：分析失业学生的性别和还款情况**
+
+```
+<Analyze>
+分析失业学生的性别和还款情况
+</Analyze>
+
+<Code>
+import sqlite3
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from pathlib import Path
+
+# 从第一轮输出中复制数据库路径
+DB_PATH = r"/home/tdz/DeepAnalyze/demo/workspace/session_xxx/student_loan.sqlite"
+OUTPUT_DIR = Path("generated")
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+# 合并 unemployed, male, no_payment_due 表
+query = """
+SELECT 
+    u.name,
+    CASE WHEN m.name IS NOT NULL THEN '男性' ELSE '女性' END AS gender,
+    CASE WHEN n.name IS NOT NULL THEN '有还款' ELSE '无还款' END AS payment_status
+FROM unemployed u
+LEFT JOIN male m ON u.name = m.name
+LEFT JOIN no_payment_due n ON u.name = n.name
+"""
+
+with sqlite3.connect(DB_PATH, timeout=30) as conn:
+    conn.execute("PRAGMA busy_timeout = 30000;")
+    df = pd.read_sql_query(query, conn)
+
+# 统计
+cross_tab = pd.crosstab(df['gender'], df['payment_status'])
+cross_tab.to_csv(OUTPUT_DIR / "unemployed_gender_payment.csv", encoding='utf-8')
+
+# 可视化
+plt.figure(figsize=(8, 6))
+cross_tab.plot(kind='bar', stacked=True)
+plt.title("失业学生性别与还款情况")
+plt.xlabel("性别")
+plt.ylabel("人数")
+plt.tight_layout()
+plt.savefig(OUTPUT_DIR / "unemployed_gender_payment.png", dpi=120)
+plt.close()
+
+print(f"分析完成：失业学生 {len(df)} 人")
+</Code>
+```
+
+### 6. 代码模板参考
+
+**代码模板 A：读取 CSV/Excel 文件**
+
+```python
+import pandas as pd
+import matplotlib.pyplot as plt
+from pathlib import Path
+
+OUTPUT_DIR = Path("generated")
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+# 读取 CSV 文件
+df = pd.read_csv("文件名.csv")
+# 或读取 Excel 文件
+# df = pd.read_excel("文件名.xlsx")
+
+# 数据分析
+summary = df.describe(include='all')
+summary.to_csv(OUTPUT_DIR / "描述性文件名.csv", encoding='utf-8')
+
+# 可视化
+plt.figure(figsize=(8, 6))
+# 你的绘图代码
+plt.title("图表标题")
+plt.tight_layout()
+plt.savefig(OUTPUT_DIR / "描述性文件名.png", dpi=120)
+plt.close()
+
+print("分析完成")
+```
+
+**代码模板 B：读取 SQLite 数据库**
+
+```python
+import sqlite3
+import pandas as pd
+import matplotlib.pyplot as plt
+from pathlib import Path
+
+# 从第一轮结果复制的真实路径
+DB_PATH = r"真实的数据库绝对路径"
+OUTPUT_DIR = Path("generated")
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+# 读取数据
+with sqlite3.connect(DB_PATH, timeout=30) as conn:
+    conn.execute("PRAGMA busy_timeout = 30000;")
+    df = pd.read_sql_query("SELECT * FROM 表名 LIMIT 1000", conn)
+
+# 数据分析和可视化（同上）
+```
+
+**代码模板 C：合并多个表分析**（基于 SQLite）
+
+```python
+import sqlite3
+import pandas as pd
+from pathlib import Path
+
+DB_PATH = r"真实的数据库绝对路径"
+OUTPUT_DIR = Path("generated")
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+# 使用 SQL JOIN 合并多个表
+query = """
+SELECT e.name, e.school, e.month, m.name AS is_male
+FROM enrolled e
+LEFT JOIN male m ON e.name = m.name
+LIMIT 1000
+"""
+
+with sqlite3.connect(DB_PATH, timeout=30) as conn:
+    conn.execute("PRAGMA busy_timeout = 30000;")
+    merged = pd.read_sql_query(query, conn)
+
+# 分析合并后的数据
+print(merged.head())
+merged.to_csv(OUTPUT_DIR / "merged_data.csv", index=False)
+```
+
+**注意**：`male` 表只有 `name` 字段，如果 name 存在则表示是男性，不存在则为女性。
+
+### 4. 遇到错误怎么办
+
+**如果代码执行出错，直接修改代码，不要在 `<Analyze>` 中解释错误原因。**
+
+常见错误处理：
+- **列名不存在**（`no such column: xxx`）→ 回到第一轮结果，使用正确的列名
+- **文件读取错误**（`FileNotFoundError`）→ 使用数据文件清单中的文件名
+- **SQL 语法错误** → 检查表名、字段名拼写
+
+**重要**：
+- 第一轮已提供完整的表结构，不要重复查询
+- 每轮只做一件事，不要一次合并多个表
+
+### 7. 第 8 轮：生成单表分析 HTML 报告
+
+**前置条件**：已完成 5 轮 CSV 文件单表分析（第 2-6 轮）。
+
+**报告内容**：
+- 汇总第 2-6 轮的单表分析结果
+- 包含每个数据源的统计信息和可视化图表
+- 标题：《学生贷款数据 - 单表分析报告》
+
+**第 8 轮任务**：
+
+```
+<Analyze>生成单表分析 HTML 报告</Analyze>
+
+<Code>
+[使用下方 HTML 模板]
+</Code>
+```
+
+**单表分析 HTML 报告模板**
+
+```python
+from pathlib import Path
+
+OUTPUT_DIR = Path("generated")
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+# 生成 HTML 报告
+html_content = """
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>学生贷款数据 - 单表分析报告</title>
+    <style>
+        body { font-family: "Microsoft YaHei", Arial, sans-serif; max-width: 1200px; margin: 0 auto; padding: 20px; background: #f5f5f5; }
+        .container { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        h1 { color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 10px; }
+        h2 { color: #3498db; margin-top: 30px; }
+        .summary { background: #ecf0f1; padding: 15px; border-radius: 5px; margin: 20px 0; }
+        .finding { background: #e8f5e9; padding: 15px; margin: 10px 0; border-left: 4px solid #4caf50; }
+        img { max-width: 100%; height: auto; margin: 20px 0; border: 1px solid #ddd; border-radius: 4px; }
+        .footer { margin-top: 40px; text-align: center; color: #7f8c8d; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>学生贷款数据分析报告</h1>
+        
+        <div class="summary">
+            <h2>数据概况</h2>
+            <p><strong>数据库表数：</strong>10 个表</p>
+            <p><strong>分析轮次：</strong>3 轮</p>
+            <p><strong>生成文件：</strong>CSV 统计文件 + PNG 可视化图表</p>
+        </div>
+        
+        <h2>分析结果</h2>
+        
+        <div class="finding">
+            <h3>发现 1：入学学校分布</h3>
+            <p>分析了 enrolled 表的学校分布，发现前 10 所学校占据了大部分学生。</p>
+            <img src="enrolled_school_dist.png" alt="学校分布图">
+        </div>
+        
+        <div class="finding">
+            <h3>发现 2：入学月份趋势</h3>
+            <p>学生入学存在明显的季节性特征，9 月和 1 月为入学高峰期。</p>
+            <img src="enrolled_month_dist.png" alt="月份分布图">
+        </div>
+        
+        <h2>结论与建议</h2>
+        <ul>
+            <li>数据质量良好，字段完整</li>
+            <li>建议进一步分析学校与还款能力的关系</li>
+            <li>可结合其他表（如 no_payment_due）进行深度分析</li>
+        </ul>
+        
+        <div class="footer">
+            <p>生成时间：2025-12-22</p>
+            <p>分析工具：DeepAnalyze + SQLite + Pandas</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+# 保存单表分析 HTML 文件
+with open(OUTPUT_DIR / "single_table_analysis.html", "w", encoding="utf-8") as f:
+    f.write(html_content)
+
+print("单表分析 HTML 报告已生成：generated/single_table_analysis.html")
+```
+
+**注意事项**：
+- HTML 中的图片路径使用相对路径（如 `enrolled_school_dist.png`）
+- HTML 内容需根据实际分析结果修改（不要使用示例数据）
+- 生成 HTML 后，**必须等待下一轮**才能继续
+
+### 8. 第 9 轮：生成多表关联 HTML 报告
+
+**前置条件**：已完成第 7 轮 SQLite 多表关联分析。
+
+**报告内容**：
+- 汇总第 7 轮的多表关联分析结果
+- 展示数据之间的关系和关联发现
+- 标题：《学生贷款数据 - 多表关联分析报告》
+
+**第 9 轮任务**：
+
+```
+<Analyze>生成多表关联 HTML 报告</Analyze>
+
+<Code>
+from pathlib import Path
+
+OUTPUT_DIR = Path("generated")
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+# 生成多表关联 HTML 报告
+html_content = """
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>学生贷款数据 - 多表关联分析报告</title>
+    <style>
+        body { font-family: "Microsoft YaHei", Arial, sans-serif; max-width: 1200px; margin: 0 auto; padding: 20px; background: #f5f5f5; }
+        .container { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        h1 { color: #2c3e50; border-bottom: 3px solid #e74c3c; padding-bottom: 10px; }
+        h2 { color: #e74c3c; margin-top: 30px; }
+        .summary { background: #ffe5e5; padding: 15px; border-radius: 5px; margin: 20px 0; }
+        .finding { background: #fff3cd; padding: 15px; margin: 10px 0; border-left: 4px solid #ffc107; }
+        img { max-width: 100%; height: auto; margin: 20px 0; border: 1px solid #ddd; border-radius: 4px; }
+        .footer { margin-top: 40px; text-align: center; color: #7f8c8d; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>学生贷款数据 - 多表关联分析报告</h1>
+        
+        <div class="summary">
+            <h2>分析概况</h2>
+            <p><strong>数据源：</strong>SQLite 数据库（多表 JOIN）</p>
+            <p><strong>分析轮次：</strong>1 轮（第 7 轮）</p>
+            <p><strong>关联表：</strong>unemployed, male, no_payment_due 等</p>
+        </div>
+        
+        <h2>多表关联分析结果</h2>
+        
+        <div class="finding">
+            <h3>关联发现 1：失业学生的性别与还款情况</h3>
+            <p>通过关联 unemployed、male、no_payment_due 三个表，发现失业学生中男性占比更高，且还款情况较差。</p>
+            <img src="unemployed_gender_payment.png" alt="失业学生性别与还款关系">
+        </div>
+        
+        <h2>多表关联结论</h2>
+        <ul>
+            <li>数据之间存在明显的关联关系</li>
+            <li>多维度交叉分析揭示了更深层次的规律</li>
+            <li>为政策制定提供了数据支持</li>
+        </ul>
+        
+        <div class="footer">
+            <p>生成时间：2025-12-22</p>
+            <p>分析工具：DeepAnalyze + SQLite + Pandas</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+# 保存多表关联 HTML 文件
+with open(OUTPUT_DIR / "multi_table_analysis.html", "w", encoding="utf-8") as f:
+    f.write(html_content)
+
+print("多表关联 HTML 报告已生成：generated/multi_table_analysis.html")
+</Code>
+```
+
+**注意事项**：
+- 根据第 7 轮的实际关联分析结果修改 HTML 内容
+- 图片路径使用相对路径
+- 生成 HTML 后，**必须等待下一轮**才能输出 `<Answer>`
+
+### 9. 第 10 轮：输出最终答案
+
+**前置条件**：第 8-9 轮已成功生成两份 HTML 报告。
+
+**格式**：
+
+```
+<Answer>
+总结你的发现：
+1. 数据概况（多少表、多少记录）
+2. 关键发现（至少 2 条，引用具体的执行结果）
+3. 建议（下一步可以做什么）
+</Answer>
+```
+
+## 绝对禁止的事项
+
+❌ **禁止在 `<Analyze>` 中解释错误或讨论方法**（只写分析目标）
+❌ **禁止在 `</Code>` 后继续输出任何内容**（包括说明、总结等）
+❌ **禁止使用第一轮结果中不存在的列名**
+❌ **禁止输出 `<Execute>` 或 `<File>` 标签**
+❌ **禁止在完成 7 轮分析前输出 `<Answer>`**
+❌ **禁止在未生成两份 HTML 报告的情况下输出 `<Answer>`**
+❌ **禁止跳过第 2-7 轮的数据分析，直接生成 HTML**
+❌ **禁止只分析 1-2 个 CSV 文件就结束，必须分析所有主要文件**
+❌ **禁止只生成一份 HTML 报告，必须生成单表分析和多表关联两份报告**
+
+## 开始分析
+
+**完整流程总结**：
+- **第 1 轮**：系统自动 bootstrap（已完成）
+- **第 2-6 轮**：CSV 单表分析
+  - 第 2 轮：分析 `enrolled.csv`，生成 CSV + PNG
+  - 第 3 轮：分析 `male.csv`，生成 CSV + PNG
+  - 第 4 轮：分析 `unemployed.csv`，生成 CSV + PNG
+  - 第 5 轮：分析 `no_payment_due.csv`，生成 CSV + PNG
+  - 第 6 轮：分析 `disabled.csv` 或 `filed_for_bankrupcy.csv`，生成 CSV + PNG
+- **第 7 轮**：SQLite 多表关联分析，生成 CSV + PNG
+- **第 8 轮**：生成单表分析 HTML 报告（`single_table_analysis.html`）
+- **第 9 轮**：生成多表关联 HTML 报告（`multi_table_analysis.html`）
+- **第 10 轮**：输出 `<Answer>`
+
+**分析策略说明**：
+- 第 2-6 轮：使用 CSV 文件进行单表分析（每个数据源独立分析）
+- 第 7 轮：使用 SQLite 数据库进行多表 JOIN 分析（发现数据关联）
+- 第 8 轮：汇总单表分析结果，生成第一份 HTML 报告
+- 第 9 轮：汇总多表关联结果，生成第二份 HTML 报告
+- 不重复分析相同数据，CSV 和 SQLite 各取所长，两份报告各有侧重
+
+**现在立即开始第 2 轮**：
+
+你必须立即输出以下格式：
+
+```
+<Analyze>
+分析 enrolled.csv 的学校分布
+</Analyze>
+
+<Code>
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from pathlib import Path
+
+OUTPUT_DIR = Path("generated")
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+df = pd.read_csv("enrolled.csv")
+...
+</Code>
+```
+
+**禁止输出任何解释性文字，禁止询问用户需求，禁止等待用户指令，立即开始分析！**
