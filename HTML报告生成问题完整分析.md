@@ -113,7 +113,7 @@ if "</Answer>" in current_stream:
 
 ---
 
-### 修复 5：修复提前 Answer 检测逻辑（12月 23 日）✅
+### 修复 5：修复提前 Answer 检测逻辑（12月 23 日上午）✅
 **修改内容**：
 ```python
 # 修改前
@@ -139,6 +139,131 @@ else:
 - 在流式输出阶段就拦截提前 `<Answer>`
 - 注入明确的继续执行提示，包含具体轮次和任务
 - 允许模型恢复并继续后续轮次
+
+**实际效果**：❌ 无效，拦截逻辑仍未被触发
+
+**失败原因**：修复 5 只修改了判断条件，但忽略了两个更深层的问题：
+1. **流式输出检测顺序错误**：检测到 `</Code>` 就立即 `break`，永远不会执行到 `</Answer>` 检测
+2. **execute_rounds 初始化错误**：Bootstrap 执行后 `execute_rounds` 仍为 0，导致计数不准确
+
+---
+
+### 修复 6：修复流式输出检测顺序 + execute_rounds 初始化（12月 23 日下午）✅
+
+#### 问题 6.1：流式输出检测顺序错误
+
+**问题代码**（`backend.py:1938-1944`）：
+```python
+# 检测到 </Code> 标签时立即停止流式接收
+if "</Code>" in current_stream:
+    logger.info(f"[bot_stream] Detected </Code>, stopping stream reception")
+    break  # ❌ 立即退出，永远不会执行到下面的 </Answer> 检测
+
+if "</Answer>" in current_stream:
+    # 拦截逻辑（永远不会执行到这里）
+```
+
+**根本原因**：
+- 当模型在同一轮输出 `<Code>...</Code>` 和 `<Answer>...</Answer>` 时
+- 流式接收在检测到 `</Code>` 时就立即 `break`
+- 导致 `</Answer>` 的拦截逻辑**永远不会被执行**
+- 这就是为什么日志中**完全没有 "Premature Answer detected" 警告**的原因
+
+**修复方案**：
+```python
+# 【重要】先检查 </Answer>，再检查 </Code>，避免提前 break 导致拦截失效
+if "</Answer>" in current_stream:
+    MIN_REQUIRED_ROUNDS = 9
+    if execute_rounds < MIN_REQUIRED_ROUNDS:
+        # 拦截逻辑
+        premature_answer_detected = True
+        ...
+    else:
+        finished = True
+        break
+
+# 检测到 </Code> 标签时立即停止流式接收
+if "</Code>" in current_stream:
+    logger.info(f"[bot_stream] Detected </Code>, stopping stream reception")
+    break
+```
+
+**修改位置**：`backend.py:1937-1974`
+
+#### 问题 6.2：execute_rounds 初始化错误
+
+**问题代码**（`backend.py:1802-1815`）：
+```python
+if not schema_bootstrap_used:
+    auto_block = run_schema_bootstrap(workspace_path, session_id)
+    if auto_block:
+        schema_bootstrap_used = True
+        schema_confirmed = True
+        messages.append({"role": "assistant", "content": auto_block})
+        yield auto_block
+        # ❌ Bootstrap 执行后 execute_rounds 仍为 0
+```
+
+**根本原因**：
+- Bootstrap 生成 `execute_round_0_bootstrap.txt`，应该算作 round 0
+- 但 `execute_rounds` 没有递增，仍然是 0
+- 导致后续轮次计数不准确（第1轮代码执行后 `execute_rounds=1`，但实际应该是 2）
+
+**修复方案**：
+```python
+if not schema_bootstrap_used:
+    auto_block = run_schema_bootstrap(workspace_path, session_id)
+    if auto_block:
+        schema_bootstrap_used = True
+        schema_confirmed = True
+        messages.append({"role": "assistant", "content": auto_block})
+        yield auto_block
+        # Bootstrap 算作 execute_round_0，所以下一轮应该是 round 1
+        execute_rounds = 1  # ✅ 修复初始化
+        logger.info(
+            f"[bot_stream] Schema bootstrap completed, execute_rounds={execute_rounds}"
+        )
+```
+
+**修改位置**：`backend.py:1814`
+
+#### 为什么之前没有发现这两个问题？
+
+**原因分析**：
+
+1. **修复 1-4 都聚焦在提示词和高层逻辑**
+   - 修复 1-3：修改提示词，期望模型自己遵守约束
+   - 修复 4：增强空输出检测，但没有触及拦截逻辑
+   - 都没有深入分析**流式输出的执行顺序**
+
+2. **修复 5 只看到了表面问题**
+   - 发现了 `non_schema_exec_rounds == 0` 的判断条件错误
+   - 但没有追问："为什么日志中完全没有拦截警告？"
+   - 如果拦截逻辑被执行，即使条件错误，也应该有日志输出
+   - **缺少对日志的深度分析**
+
+3. **流式输出检测顺序问题非常隐蔽**
+   - 代码逻辑看起来合理：检测到 `</Code>` 就停止接收，避免模型继续输出
+   - 但忽略了：如果模型在 `</Code>` 之后立即输出 `<Answer>`，拦截逻辑会被跳过
+   - 这种问题只有在**仔细追踪代码执行流程**时才能发现
+
+4. **execute_rounds 初始化问题被忽略**
+   - Bootstrap 的文件命名是 `execute_round_0_bootstrap.txt`
+   - 但代码中 `execute_rounds` 初始化为 0，且 Bootstrap 后没有递增
+   - 导致文件命名和变量值不一致
+   - 之前的修复都假设 `execute_rounds` 计数是正确的
+
+**教训**：
+- ✅ **必须分析日志**：如果预期的日志没有出现，说明代码路径没有被执行
+- ✅ **追踪执行流程**：不能只看代码逻辑，要追踪实际执行顺序
+- ✅ **验证假设**：不能假设变量计数是正确的，要验证初始化和递增逻辑
+- ✅ **关注边界情况**：流式输出的 `break` 语句会影响后续代码执行
+
+**预期效果**：
+- 流式输出阶段能正确检测到提前的 `<Answer>` 并拦截
+- 日志中会出现 `Premature <Answer> detected` 警告
+- `execute_rounds` 计数与文件命名一致
+- 模型被拦截后能继续执行后续轮次
 
 ---
 
@@ -454,6 +579,15 @@ tail -f ~/DeepAnalyze/demo/logs/backend.log | grep -E "execute_rounds|premature|
 
 ---
 
-**文档版本**：v2.0（合并版）  
-**最后更新**：2024-12-23 10:25  
-**状态**：代码已修复完成，`MIN_REQUIRED_ROUNDS = 9`，待重启后端验证效果
+**文档版本**：v3.0（修复 6 完整版）  
+**最后更新**：2024-12-23 10:59  
+**状态**：
+- ✅ 修复 6.1：流式输出检测顺序已修复（先检查 `</Answer>` 再检查 `</Code>`）
+- ✅ 修复 6.2：`execute_rounds` 初始化已修复（Bootstrap 后设为 1）
+- ⏳ 待重启后端服务验证效果
+
+**修复历史总结**：
+- 修复 1-3：提示词优化（无效，问题在后端）
+- 修复 4：空输出检测增强（缓解但未解决核心问题）
+- 修复 5：修改判断条件（部分修复，但遗漏了检测顺序和初始化问题）
+- **修复 6：修复流式输出检测顺序 + execute_rounds 初始化（完整修复）**

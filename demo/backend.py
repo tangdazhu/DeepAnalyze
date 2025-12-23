@@ -1810,8 +1810,10 @@ def bot_stream(messages, workspace, session_id="default"):
             messages.append({"role": "assistant", "content": auto_block})
             assistant_reply = auto_block
             yield auto_block
+            # Bootstrap 算作 execute_round_0，所以下一轮应该是 round 1
+            execute_rounds = 1
             logger.info(
-                f"[bot_stream] Schema bootstrap completed, injected into messages"
+                f"[bot_stream] Schema bootstrap completed, injected into messages, execute_rounds={execute_rounds}"
             )
 
     while (
@@ -1932,13 +1934,7 @@ def bot_stream(messages, workspace, session_id="default"):
                     break
                 current_stream = sanitized_stream
 
-                # 检测到 </Code> 标签时立即停止流式接收，防止模型在 </Code> 后继续输出
-                if "</Code>" in current_stream:
-                    logger.info(
-                        f"[bot_stream] Detected </Code>, stopping stream reception"
-                    )
-                    break
-
+                # 【重要】先检查 </Answer>，再检查 </Code>，避免提前 break 导致拦截失效
                 if "</Answer>" in current_stream:
                     MIN_REQUIRED_ROUNDS = 9  # 确保第 8、9 轮的 HTML 报告都已生成
                     if execute_rounds < MIN_REQUIRED_ROUNDS:
@@ -1969,6 +1965,13 @@ def bot_stream(messages, workspace, session_id="default"):
                     else:
                         finished = True
                         break
+
+                # 检测到 </Code> 标签时立即停止流式接收，防止模型在 </Code> 后继续输出
+                if "</Code>" in current_stream:
+                    logger.info(
+                        f"[bot_stream] Detected </Code>, stopping stream reception"
+                    )
+                    break
         except Exception as stream_error:
             error_block = (
                 "\n<Answer>\n"
