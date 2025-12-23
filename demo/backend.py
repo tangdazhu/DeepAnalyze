@@ -147,8 +147,8 @@ def execute_code_safe(
 API_BASE = "http://localhost:8000/v1"  # this localhost is for vllm api, do not change
 MODEL_PATH = "qwen3-4b-instruct"  # replace to your path to DeepAnalyze-8B
 MAX_ITERATIONS = 12
-ANSWER_MIN_EXEC_ROUNDS = 3
-ANSWER_MIN_NON_SCHEMA_ROUNDS = 2
+ANSWER_MIN_EXEC_ROUNDS = 10  # 确保完成第 2-9 轮分析后才请求 Answer
+ANSWER_MIN_NON_SCHEMA_ROUNDS = 8  # 对应 8 轮非 schema 代码执行(第 2-9 轮)
 MAX_PROMPT_CHARS = getattr(api_config, "MAX_PROMPT_CHARS", 16000)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SQLITE_SEEDS = [
@@ -2281,7 +2281,9 @@ def bot_stream(messages, workspace, session_id="default"):
 
             if not has_code_block:
                 messages.append({"role": "assistant", "content": cur_res})
-                if answer_requested:
+                # 只有在达到最小轮次后才响应 answer_requested
+                MIN_REQUIRED_ROUNDS = 9
+                if answer_requested and execute_rounds >= MIN_REQUIRED_ROUNDS:
                     answer_waiting_rounds += 1
                     reminder = (
                         "你已完成必要的代码执行，请直接给出 <Answer>，总结 <Execute>/<File> 的发现并提出建议，"
@@ -2337,7 +2339,9 @@ def bot_stream(messages, workspace, session_id="default"):
             missing_code_rounds = 0
 
             if "</Code>" in cur_res and not finished:
-                if answer_requested:
+                # 只有在达到最小轮次后才响应 answer_requested
+                MIN_REQUIRED_ROUNDS = 9
+                if answer_requested and execute_rounds >= MIN_REQUIRED_ROUNDS:
                     messages.append({"role": "assistant", "content": cur_res})
                     reminder = "分析已完成，请停止输出新的 <Code>。在下一轮直接编写 <Answer>，总结已得到的 <Execute>/<File> 结果并给出进一步建议。"
                     messages.append({"role": "user", "content": reminder})

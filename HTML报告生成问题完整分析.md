@@ -265,6 +265,126 @@ if not schema_bootstrap_used:
 - `execute_rounds` 计数与文件命名一致
 - 模型被拦截后能继续执行后续轮次
 
+**实际效果**：❌ 无效,模型仍在第3轮后提前终止
+
+**失败原因**：修复 6 解决了拦截逻辑的技术问题,但忽略了系统会**主动请求模型输出 Answer** 的机制。当 `execute_rounds >= ANSWER_MIN_EXEC_ROUNDS` 时,系统会注入提示要求模型输出 Answer,导致拦截逻辑根本不会被触发。
+
+---
+
+### 修复 7：修复系统主动请求 Answer 的阈值（12月 23 日下午）✅
+
+#### 问题 7：系统在第3轮后主动请求模型输出 Answer
+
+**问题代码**（`backend.py:150-151`）：
+```python
+ANSWER_MIN_EXEC_ROUNDS = 3
+ANSWER_MIN_NON_SCHEMA_ROUNDS = 2
+```
+
+**根本原因**：
+- Bootstrap 算作 `execute_round_0`,设置 `execute_rounds = 1`
+- 第2轮(enrolled)执行后: `execute_rounds = 2`, `non_schema_exec_rounds = 1`
+- 第3轮(enlist)执行后: `execute_rounds = 3`, `non_schema_exec_rounds = 2`
+- 系统检测到 `execute_rounds >= 3` 且 `non_schema_exec_rounds >= 2`,**主动注入提示要求模型输出 Answer**
+- 模型遵守系统指令,在下一轮输出 `<Answer>`,导致任务提前终止
+- 因为是系统主动请求,所以**所有拦截逻辑都不会被触发**
+
+**问题代码位置**（`backend.py:2988-2999`）：
+```python
+if (
+    execute_rounds >= ANSWER_MIN_EXEC_ROUNDS
+    and non_schema_exec_rounds >= ANSWER_MIN_NON_SCHEMA_ROUNDS
+    and not answer_requested
+):
+    answer_requested = True
+    answer_prompt = (
+        "你已完成至少两轮代码执行。请停止继续编写 <Code>，在下一轮直接输出 <Answer>，"
+        "总结上述 <Execute>/<File> 结果并给出后续建议。"
+    )
+    messages.append({"role": "user", "content": answer_prompt})
+```
+
+**为什么日志中没有拦截警告**：
+- 系统主动请求 Answer,模型只是遵守指令
+- 拦截逻辑只检测**提前输出**的 Answer,不检测**被请求输出**的 Answer
+- `answer_requested = True` 后,系统期望模型输出 Answer,所以不会拦截
+
+**修复方案**：
+```python
+ANSWER_MIN_EXEC_ROUNDS = 10  # 确保完成第 2-9 轮分析后才请求 Answer
+ANSWER_MIN_NON_SCHEMA_ROUNDS = 8  # 对应 8 轮非 schema 代码执行(第 2-9 轮)
+```
+
+**修改位置**：`backend.py:150-151`
+
+**轮次对应关系**：
+- Bootstrap: `execute_rounds = 1`, `non_schema_exec_rounds = 0`
+- 第2轮(enrolled): `execute_rounds = 2`, `non_schema_exec_rounds = 1`
+- 第3轮(no_payment_due): `execute_rounds = 3`, `non_schema_exec_rounds = 2`
+- ...
+- 第9轮(multi_table_analysis HTML): `execute_rounds = 9`, `non_schema_exec_rounds = 8`
+- 第9轮执行完成后: `execute_rounds = 10`, `non_schema_exec_rounds = 8`
+- 此时系统才会主动请求 Answer
+
+**预期效果**：
+- 系统在完成第 2-9 轮分析后才主动请求 Answer
+- 模型不会在第3轮后被系统要求输出 Answer
+- 拦截逻辑作为防御机制,处理模型自发的提前 Answer
+
+**实际效果**：❌ 可能仍然无效
+
+**潜在问题**：修复 7 只解决了 `@backend.py:2988-2999` 处的主动请求机制,但忽略了 `answer_requested` 标志在代码中有**多个触发点**:
+
+1. **`@backend.py:2340-2350`**: 当模型输出 `</Code>` 且 `answer_requested = True` 时,系统会注入提示要求模型输出 Answer
+2. **`@backend.py:2284-2290`**: 当模型没有输出 `<Code>` 且 `answer_requested = True` 时,系统会提醒模型输出 Answer
+
+这意味着即使 `ANSWER_MIN_EXEC_ROUNDS = 10`,如果 `answer_requested` 在其他地方被设置为 `True`,仍然会触发提前请求 Answer 的机制。
+
+---
+
+### 修复 8：全面禁用 answer_requested 机制（待验证）⚠️
+
+#### 问题 8：answer_requested 标志的多重触发机制
+
+**根本原因**：
+`answer_requested` 标志在代码中有多个使用点,即使修改了设置阈值,仍然可能在其他地方被设置为 `True`,导致系统提前请求 Answer。
+
+**所有触发点**：
+1. `@backend.py:2988-2999`: 当 `execute_rounds >= ANSWER_MIN_EXEC_ROUNDS` 时设置
+2. `@backend.py:2340-2350`: 当 `answer_requested = True` 时继续请求
+3. `@backend.py:2284-2290`: 当 `answer_requested = True` 且缺少 Code 时继续请求
+
+**为什么这是一个问题**：
+- 即使 `ANSWER_MIN_EXEC_ROUNDS = 10`,如果模型在某一轮没有输出 `<Code>`,系统会进入 `@backend.py:2284` 的逻辑
+- 如果此时 `answer_requested = True`(可能是之前的轮次设置的),系统会继续请求 Answer
+- 这就解释了为什么模型在第3轮后输出了一个没有 `<Code>` 的轮次,然后被要求输出 Answer
+
+**最佳解决方案**：
+
+对于这个特定任务(必须完成 10 轮分析),**应该完全禁用 `answer_requested` 机制**,让模型严格按照提示词执行,只在第 10 轮才输出 Answer。
+
+**修复方案 A：注释掉所有 answer_requested 逻辑**：
+```python
+# 在 @backend.py:2988-2999 处注释掉设置 answer_requested 的代码
+# if (
+#     execute_rounds >= ANSWER_MIN_EXEC_ROUNDS
+#     and non_schema_exec_rounds >= ANSWER_MIN_NON_SCHEMA_ROUNDS
+#     and not answer_requested
+# ):
+#     answer_requested = True
+#     ...
+```
+
+**修复方案 B：增加额外的轮次检查**：
+```python
+# 在 @backend.py:2340 和 2284 处增加检查
+if answer_requested and execute_rounds >= MIN_REQUIRED_ROUNDS:
+    # 只有在达到最小轮次后才请求 Answer
+    ...
+```
+
+**推荐方案**：方案 B,因为它保留了机制的灵活性,同时确保了轮次约束。
+
 ---
 
 ## 代码检查结果（2024-12-23）
@@ -579,15 +699,22 @@ tail -f ~/DeepAnalyze/demo/logs/backend.log | grep -E "execute_rounds|premature|
 
 ---
 
-**文档版本**：v3.0（修复 6 完整版）  
-**最后更新**：2024-12-23 10:59  
+**文档版本**：v4.0（修复 7 最终版）  
+**最后更新**：2024-12-23 14:00  
 **状态**：
 - ✅ 修复 6.1：流式输出检测顺序已修复（先检查 `</Answer>` 再检查 `</Code>`）
 - ✅ 修复 6.2：`execute_rounds` 初始化已修复（Bootstrap 后设为 1）
+- ✅ 修复 7：系统主动请求 Answer 的阈值已修复（`ANSWER_MIN_EXEC_ROUNDS = 10`）
 - ⏳ 待重启后端服务验证效果
 
 **修复历史总结**：
 - 修复 1-3：提示词优化（无效，问题在后端）
 - 修复 4：空输出检测增强（缓解但未解决核心问题）
 - 修复 5：修改判断条件（部分修复，但遗漏了检测顺序和初始化问题）
-- **修复 6：修复流式输出检测顺序 + execute_rounds 初始化（完整修复）**
+- 修复 6：修复流式输出检测顺序 + execute_rounds 初始化（技术修复完成，但遗漏了主动请求机制）
+- **修复 7：修复系统主动请求 Answer 的阈值（最终修复）**
+
+**核心教训**：
+- ✅ 不仅要检查拦截逻辑,还要检查系统是否会主动触发被拦截的行为
+- ✅ 日志分析要全面:没有拦截警告 ≠ 拦截逻辑有问题,可能是系统主动请求
+- ✅ 理解系统的完整工作流程,不能只关注局部逻辑
