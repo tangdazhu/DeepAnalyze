@@ -1940,12 +1940,22 @@ def bot_stream(messages, workspace, session_id="default"):
                     break
 
                 if "</Answer>" in current_stream:
-                    if non_schema_exec_rounds == 0:
+                    MIN_REQUIRED_ROUNDS = 9  # 确保第 8、9 轮的 HTML 报告都已生成
+                    if execute_rounds < MIN_REQUIRED_ROUNDS:
                         premature_answer_rounds += 1
                         messages.append(
                             {"role": "assistant", "content": current_stream}
                         )
-                        warn_msg = "尚未基于真实表执行任何 EDA/可视化。请先按照要求运行 `SELECT *` 等分析，形成 <Execute>/<File> 结果后再给出 <Answer>。"
+                        warn_msg = (
+                            f"⚠️ 检测到提前输出 <Answer>：当前仅完成 {execute_rounds} 轮分析，但任务要求完成至少 {MIN_REQUIRED_ROUNDS} 轮。\n\n"
+                            "**必须继续执行以下轮次**：\n"
+                            "- 第 2-6 轮：单表分析（enrolled, no_payment_due, longest_absense_from_school, enlist, disabled）\n"
+                            "- 第 7 轮：多表关联分析\n"
+                            "- 第 8 轮：生成单表分析 HTML 报告（single_table_analysis.html）\n"
+                            "- 第 9 轮：生成多表关联 HTML 报告（multi_table_analysis.html）\n"
+                            "- 第 10 轮：输出最终 <Answer>\n\n"
+                            f"**请立即继续第 {execute_rounds + 1} 轮分析，禁止输出 <Answer>。**"
+                        )
                         messages.append({"role": "user", "content": warn_msg})
                         current_stream = current_stream.replace(
                             "<Answer>", "<Answer (ignored)>"
@@ -1953,7 +1963,7 @@ def bot_stream(messages, workspace, session_id="default"):
                         sanitized_stream = current_stream
                         premature_answer_detected = True
                         if premature_answer_rounds >= 3:
-                            forced_reason = "多次尝试直接输出 <Answer> 而未执行任何真实 SQL/EDA，任务被终止"
+                            forced_reason = f"连续 3 次尝试提前输出 <Answer>（当前 {execute_rounds} 轮，要求 {MIN_REQUIRED_ROUNDS} 轮），任务被终止"
                             finished = True
                             break
                     else:
@@ -2230,7 +2240,9 @@ def bot_stream(messages, workspace, session_id="default"):
 
             if finished:
                 # 检查是否提前输出 Answer（在完成足够轮次之前）
-                MIN_REQUIRED_ROUNDS = 8  # 至少需要 8 轮（2-9 轮分析 + HTML 生成）
+                MIN_REQUIRED_ROUNDS = (
+                    9  # 至少需要 9 轮（确保第 8、9 轮的 HTML 报告都已生成）
+                )
                 if execute_rounds < MIN_REQUIRED_ROUNDS:
                     logger.warning(
                         f"[bot_stream] Premature <Answer> detected: execute_rounds={execute_rounds}, required={MIN_REQUIRED_ROUNDS}"
