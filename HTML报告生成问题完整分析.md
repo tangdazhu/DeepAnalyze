@@ -342,7 +342,7 @@ ANSWER_MIN_NON_SCHEMA_ROUNDS = 8  # 对应 8 轮非 schema 代码执行(第 2-9 
 
 ---
 
-### 修复 8：全面禁用 answer_requested 机制（待验证）⚠️
+### 修复 8：在 answer_requested 使用点增加轮次检查（12月 23 日下午）✅
 
 #### 问题 8：answer_requested 标志的多重触发机制
 
@@ -363,27 +363,168 @@ ANSWER_MIN_NON_SCHEMA_ROUNDS = 8  # 对应 8 轮非 schema 代码执行(第 2-9 
 
 对于这个特定任务(必须完成 10 轮分析),**应该完全禁用 `answer_requested` 机制**,让模型严格按照提示词执行,只在第 10 轮才输出 Answer。
 
-**修复方案 A：注释掉所有 answer_requested 逻辑**：
+**已实施的修复方案**：
+
+在 `answer_requested` 的两个使用点增加轮次检查，确保只有在达到最小轮次后才响应 `answer_requested` 标志。
+
+**修改位置 1**：`backend.py:2284-2292` (缺少 Code 时的处理)
 ```python
-# 在 @backend.py:2988-2999 处注释掉设置 answer_requested 的代码
-# if (
-#     execute_rounds >= ANSWER_MIN_EXEC_ROUNDS
-#     and non_schema_exec_rounds >= ANSWER_MIN_NON_SCHEMA_ROUNDS
-#     and not answer_requested
-# ):
-#     answer_requested = True
-#     ...
+# 修改前
+if answer_requested:
+    answer_waiting_rounds += 1
+    reminder = (...)
+    messages.append({"role": "user", "content": reminder})
+
+# 修改后
+MIN_REQUIRED_ROUNDS = 9
+if answer_requested and execute_rounds >= MIN_REQUIRED_ROUNDS:
+    answer_waiting_rounds += 1
+    reminder = (...)
+    messages.append({"role": "user", "content": reminder})
 ```
 
-**修复方案 B：增加额外的轮次检查**：
+**修改位置 2**：`backend.py:2342-2348` (有 Code 时的处理)
 ```python
-# 在 @backend.py:2340 和 2284 处增加检查
+# 修改前
+if answer_requested:
+    messages.append({"role": "assistant", "content": cur_res})
+    reminder = (...)
+    messages.append({"role": "user", "content": reminder})
+
+# 修改后
+MIN_REQUIRED_ROUNDS = 9
 if answer_requested and execute_rounds >= MIN_REQUIRED_ROUNDS:
-    # 只有在达到最小轮次后才请求 Answer
+    messages.append({"role": "assistant", "content": cur_res})
+    reminder = (...)
+    messages.append({"role": "user", "content": reminder})
+```
+
+**修复逻辑**：
+- 保留 `answer_requested` 机制的灵活性
+- 但增加 `execute_rounds >= MIN_REQUIRED_ROUNDS` 的检查
+- 确保即使 `answer_requested = True`,也只有在完成第 2-9 轮后才会请求 Answer
+
+**预期效果**：
+- 系统不会在第 3 轮后请求 Answer
+- 即使模型在某一轮没有输出 `<Code>`,也不会触发提前请求
+- 模型将严格按照提示词完成 10 轮分析
+
+**实际效果**：❌ 无效,模型在第7轮陷入无限循环
+
+**失败原因**：修复 8 解决了 `answer_requested` 的多重触发问题,但忽略了**表验证逻辑**的缺陷。系统在第7轮(多表关联分析)错误地将 SQL 别名 (`e`, `n`, `d`) 和输出文件名 (`correlation_analysis`) 识别为"不存在的表",导致模型陷入无限循环,无法继续执行。
+
+---
+
+### 修复 9：修复表验证逻辑,排除 SQL 别名和文件名（12月 23 日下午）✅
+
+#### 问题 9：表验证逻辑错误地拦截 SQL 别名和文件名
+
+**问题现象**：
+从用户提供的前端反馈可以看到,模型在第7轮(多表关联分析)陷入无限循环:
+```
+Assistant 当前目标=第 7 轮分析，分析 多表关联分析...
+```
+
+系统反复输出:
+```
+请根据真实表结构，修正错误字段引用。
+```
+
+**生成文件情况**：
+- ✅ 第2-6轮: 所有 CSV 和 PNG 文件正常生成
+- ❌ 第7轮及之后: 没有任何文件生成
+- ❌ 没有 HTML 报告
+
+**根本原因**：
+
+`extract_table_mentions_from_text` 函数 (`@backend.py:382-852`) 用于从 `<Analyze>` 文本中提取表名,并验证这些表是否存在于数据库中。该函数使用正则表达式 `TABLE_TOKEN_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")` 匹配所有字母开头的标识符。
+
+虽然函数有一个很长的 `COMMON_WORDS` 列表来过滤常见词汇,但**缺少以下关键过滤**:
+
+1. **SQL 别名** (`e`, `n`, `d`): 在多表 JOIN 语句中,这些单字母别名是标准用法,但不在 `COMMON_WORDS` 中
+2. **输出文件名** (`correlation_analysis`): 虽然有文件后缀过滤 (`_summary`, `_dist` 等),但 `correlation_analysis` 不符合这些模式
+
+**问题代码位置**：`backend.py:2216-2225`
+```python
+if schema_confirmed and unknown_mentions:
+    messages.append({"role": "assistant", "content": cur_res})
+    warn_unknown = (
+        "检测到你引用了不存在于实际 SQLite 中的表："
+        + ", ".join(sorted(unknown_mentions))
+        + "。请重新查看 sqlite_master 结果，仅使用真实表名。"
+    )
+    messages.append({"role": "user", "content": warn_unknown})
+    refund_iteration()
+    continue
+```
+
+当模型在 `<Analyze>` 中提到 SQL 别名或文件名时,系统错误地将它们识别为"不存在的表",注入警告并退还迭代,导致模型陷入无限循环。
+
+**修复方案**：
+
+在 `COMMON_WORDS` 中添加:
+1. **所有单字母 SQL 别名** (a-z)
+2. **常见的分析文件名前缀** (`correlation_analysis`, `multi_table_analysis`, `single_table_analysis` 等)
+
+**修改位置 1**：`backend.py:392-394` (添加 SQL 别名)
+```python
+# 修改前
+COMMON_WORDS = {
+    "sqlite_master",
+    "sqlite_sequence",
+    # SQL 关键字和函数
+    "select",
+    ...
+
+# 修改后
+COMMON_WORDS = {
+    "sqlite_master",
+    "sqlite_sequence",
+    # SQL 别名 (单字母 a-z，常用于 JOIN 语句)
+    "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m",
+    "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z",
+    # SQL 关键字和函数
+    "select",
     ...
 ```
 
-**推荐方案**：方案 B,因为它保留了机制的灵活性,同时确保了轮次约束。
+**修改位置 2**：`backend.py:524-529` (添加文件名前缀)
+```python
+# 修改前
+# 分析相关
+"analysis",
+"distribution",
+"statistics",
+"correlation",
+"trend",
+...
+
+# 修改后
+# 分析相关
+"analysis",
+"distribution",
+"statistics",
+"correlation",
+"correlation_analysis",  # 多表关联分析文件名
+"multi_table",
+"single_table",
+"multi_table_join",
+"multi_table_analysis",
+"single_table_analysis",
+"trend",
+...
+```
+
+**修复逻辑**：
+- 将所有可能在 SQL 语句中出现的单字母别名加入过滤列表
+- 将所有可能在分析文本中出现的文件名前缀加入过滤列表
+- 确保 `extract_table_mentions_from_text` 只标记真正的表名,而不是 SQL 语法元素或文件名
+
+**预期效果**：
+- 模型在第7轮能正常执行多表关联分析,使用 SQL 别名不会被拦截
+- 模型在 `<Analyze>` 中提到输出文件名不会被误判为表名
+- 第7-9轮能正常生成文件,包括 HTML 报告
+- 第10轮输出 `<Answer>` 总结
 
 ---
 
@@ -699,12 +840,14 @@ tail -f ~/DeepAnalyze/demo/logs/backend.log | grep -E "execute_rounds|premature|
 
 ---
 
-**文档版本**：v4.0（修复 7 最终版）  
-**最后更新**：2024-12-23 14:00  
+**文档版本**：v6.0（修复 9 最终版）  
+**最后更新**：2024-12-23 16:20  
 **状态**：
 - ✅ 修复 6.1：流式输出检测顺序已修复（先检查 `</Answer>` 再检查 `</Code>`）
 - ✅ 修复 6.2：`execute_rounds` 初始化已修复（Bootstrap 后设为 1）
 - ✅ 修复 7：系统主动请求 Answer 的阈值已修复（`ANSWER_MIN_EXEC_ROUNDS = 10`）
+- ✅ 修复 8：在 answer_requested 使用点增加轮次检查（防止多重触发）
+- ✅ 修复 9：修复表验证逻辑,排除 SQL 别名和文件名（解决第7轮循环问题）
 - ⏳ 待重启后端服务验证效果
 
 **修复历史总结**：
@@ -712,9 +855,13 @@ tail -f ~/DeepAnalyze/demo/logs/backend.log | grep -E "execute_rounds|premature|
 - 修复 4：空输出检测增强（缓解但未解决核心问题）
 - 修复 5：修改判断条件（部分修复，但遗漏了检测顺序和初始化问题）
 - 修复 6：修复流式输出检测顺序 + execute_rounds 初始化（技术修复完成，但遗漏了主动请求机制）
-- **修复 7：修复系统主动请求 Answer 的阈值（最终修复）**
+- 修复 7：修复系统主动请求 Answer 的阈值（修复了设置点，但遗漏了使用点）
+- 修复 8：在 answer_requested 使用点增加轮次检查（修复了主动请求，但遗漏了表验证逻辑）
+- **修复 9：修复表验证逻辑,排除 SQL 别名和文件名（最终修复）**
 
 **核心教训**：
 - ✅ 不仅要检查拦截逻辑,还要检查系统是否会主动触发被拦截的行为
 - ✅ 日志分析要全面:没有拦截警告 ≠ 拦截逻辑有问题,可能是系统主动请求
 - ✅ 理解系统的完整工作流程,不能只关注局部逻辑
+- ✅ 检查标志变量的所有设置点和使用点,确保一致性
+- ✅ **验证逻辑要考虑所有合法场景,不能误判正常的 SQL 语法或文件名**
