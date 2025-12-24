@@ -34,33 +34,38 @@ pip install -r requirements.txt
 
 1. **模型服务**
 --seed 42：固定随机种子（可以是任意整数，42 是常用值）
+
    ```bash
    (deepanalyze) tdz@tangdazhu:~$
    conda activate deepanalyze
-vllm serve ~/models/qwen3-4b-instruct \
+   
+   vllm serve ~/models/qwen3-4b-instruct \
+
   --host 0.0.0.0 --port 8000 \
   --served-model-name qwen3-4b-instruct \
   --trust-remote-code \
   --seed 42 \
   --max-model-len 32768
    ```
+   
 2. **后端服务**（使用 demo/backend.py，提供 `/workspace/*` 等接口）
    ```bash
    conda activate deepanalyze
    cd ~/DeepAnalyze/demo
    python backend.py
    ```
-3. **前端 WebUI**
+
+1. **前端 WebUI**
+
    ```bash
    conda activate deepanalyze
    cd ~/DeepAnalyze/demo/chat
    npm run dev -- --hostname 0.0.0.0 --port 4000
    ```
 
- 然后从浏览器访问WebUI： http://172.23.6.173:4000/
+ 然后从浏览器访问WebUI： <http://172.23.6.173:4000/>
 
 此模式下无需再启动 `API/start_server.py`，避免 8200/8100 端口冲突。若后续改用官方 API，可将 `/workspace/*` 路由迁移或继续并行运行 `backend.py`。
-
 
 ## 3. 部署推理模型（vLLM）
 
@@ -154,15 +159,19 @@ npm run dev -- --host 0.0.0.0 --port 4000
 使用 `nvidia-smi` 查看显存。如果发现进程（如 `/python3.12`）长期占满显存，可：
 
 1. 确认进程身份：
+
    ```bash
    ps -fp <PID>
    ```
+
 2. 结束进程：
+
    ```bash
    kill -TERM <PID>
    sleep 2
    kill -9 <PID>
    ```
+
    或直接 `pkill -f "vllm"` / `pkill -f "start_server.py"`。
 
 ## 9. Node.js 与 WebUI 依赖
@@ -191,8 +200,6 @@ npm install
 npm run dev -- --hostname 0.0.0.0 --port 4000
 ```
 
-
-
 ## 11. 模型名称一致性
 
 若 vLLM 日志提示 “The model `DeepAnalyze-8B` does not exist”，通常是请求里的 `model` 字段与 vLLM 的 `served_model_name` 不一致。
@@ -203,14 +210,15 @@ npm run dev -- --hostname 0.0.0.0 --port 4000
 **两种解决方案：**
 
 1. 启动 vLLM 时显式指定名称：
+
    ```bash
    vllm serve ~/models/qwen2.5-3b-instruct \
      --host 0.0.0.0 --port 8000 \
      --served-model-name qwen2.5-3b-instruct \
      --trust-remote-code
    ```
+
    并在 backend/WebUI 中使用同样的字符串。
 2. 若未指定 `--served-model-name`，vLLM 会使用完整路径（如 `/home/tdz/models/qwen2.5-3b-instruct`）。此时需将 backend 与 WebUI 的 `model` 字段改成该绝对路径。
 
 只要三者一致，`/v1/chat/completions` 就不会再返回 404。
-

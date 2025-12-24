@@ -2989,15 +2989,34 @@ def bot_stream(messages, workspace, session_id="default"):
                             ]
                             error_hint = error_lines[-1] if error_lines else "未知错误"
 
-                            error_warning = (
-                                f"代码执行过程中出现错误：{error_hint}\n\n"
-                                "请仔细检查上方 <Execute> 块中的完整错误信息，常见问题包括：\n"
-                                "1. 对字符串字段调用数值计算方法（如 df.corr()）\n"
-                                "2. 使用不存在的字段名或表名\n"
-                                "3. 数据类型不匹配\n"
-                                "4. 缺少必要的数据预处理步骤\n\n"
-                                "请修正代码后重新提交。如果部分代码已成功执行，可以基于已生成的文件继续分析。"
-                            )
+                            # 特殊处理：SQL 字段错误
+                            if (
+                                "no such column" in exe_output.lower()
+                                or "operationalerror" in exe_output.lower()
+                            ):
+                                # 提取表结构信息
+                                schema_hint = summarize_sqlite_schema(workspace_path)
+                                error_warning = (
+                                    f"⚠️ SQL 查询错误：{error_hint}\n\n"
+                                    "**错误原因**：代码中使用了不存在的字段名。\n\n"
+                                    "**数据库真实表结构**：\n"
+                                    f"{schema_hint}\n\n"
+                                    "**修正方法**：\n"
+                                    "1. 仔细对照上方的表结构，确认每个表的真实字段名\n"
+                                    "2. 修改 SQL 查询中的字段名，使用真实存在的字段\n"
+                                    "3. 不要臆测字段名，必须严格使用 sqlite_master 和 PRAGMA table_info 返回的字段\n\n"
+                                    "请立即修正代码并重新提交。"
+                                )
+                            else:
+                                error_warning = (
+                                    f"代码执行过程中出现错误：{error_hint}\n\n"
+                                    "请仔细检查上方 <Execute> 块中的完整错误信息，常见问题包括：\n"
+                                    "1. 对字符串字段调用数值计算方法（如 df.corr()）\n"
+                                    "2. 使用不存在的字段名或表名\n"
+                                    "3. 数据类型不匹配\n"
+                                    "4. 缺少必要的数据预处理步骤\n\n"
+                                    "请修正代码后重新提交。如果部分代码已成功执行，可以基于已生成的文件继续分析。"
+                                )
                             messages.append({"role": "user", "content": error_warning})
                             refund_iteration()
                             continue
