@@ -40,7 +40,6 @@ pip install -r requirements.txt
    conda activate deepanalyze
    
    vllm serve ~/models/qwen3-4b-instruct \
-
   --host 0.0.0.0 --port 8000 \
   --served-model-name qwen3-4b-instruct \
   --trust-remote-code \
