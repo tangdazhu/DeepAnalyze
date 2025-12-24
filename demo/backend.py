@@ -1573,7 +1573,7 @@ def find_primary_sqlite(workspace_path: Path) -> Path | None:
 
 
 def build_schema_bootstrap_block(workspace_path: Path) -> str:
-    """生成首轮自动列出 sqlite_master 和每个表字段信息的模板响应。"""
+    """生成首轮自动列出 CSV 文件路径和 SQLite 表结构的模板响应。"""
     db_path = find_primary_sqlite(workspace_path)
     if not db_path:
         return ""
@@ -1582,10 +1582,17 @@ def build_schema_bootstrap_block(workspace_path: Path) -> str:
     print(
         f"[build_schema_bootstrap_block] workspace_path={workspace_path}, db_name={db_name}"
     )
+
+    # 查找 data 目录下的所有 CSV 文件
+    data_dir = workspace_path / "data"
+    csv_files = []
+    if data_dir.exists():
+        csv_files = sorted([f for f in data_dir.glob("*.csv")])
+
     analyze = (
         "<Analyze>\n"
-        "系统检测到模型尚未正确进入首轮分析，已自动补充：当前目标=列出所有表结构和字段信息，"
-        "并在同轮 <Execute> 中打印 sqlite_master 结果和每个表的字段列表，供后续引用。\n"
+        "系统检测到模型尚未正确进入首轮分析，已自动补充：当前目标=列出所有 CSV 数据文件路径和 SQLite 表结构，"
+        "供后续分析引用。\n"
         "</Analyze>\n"
     )
     query_lines = "\n".join(
@@ -1595,29 +1602,58 @@ def build_schema_bootstrap_block(workspace_path: Path) -> str:
             "WHERE type IN ('table', 'view');",
         ]
     )
-    code = (
-        "<Code>\n"
-        "```python\n"
-        "import sqlite3\n"
-        "import pandas as pd\n"
-        "\n"
-        f'conn = sqlite3.connect(r"{db_name}")\n'
-        f'query = """\n{query_lines}\n"""\n'
-        "schema_df = pd.read_sql_query(query, conn)\n"
-        "print(schema_df)\n"
-        "print('\\n' + '='*80)\n"
-        "print('【表字段详情】')\n"
-        "print('='*80)\n"
-        "for table_name in schema_df['table_name']:\n"
-        "    cursor = conn.cursor()\n"
-        "    cursor.execute(f'PRAGMA table_info({table_name})')\n"
-        "    columns = cursor.fetchall()\n"
-        "    print(f'\\n表名: {table_name}')\n"
-        "    print(f'字段: {\", \".join([col[1] for col in columns])}')\n"
-        "conn.close()\n"
-        "```\n"
-        "</Code>"
+
+    # 构建代码块
+    code_parts = [
+        "<Code>\n",
+        "```python\n",
+        "import sqlite3\n",
+        "import pandas as pd\n",
+        "from pathlib import Path\n",
+        "\n",
+        "# ========== 第一部分：CSV 数据文件路径 ==========\n",
+        "print('='*80)\n",
+        "print('【CSV 数据文件路径】')\n",
+        "print('='*80)\n",
+    ]
+
+    # 添加 CSV 文件路径
+    if csv_files:
+        for csv_file in csv_files:
+            csv_abs_path = str(csv_file.resolve())
+            file_name = csv_file.name
+            code_parts.append(f'print(f"{file_name}: {csv_abs_path!r}")\n')
+    else:
+        code_parts.append('print("未找到 CSV 文件")\n')
+
+    # 添加 SQLite 表结构查询
+    code_parts.extend(
+        [
+            "\n",
+            "# ========== 第二部分：SQLite 数据库表结构 ==========\n",
+            f'conn = sqlite3.connect(r"{db_name}")\n',
+            f'query = """\n{query_lines}\n"""\n',
+            "schema_df = pd.read_sql_query(query, conn)\n",
+            "print('\\n' + '='*80)\n",
+            "print('【SQLite 数据库表结构】')\n",
+            "print('='*80)\n",
+            "print(schema_df)\n",
+            "print('\\n' + '='*80)\n",
+            "print('【表字段详情】')\n",
+            "print('='*80)\n",
+            "for table_name in schema_df['table_name']:\n",
+            "    cursor = conn.cursor()\n",
+            "    cursor.execute(f'PRAGMA table_info({table_name})')\n",
+            "    columns = cursor.fetchall()\n",
+            "    print(f'\\n表名: {table_name}')\n",
+            "    print(f'字段: {\", \".join([col[1] for col in columns])}')\n",
+            "conn.close()\n",
+            "```\n",
+            "</Code>",
+        ]
     )
+
+    code = "".join(code_parts)
     return analyze + "\n" + code
 
 

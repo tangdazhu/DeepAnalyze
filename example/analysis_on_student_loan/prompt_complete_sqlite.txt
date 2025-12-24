@@ -70,69 +70,67 @@
 
 ### 2. 第一轮：系统自动完成
 
-**重要**：第一轮由系统自动执行 bootstrap，已在 `<Execute>` 块中显示：
-1. **CSV 数据文件的绝对路径**（用于第 2-6 轮分析）
-2. **SQLite 数据库表结构**（用于第 7 轮多表关联分析）
+**重要**：第一轮由系统自动执行 bootstrap，已在 `<Execute>` 块中显示所有表的完整结构和数据库绝对路径。
 
 **你的任务**：仔细阅读第一轮的 `<Execute>` 输出，记住：
-- **CSV 文件绝对路径**（如 `enrolled.csv`, `enlist.csv` 等）
-- **SQLite 数据库绝对路径**（`DB_PATH`，用于第 7 轮）
-- **所有表名和字段名**（用于第 7 轮的 SQL 查询）
+- 数据库绝对路径（`DB_PATH`）
+- 所有表名和字段名
 - 禁止使用不存在的表名或字段名
 
 **第一轮后，立即开始第二轮分析，不要等待用户指令，不要询问用户需求**。
 
 ### 3. 分析流程（必须按顺序完成）
 
-- **第 2 轮**：分析 enrolled.csv 文件 📄
-- **第 3 轮**：分析 no_payment_due.csv 文件 📄
-- **第 4 轮**：分析 longest_absense_from_school.csv 文件 📄
-- **第 5 轮**：分析 enlist.csv 文件 📄
-- **第 6 轮**：分析 disabled.csv 文件 📄
-- **第 7 轮**：使用 SQLite 数据库进行多表关联分析 📊
+- **第 2 轮**：分析 enrolled 表
+- **第 3 轮**：分析 no_payment_due 表
+- **第 4 轮**：分析 longest_absense_from_school 表
+- **第 5 轮**：分析 enlist 表
+- **第 6 轮**：分析 disabled 表
+- **第 7 轮**：多表关联分析
 - **第 8 轮**：生成 single_table_analysis.html
 - **第 9 轮**：生成 multi_table_analysis.html
 - **第 10 轮**：输出 `<Answer>`（唯一允许输出 Answer 的轮次）
 
-### 4. 第 2-6 轮：CSV 文件单表分析（必须完成）
+### 4. 第 2-6 轮：单表数据分析（必须完成）
 
 **强制要求**：
-- 必须完成 **5 轮 CSV 文件分析**
-- **使用第 1 轮 Bootstrap 输出的 CSV 文件绝对路径**
-- 分析以下 5 个 CSV 文件（按顺序）：
-  - **第 2 轮**：`enrolled.csv`（字段：name, school, month）→ 分析学校分布和入学时间分布
-  - **第 3 轮**：`no_payment_due.csv`（字段：name, bool）→ 分析还款状态分布
-  - **第 4 轮**：`longest_absense_from_school.csv`（字段：name, month）→ 分析缺勤时长分布
-  - **第 5 轮**：`enlist.csv`（字段：name, organ）→ 分析服役单位分布
-  - **第 6 轮**：`disabled.csv`（字段：name）→ 统计残疾学生数量并与总人数对比
+- 必须完成 **5 轮单表分析**
+- **严格按照第 1 轮 Bootstrap 输出的表结构进行分析**
+- 分析以下 5 个表（按顺序）：
+  - **第 2 轮**：`enrolled` 表（字段：name, school, month）→ 分析学校分布和入学时间分布
+  - **第 3 轮**：`no_payment_due` 表（字段：name, bool）→ 分析还款状态分布
+  - **第 4 轮**：`longest_absense_from_school` 表（字段：name, month）→ 分析缺勤时长分布
+  - **第 5 轮**：`enlist` 表（字段：name, organ）→ 分析服役单位分布
+  - **第 6 轮**：`disabled` 表（字段：name）→ 统计残疾学生数量并与总人数对比
 - 每轮必须生成至少 1 个 CSV 文件和 1 个 PNG 图表
 - 所有文件保存到 `generated/` 目录
 
 **重要提醒**：
-- ✅ **使用 pandas 直接读取 CSV 文件**（使用第 1 轮提供的绝对路径）
-- ✅ 第 7 轮会使用 SQLite 数据库进行多表关联分析
-- ❌ **第 2-6 轮禁止使用 SQLite 数据库**
+- ❌ **禁止使用第 1 轮 Bootstrap 中不存在的字段**（如 `male` 表没有 `bool` 字段）
+- ✅ 使用 SQLite 数据库读取数据（已在第 1 轮提供绝对路径）
+- ✅ 第 7 轮会进行多表关联分析
 
-**示例：第 2 轮分析 enrolled.csv 文件**
+**示例：第 2 轮分析 enrolled 表**
 
 ```
 <Analyze>
-分析 enrolled.csv 的学校分布和入学时间
+分析 enrolled 表的学校分布和入学时间
 </Analyze>
 
 <Code>
+import sqlite3
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
 
-# 使用第 1 轮提供的 CSV 文件绝对路径
-CSV_PATH = r"/home/tdz/DeepAnalyze/demo/workspace/session_xxx/data/enrolled.csv"
+# 使用第 1 轮提供的数据库路径
+DB_PATH = r"/home/tdz/DeepAnalyze/demo/workspace/session_xxx/student_loan.sqlite"
 OUTPUT_DIR = Path("generated")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-# 读取 CSV 文件
-df = pd.read_csv(CSV_PATH)
+with sqlite3.connect(DB_PATH, timeout=30) as conn:
+    df = pd.read_sql_query("SELECT * FROM enrolled LIMIT 1000", conn)
 
 # 统计学校分布
 school_counts = df['school'].value_counts().reset_index()
@@ -149,29 +147,29 @@ plt.tight_layout()
 plt.savefig(OUTPUT_DIR / "enrolled_school_dist.png", dpi=120)
 plt.close()
 
-print(f"分析完成：enrolled.csv 共 {len(df)} 条记录，{len(school_counts)} 所学校")
+print(f"分析完成：enrolled 表共 {len(df)} 条记录，{len(school_counts)} 所学校")
 </Code>
 ```
 
-**第 3 轮示例：分析 no_payment_due.csv 文件**
+**第 3 轮示例：分析 no_payment_due 表**
 
 ```
 <Analyze>
-分析 no_payment_due.csv 的还款状态分布
+分析 no_payment_due 表的还款状态分布
 </Analyze>
 
 <Code>
+import sqlite3
 import pandas as pd
 import matplotlib.pyplot as plt
 from pathlib import Path
 
-# 使用第 1 轮提供的 CSV 文件绝对路径
-CSV_PATH = r"/home/tdz/DeepAnalyze/demo/workspace/session_xxx/data/no_payment_due.csv"
+DB_PATH = r"/home/tdz/DeepAnalyze/demo/workspace/session_xxx/student_loan.sqlite"
 OUTPUT_DIR = Path("generated")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-# 读取 CSV 文件
-df = pd.read_csv(CSV_PATH)
+with sqlite3.connect(DB_PATH, timeout=30) as conn:
+    df = pd.read_sql_query("SELECT * FROM no_payment_due LIMIT 1000", conn)
 
 # 统计还款状态
 payment_stats = df['bool'].value_counts().reset_index()
@@ -187,22 +185,15 @@ plt.tight_layout()
 plt.savefig(OUTPUT_DIR / "payment_status_dist.png", dpi=120)
 plt.close()
 
-print(f"分析完成：no_payment_due.csv 共 {len(df)} 条记录")
+print(f"分析完成：no_payment_due 表共 {len(df)} 条记录")
 </Code>
 ```
 
-**第 4-6 轮**：继续分析其他 CSV 文件，每个文件生成对应的统计结果和可视化图表。
+**第 4-6 轮**：继续分析其他 CSV/Excel 文件，每个文件生成对应的统计结果和可视化图表。
 
 ### 5. 第 7 轮：SQLite 多表关联分析
 
-**重要**：第 7 轮开始使用 SQLite 数据库，不再使用 CSV 文件。
-
 **目的**：合并多个表，发现数据之间的关联。
-
-**强制要求**：
-- ✅ 使用第 1 轮 Bootstrap 提供的 SQLite 数据库绝对路径
-- ✅ 使用 SQL JOIN 语句进行多表关联
-- ✅ 严格使用第 1 轮显示的表名和字段名
 
 **示例：分析失业学生的性别和还款情况**
 
@@ -258,20 +249,20 @@ print(f"分析完成：失业学生 {len(df)} 人")
 
 ### 6. 代码模板参考
 
-**代码模板 A：读取 CSV 文件（第 2-6 轮使用）**
+**代码模板 A：读取 CSV/Excel 文件**
 
 ```python
 import pandas as pd
 import matplotlib.pyplot as plt
 from pathlib import Path
 
-# 使用第 1 轮 Bootstrap 提供的 CSV 绝对路径
-CSV_PATH = r"/home/tdz/DeepAnalyze/demo/workspace/session_xxx/data/文件名.csv"
 OUTPUT_DIR = Path("generated")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # 读取 CSV 文件
-df = pd.read_csv(CSV_PATH)
+df = pd.read_csv("文件名.csv")
+# 或读取 Excel 文件
+# df = pd.read_excel("文件名.xlsx")
 
 # 数据分析
 summary = df.describe(include='all')

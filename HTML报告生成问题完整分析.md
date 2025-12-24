@@ -526,6 +526,141 @@ COMMON_WORDS = {
 - 第7-9轮能正常生成文件,包括 HTML 报告
 - 第10轮输出 `<Answer>` 总结
 
+**实际效果**：✅ 部分有效,❌ 新问题出现
+
+**测试结果**:
+- ✅ 修复 9 已生效:模型在第7轮成功尝试执行多表关联分析,没有被表名验证拦截
+- ✅ 第2-6轮文件全部正常生成
+- ❌ 第7轮代码执行失败:模型使用了不存在的字段名
+  - `longest_absense_from_school`: 使用 `days` (实际是 `month`)
+  - `enlist`: 使用 `enlisted` (实际是 `organ`)
+- ❌ SQL 错误信息不够清晰,模型无法理解并修正
+- ❌ 没有 HTML 报告生成
+
+**失败原因**:修复 9 解决了表名验证问题,但暴露了新问题:**后端缺少针对 SQL 字段错误的智能检测和反馈机制**。当 SQL 查询因字段不存在而失败时,错误信息被包含在 `<Execute>` 输出中,但没有被特殊标记或解析,模型无法理解"no such column"错误的含义,导致反复尝试相同的错误代码。
+
+---
+
+### 修复 10:增强 SQL 字段错误检测和反馈(12月 24 日上午)✅
+
+#### 问题 10:SQL 字段错误缺少智能检测和明确反馈
+
+**问题现象**:
+从用户提供的测试结果可以看到,模型在第7轮(多表关联分析)使用了不存在的字段:
+
+```python
+# 模型错误地使用了这些字段:
+longest_absense_df = pd.read_sql_query("SELECT name, days FROM longest_absense_from_school", conn)
+enlist_df = pd.read_sql_query("SELECT name, enlisted FROM enlist", conn)
+```
+
+但根据 Bootstrap 输出,实际字段是:
+- `longest_absense_from_school`: `name, month` (不是 `days`)
+- `enlist`: `name, organ` (不是 `enlisted`)
+
+这导致 SQL 查询报错,但模型无法理解错误并修正。
+
+**根本原因**:
+
+后端已有通用错误检测机制 (`@backend.py:2970-3003`),但**不够精准**:
+
+1. **缺少 SQL 字段错误的特殊处理**:当检测到 `no such column` 或 `OperationalError` 时,只给出通用错误提示
+2. **错误信息不够明确**:没有自动展示数据库真实表结构,模型需要自己回忆 Bootstrap 输出
+3. **反馈不够直接**:模型无法快速定位是哪个字段名错误,需要反复尝试
+
+**问题代码位置**:`backend.py:2970-3003`
+
+原有的错误检测逻辑:
+```python
+if has_error:
+    # 提取错误类型和关键信息
+    error_lines = [...]
+    error_hint = error_lines[-1] if error_lines else "未知错误"
+    
+    error_warning = (
+        f"代码执行过程中出现错误:{error_hint}\n\n"
+        "请仔细检查上方 <Execute> 块中的完整错误信息,常见问题包括:\n"
+        "1. 对字符串字段调用数值计算方法(如 df.corr())\n"
+        "2. 使用不存在的字段名或表名\n"
+        "3. 数据类型不匹配\n"
+        "4. 缺少必要的数据预处理步骤\n\n"
+        "请修正代码后重新提交。如果部分代码已成功执行,可以基于已生成的文件继续分析。"
+    )
+```
+
+这个提示**过于通用**,对于 SQL 字段错误没有针对性。
+
+**修复方案**:
+
+在现有错误检测的基础上,增加对 `no such column` 和 `OperationalError` 的特殊处理:
+
+1. **检测 SQL 字段错误**:识别 `no such column` 或 `operationalerror` 关键词
+2. **自动提取表结构**:调用 `summarize_sqlite_schema(workspace_path)` 获取真实表结构
+3. **生成明确的错误提示**:直接展示数据库真实表结构,指导模型修正字段名
+
+**修改位置**:`backend.py:2992-3006` (在原有错误检测逻辑中增加分支)
+
+```python
+# 修改后
+if has_error:
+    logger.warning(
+        f"[bot_stream] Code execution error detected (files generated: {len(artifact_paths)})"
+    )
+    # 提取错误类型和关键信息
+    error_lines = [
+        line
+        for line in exe_output.split("\n")
+        if any(
+            kw in line.lower()
+            for kw in ["error", "exception", "traceback"]
+        )
+    ]
+    error_hint = error_lines[-1] if error_lines else "未知错误"
+
+    # 特殊处理:SQL 字段错误
+    if "no such column" in exe_output.lower() or "operationalerror" in exe_output.lower():
+        # 提取表结构信息
+        schema_hint = summarize_sqlite_schema(workspace_path)
+        error_warning = (
+            f"⚠️ SQL 查询错误:{error_hint}\n\n"
+            "**错误原因**:代码中使用了不存在的字段名。\n\n"
+            "**数据库真实表结构**:\n"
+            f"{schema_hint}\n\n"
+            "**修正方法**:\n"
+            "1. 仔细对照上方的表结构,确认每个表的真实字段名\n"
+            "2. 修改 SQL 查询中的字段名,使用真实存在的字段\n"
+            "3. 不要臆测字段名,必须严格使用 sqlite_master 和 PRAGMA table_info 返回的字段\n\n"
+            "请立即修正代码并重新提交。"
+        )
+    else:
+        # 通用错误处理
+        error_warning = (
+            f"代码执行过程中出现错误:{error_hint}\n\n"
+            "请仔细检查上方 <Execute> 块中的完整错误信息,常见问题包括:\n"
+            "1. 对字符串字段调用数值计算方法(如 df.corr())\n"
+            "2. 使用不存在的字段名或表名\n"
+            "3. 数据类型不匹配\n"
+            "4. 缺少必要的数据预处理步骤\n\n"
+            "请修正代码后重新提交。如果部分代码已成功执行,可以基于已生成的文件继续分析。"
+        )
+    messages.append({"role": "user", "content": error_warning})
+    refund_iteration()
+    continue
+```
+
+**修复逻辑**:
+- 检测到 SQL 字段错误时,自动调用 `summarize_sqlite_schema` 提取表结构
+- 在错误提示中直接展示所有表的真实字段,无需模型回忆 Bootstrap 输出
+- 提供明确的修正步骤,指导模型对照表结构修改字段名
+- 强调"不要臆测字段名",必须使用真实字段
+
+**预期效果**:
+- 模型在第7轮遇到字段错误时,能立即看到完整的表结构
+- 模型能快速定位错误字段,修正为正确的字段名
+- 第7轮能成功执行多表关联分析,生成相关文件
+- 第8-9轮能正常生成 HTML 报告
+- 第10轮输出 `<Answer>` 总结
+
 ---
 
 ## 代码检查结果（2024-12-23）
@@ -840,28 +975,31 @@ tail -f ~/DeepAnalyze/demo/logs/backend.log | grep -E "execute_rounds|premature|
 
 ---
 
-**文档版本**：v6.0（修复 9 最终版）  
-**最后更新**：2024-12-23 16:20  
-**状态**：
-- ✅ 修复 6.1：流式输出检测顺序已修复（先检查 `</Answer>` 再检查 `</Code>`）
-- ✅ 修复 6.2：`execute_rounds` 初始化已修复（Bootstrap 后设为 1）
-- ✅ 修复 7：系统主动请求 Answer 的阈值已修复（`ANSWER_MIN_EXEC_ROUNDS = 10`）
-- ✅ 修复 8：在 answer_requested 使用点增加轮次检查（防止多重触发）
-- ✅ 修复 9：修复表验证逻辑,排除 SQL 别名和文件名（解决第7轮循环问题）
+**文档版本**:v7.0(修复 10 最终版)  
+**最后更新**:2024-12-24 10:15  
+**状态**:
+- ✅ 修复 6.1:流式输出检测顺序已修复(先检查 `</Answer>` 再检查 `</Code>`)
+- ✅ 修复 6.2:`execute_rounds` 初始化已修复(Bootstrap 后设为 1)
+- ✅ 修复 7:系统主动请求 Answer 的阈值已修复(`ANSWER_MIN_EXEC_ROUNDS = 10`)
+- ✅ 修复 8:在 answer_requested 使用点增加轮次检查(防止多重触发)
+- ✅ 修复 9:修复表验证逻辑,排除 SQL 别名和文件名(解决第7轮循环问题)
+- ✅ 修复 10:增强 SQL 字段错误检测和反馈(解决字段名错误问题)
 - ⏳ 待重启后端服务验证效果
 
-**修复历史总结**：
-- 修复 1-3：提示词优化（无效，问题在后端）
-- 修复 4：空输出检测增强（缓解但未解决核心问题）
-- 修复 5：修改判断条件（部分修复，但遗漏了检测顺序和初始化问题）
-- 修复 6：修复流式输出检测顺序 + execute_rounds 初始化（技术修复完成，但遗漏了主动请求机制）
-- 修复 7：修复系统主动请求 Answer 的阈值（修复了设置点，但遗漏了使用点）
-- 修复 8：在 answer_requested 使用点增加轮次检查（修复了主动请求，但遗漏了表验证逻辑）
-- **修复 9：修复表验证逻辑,排除 SQL 别名和文件名（最终修复）**
+**修复历史总结**:
+- 修复 1-3:提示词优化(无效,问题在后端)
+- 修复 4:空输出检测增强(缓解但未解决核心问题)
+- 修复 5:修改判断条件(部分修复,但遗漏了检测顺序和初始化问题)
+- 修复 6:修复流式输出检测顺序 + execute_rounds 初始化(技术修复完成,但遗漏了主动请求机制)
+- 修复 7:修复系统主动请求 Answer 的阈值(修复了设置点,但遗漏了使用点)
+- 修复 8:在 answer_requested 使用点增加轮次检查(修复了主动请求,但遗漏了表验证逻辑)
+- 修复 9:修复表验证逻辑,排除 SQL 别名和文件名(修复了表名验证,但遗漏了字段验证)
+- **修复 10:增强 SQL 字段错误检测和反馈(最终修复)**
 
-**核心教训**：
+**核心教训**:
 - ✅ 不仅要检查拦截逻辑,还要检查系统是否会主动触发被拦截的行为
 - ✅ 日志分析要全面:没有拦截警告 ≠ 拦截逻辑有问题,可能是系统主动请求
 - ✅ 理解系统的完整工作流程,不能只关注局部逻辑
 - ✅ 检查标志变量的所有设置点和使用点,确保一致性
-- ✅ **验证逻辑要考虑所有合法场景,不能误判正常的 SQL 语法或文件名**
+- ✅ 验证逻辑要考虑所有合法场景,不能误判正常的 SQL 语法或文件名
+- ✅ **错误反馈要精准和可操作,针对不同错误类型提供针对性的修正指导**
