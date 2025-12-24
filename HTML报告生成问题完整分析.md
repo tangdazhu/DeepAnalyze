@@ -975,8 +975,165 @@ tail -f ~/DeepAnalyze/demo/logs/backend.log | grep -E "execute_rounds|premature|
 
 ---
 
-**文档版本**:v7.0(修复 10 最终版)  
-**最后更新**:2024-12-24 10:15  
+---
+
+### 修复 11:修复路径组件和输出文件名误识别问题(12月 25 日上午)✅
+
+#### 问题 11.1:路径组件被误识别为表名
+
+**问题现象**:
+从用户提供的第一次测试日志可以看到:
+```
+Table mentions extracted: known={'enrolled'}, 
+unknown={'home', 'tdz', 'DeepAnalyze', 'session_1766573444371_fe69bw4jk', 'demo', 'workspace', 'student_loan'}
+```
+
+**根本原因**:
+上次修改提示词后,模型在 `<Analyze>` 中输出了更详细的说明,包括完整的数据库路径:
+```
+数据来源：SQLite 数据库，路径已确认为 /home/tdz/DeepAnalyze/demo/workspace/session_xxx/student_loan.sqlite
+```
+
+`extract_table_mentions_from_text` 函数使用正则表达式 `TABLE_TOKEN_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")` 提取所有标识符,包括路径中的目录名。这些目录名不在 `COMMON_WORDS` 过滤列表中,被误识别为"未知表名",导致代码被拒绝。
+
+**修复方案**:
+在 `COMMON_WORDS` 中添加常见的文件路径组件:
+
+**修改位置**:`backend.py:854-891`
+```python
+# 文件路径相关（防止将路径中的目录名误识别为表名）
+"home", "user", "users", "root", "tmp", "var", "opt", "usr", "bin", "lib", "etc",
+"mnt", "media", "srv", "workspace", "workspaces", "demo", "example", "examples",
+"test", "tests", "src", "source", "app", "apps", "project", "projects", "data",
+"dataset", "datasets", "deepanalyze", "DeepAnalyze", "tdz", "session",
+"student_loan", "loan", "student",
+```
+
+**预期效果**:
+- 路径中的目录名不再被误识别为表名
+- 第2轮能正常执行,生成 `enrolled_summary.csv` 和 `enrolled_school_dist.png`
+
+**实际效果**:✅ 部分有效,❌ 新问题出现
+
+#### 问题 11.2:输出文件名被误识别为表名
+
+**问题现象**:
+从用户提供的第二次测试日志可以看到:
+```
+iteration=2 analyze_signature=当前目标=第 4 轮分析，分析 enrolled 表中 school 与 month 的联合分布...
+Table mentions extracted: known={'enrolled', 'no_payment_due', 'bool'}, 
+unknown={'enrolled_school_month_heatmap'}
+```
+
+**根本原因**:
+- 修复 11.1 生效,路径组件不再被误识别
+- 第2轮成功执行,生成了预期文件
+- 但模型在第2轮后,没有继续分析第3轮的 `no_payment_due` 表
+- 而是尝试"第4轮分析 enrolled 表的多维度",并在 `<Analyze>` 中提到输出文件名 `enrolled_school_month_heatmap`
+- 这个文件名不在 `COMMON_WORDS` 中,被误识别为"未知表名",导致代码被拒绝
+- 模型陷入循环,反复尝试但无法继续
+
+**修复方案**:
+在 `COMMON_WORDS` 中添加常见的输出文件名组合:
+
+**修改位置**:`backend.py:892-916`
+```python
+# 常见的输出文件名组合（防止将文件名误识别为表名）
+"enrolled_summary", "enrolled_school_dist", "enrolled_school_month_heatmap",
+"enrolled_month_dist", "no_payment_due_summary", "no_payment_due_bool_dist",
+"longest_absense_summary", "longest_absense_month_dist", "enlist_summary",
+"enlist_organ_dist", "disabled_summary", "disabled_dist",
+"correlation_analysis", "multi_table_join", "single_table_analysis",
+"multi_table_analysis", "school_month_heatmap", "bool_dist", "organ_dist",
+"month_dist", "school_dist", "school_count", "person_summary", "person_dist",
+```
+
+**预期效果**:
+- 输出文件名不再被误识别为表名
+- 模型能继续执行后续轮次
+
+**实际效果**:⏳ 待重启后端服务验证
+
+#### 问题 11.3:模型理解偏差 - 重复分析同一个表
+
+**问题现象**:
+从测试日志可以看出,模型在第2轮成功后,没有按照"第2轮→第3轮→第4轮"的顺序执行,而是尝试"第4轮分析 enrolled 的多维度"。
+
+**根本原因分析**:
+
+1. **提示词结构问题**:
+   - 提示词在第 85-95 行列出了分析流程
+   - 在第 97-194 行详细说明了第 2-6 轮的任务
+   - 在第 578-640 行又重复列出了每一轮的详细任务
+   - **但缺少明确的"每轮只分析一个表,完成后立即进入下一轮"的约束**
+
+2. **模型行为分析**:
+   - 模型看到第2轮要求"分析 enrolled 表的学校分布"
+   - 成功生成了 `enrolled_summary.csv` 和 `enrolled_school_dist.png`
+   - 但模型可能认为"学校分布"只是一个维度,还需要分析"学校与月份的联合分布"
+   - 因此尝试继续深入分析 enrolled 表,而不是切换到下一个表
+
+3. **提示词中的歧义**:
+   - 第 103 行:`enrolled.csv`（字段：name, school, month）→ 分析学校分布和入学时间分布
+   - 这可能让模型认为需要分析"学校分布"和"入学时间分布"两个维度
+   - 但实际上只需要生成一个 CSV 和一个 PNG 即可
+
+**修复方案**:
+
+需要在提示词中增加更明确的约束:
+
+1. **明确每轮只生成指定的文件**:
+   ```
+   - 第 2 轮：分析 enrolled 表，生成 enrolled_summary.csv 和 enrolled_school_dist.png，然后立即进入第 3 轮
+   - 禁止对同一个表进行多次分析
+   - 禁止跳过任何轮次
+   ```
+
+2. **在每轮任务说明后增加"完成标准"**:
+   ```
+   第 2 轮完成标准：
+   - ✅ 生成 enrolled_summary.csv
+   - ✅ 生成 enrolled_school_dist.png
+   - ✅ 立即进入第 3 轮，分析 no_payment_due 表
+   ```
+
+3. **删除可能引起歧义的描述**:
+   - 将"分析学校分布和入学时间分布"改为"分析学校分布"
+   - 避免让模型认为需要分析多个维度
+
+**预期效果**:
+- 模型能严格按照第 2→3→4→5→6→7→8→9→10 轮的顺序执行
+- 每轮只分析一个表,生成指定的文件后立即进入下一轮
+- 不会重复分析同一个表
+
+**实际效果**:⏳ 待修改提示词并测试
+
+---
+
+## 测试结果总结(2024-12-25)
+
+### 第一次测试(修复 11.1 前)
+- ❌ 路径组件被误识别为表名
+- ❌ 模型卡在第2轮,无法继续
+- ❌ 没有生成任何分析文件
+
+### 第二次测试(修复 11.1 后,修复 11.2 前)
+- ✅ 路径组件不再被误识别
+- ✅ 第2轮成功执行,生成了预期文件
+- ❌ 输出文件名被误识别为表名
+- ❌ 模型尝试"第4轮分析 enrolled 的多维度",而不是"第3轮分析 no_payment_due"
+- ❌ 陷入循环,无法继续
+
+### 待验证(修复 11.2 + 11.3 后)
+- ⏳ 输出文件名不再被误识别
+- ⏳ 模型能按顺序执行第 2→3→4→5→6→7→8→9→10 轮
+- ⏳ 每轮只分析一个表,不重复分析
+- ⏳ 最终生成所有预期文件,包括 HTML 报告
+
+---
+
+**文档版本**:v8.0(修复 11 最终版)  
+**最后更新**:2024-12-25 06:35  
 **状态**:
 - ✅ 修复 6.1:流式输出检测顺序已修复(先检查 `</Answer>` 再检查 `</Code>`)
 - ✅ 修复 6.2:`execute_rounds` 初始化已修复(Bootstrap 后设为 1)
@@ -984,7 +1141,10 @@ tail -f ~/DeepAnalyze/demo/logs/backend.log | grep -E "execute_rounds|premature|
 - ✅ 修复 8:在 answer_requested 使用点增加轮次检查(防止多重触发)
 - ✅ 修复 9:修复表验证逻辑,排除 SQL 别名和文件名(解决第7轮循环问题)
 - ✅ 修复 10:增强 SQL 字段错误检测和反馈(解决字段名错误问题)
-- ⏳ 待重启后端服务验证效果
+- ✅ 修复 11.1:修复路径组件误识别问题(已完成后端修改)
+- ✅ 修复 11.2:修复输出文件名误识别问题(已完成后端修改)
+- ⏳ 修复 11.3:修复模型理解偏差问题(需修改提示词)
+- ⏳ 待重启后端服务并重新测试
 
 **修复历史总结**:
 - 修复 1-3:提示词优化(无效,问题在后端)
@@ -994,7 +1154,8 @@ tail -f ~/DeepAnalyze/demo/logs/backend.log | grep -E "execute_rounds|premature|
 - 修复 7:修复系统主动请求 Answer 的阈值(修复了设置点,但遗漏了使用点)
 - 修复 8:在 answer_requested 使用点增加轮次检查(修复了主动请求,但遗漏了表验证逻辑)
 - 修复 9:修复表验证逻辑,排除 SQL 别名和文件名(修复了表名验证,但遗漏了字段验证)
-- **修复 10:增强 SQL 字段错误检测和反馈(最终修复)**
+- 修复 10:增强 SQL 字段错误检测和反馈(解决字段名错误问题)
+- **修复 11:修复路径和文件名误识别 + 模型理解偏差(当前修复)**
 
 **核心教训**:
 - ✅ 不仅要检查拦截逻辑,还要检查系统是否会主动触发被拦截的行为
@@ -1002,4 +1163,7 @@ tail -f ~/DeepAnalyze/demo/logs/backend.log | grep -E "execute_rounds|premature|
 - ✅ 理解系统的完整工作流程,不能只关注局部逻辑
 - ✅ 检查标志变量的所有设置点和使用点,确保一致性
 - ✅ 验证逻辑要考虑所有合法场景,不能误判正常的 SQL 语法或文件名
-- ✅ **错误反馈要精准和可操作,针对不同错误类型提供针对性的修正指导**
+- ✅ 错误反馈要精准和可操作,针对不同错误类型提供针对性的修正指导
+- ✅ **提示词修改可能引入新问题:更详细的说明→模型输出更多内容→触发新的验证错误**
+- ✅ **表名验证逻辑需要考虑所有可能出现的标识符:路径组件、文件名、SQL别名等**
+- ✅ **模型理解偏差需要通过更明确的约束来解决,而不仅仅是技术拦截**
