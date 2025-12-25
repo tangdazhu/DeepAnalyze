@@ -1762,21 +1762,31 @@ def bot_stream(messages, workspace, session_id="default"):
 
                     retry_prompt = (
                         f"⚠️ 检测到第 {next_round} 轮输出为空（已重试 {empty_retry}/3 次）。\n\n"
+                        f"**🔴 强制要求：立即开始第 {next_round} 轮分析 🔴**\n\n"
                         f"**第 {next_round} 轮任务**：\n"
                         f"- 必须分析的表/任务：{table_hint}\n"
                         f"- 必须生成的文件：{file_hint}\n\n"
-                        "**立即输出以下格式**：\n"
+                        "**⚡ 立即输出以下格式（不要输出任何其他内容）**：\n\n"
                         "<Analyze>\n"
-                        f"当前目标=第 {next_round} 轮分析，分析 {table_hint}，生成 {file_hint}\n"
+                        f"第 {next_round} 轮分析：{table_hint}\n"
                         "</Analyze>\n\n"
                         "<Code>\n"
                         "import sqlite3\n"
                         "import pandas as pd\n"
                         "import matplotlib.pyplot as plt\n"
-                        "from pathlib import Path\n"
+                        "from pathlib import Path\n\n"
+                        "# 使用第1轮提供的数据库绝对路径\n"
+                        'DB_PATH = r"<从第1轮Bootstrap复制路径>"\n'
+                        'OUTPUT_DIR = Path("generated")\n'
+                        "OUTPUT_DIR.mkdir(parents=True, exist_ok=True)\n\n"
                         "# 编写完整可执行代码\n"
                         "</Code>\n\n"
-                        f"**禁止跳过第 {next_round} 轮，禁止提前输出 <Answer>。**"
+                        f"**❌ 禁止行为**：\n"
+                        f"- 禁止返回空响应\n"
+                        f"- 禁止跳过第 {next_round} 轮\n"
+                        f"- 禁止输出任何解释或等待指令\n"
+                        f"- 禁止提前输出 <Answer>\n\n"
+                        f"**✅ 必须行为**：立即输出完整的 <Analyze> 和 <Code> 标签"
                     )
                     messages.append({"role": "user", "content": retry_prompt})
                     refund_iteration()  # 关键：退还迭代计数
@@ -2611,6 +2621,23 @@ def bot_stream(messages, workspace, session_id="default"):
                         non_schema_exec_rounds += 1
                     if answer_requested:
                         answer_waiting_rounds = 0
+
+                    # 在非bootstrap代码执行成功后,添加明确的"继续下一轮"提示
+                    if (
+                        not is_schema_code
+                        and non_schema_exec_rounds > 0
+                        and non_schema_exec_rounds < 9
+                    ):
+                        next_round = non_schema_exec_rounds + 1
+                        if next_round <= 10:
+                            continue_prompt = (
+                                f"✅ 第 {non_schema_exec_rounds} 轮已完成。\n\n"
+                                f"⚡ 立即开始第 {next_round} 轮分析（不要等待指令，不要输出任何解释）。\n\n"
+                                f"直接输出 <Analyze> 和 <Code> 标签。"
+                            )
+                            messages.append(
+                                {"role": "user", "content": continue_prompt}
+                            )
 
                     # 检测代码执行错误：只要有 Traceback/Error/Exception 就警告模型
                     # 不管是否生成了文件，因为部分成功的代码仍可能包含严重错误
