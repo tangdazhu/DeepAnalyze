@@ -96,17 +96,26 @@
 
 ### 4. 第 2-6 轮：CSV 文件单表分析（必须完成）
 
-**强制要求**：
+**🚨 强制要求 - 必须严格遵守 🚨**：
 - 必须完成 **5 轮 CSV 文件分析**
+- **每轮只分析一个表,生成指定的文件后立即进入下一轮**
+- **禁止对同一个表进行多次分析**
+- **禁止跳过任何轮次**
 - **使用第 1 轮 Bootstrap 输出的 CSV 文件绝对路径**
-- 分析以下 5 个 CSV 文件（按顺序）：
-  - **第 2 轮**：`enrolled.csv`（字段：name, school, month）→ 分析学校分布和入学时间分布
-  - **第 3 轮**：`no_payment_due.csv`（字段：name, bool）→ 分析还款状态分布
-  - **第 4 轮**：`longest_absense_from_school.csv`（字段：name, month）→ 分析缺勤时长分布
-  - **第 5 轮**：`enlist.csv`（字段：name, organ）→ 分析服役单位分布
-  - **第 6 轮**：`disabled.csv`（字段：name）→ 统计残疾学生数量并与总人数对比
-- 每轮必须生成至少 1 个 CSV 文件和 1 个 PNG 图表
+- 分析以下 5 个 CSV 文件（**必须按此顺序执行**）：
+  - **第 2 轮**：`enrolled.csv`（字段：name, school, month）→ 生成 enrolled_summary.csv + enrolled_school_dist.png
+  - **第 3 轮**：`no_payment_due.csv`（字段：name, bool）→ 生成 payment_status_summary.csv + payment_status_dist.png
+  - **第 4 轮**：`longest_absense_from_school.csv`（字段：name, month）→ 生成 absense_summary.csv + absense_month_dist.png
+  - **第 5 轮**：`enlist.csv`（字段：name, organ）→ 生成 enlist_summary.csv + enlist_organ_dist.png
+  - **第 6 轮**：`disabled.csv`（字段：name）→ 生成 disabled_count.csv + disabled_vs_total.png
+- 每轮必须生成 **恰好** 1 个 CSV 文件和 1 个 PNG 图表
 - 所有文件保存到 `generated/` 目录
+
+**完成标准**：
+- ✅ 生成了指定的 CSV 和 PNG 文件
+- ✅ 立即进入下一轮,分析下一个表
+- ❌ 不要对同一个表进行额外的深入分析
+- ❌ 不要尝试分析多个维度或生成额外的文件
 
 **重要提醒**：
 - ✅ **使用 pandas 直接读取 CSV 文件**（使用第 1 轮提供的绝对路径）
@@ -383,66 +392,110 @@ merged.to_csv(OUTPUT_DIR / "merged_data.csv", index=False)
 </Code>
 ```
 
-**单表分析 HTML 报告模板**
+**单表分析 HTML 报告模板（必须使用此模板）**
 
 ```python
+import sqlite3
+import pandas as pd
 from pathlib import Path
+from datetime import datetime
 
+DB_PATH = r"/home/tdz/DeepAnalyze/demo/workspace/session_xxx/student_loan.sqlite"  # 使用第1轮提供的路径
 OUTPUT_DIR = Path("generated")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
+# 检查已生成的文件
+generated_files = list(OUTPUT_DIR.glob("*.png")) + list(OUTPUT_DIR.glob("*.csv"))
+file_list = "\n".join([f"<li>{f.name}</li>" for f in generated_files[:10]])
+
+# 读取部分数据进行统计
+try:
+    with sqlite3.connect(DB_PATH, timeout=30) as conn:
+        # 统计各表记录数
+        tables = pd.read_sql_query("SELECT name FROM sqlite_master WHERE type='table'", conn)
+        table_stats = []
+        for table in tables['name']:
+            count = pd.read_sql_query(f"SELECT COUNT(*) as cnt FROM {table}", conn).iloc[0]['cnt']
+            table_stats.append(f"<li>{table}: {count} 条记录</li>")
+        table_info = "\n".join(table_stats)
+except Exception as e:
+    table_info = f"<li>数据统计失败: {str(e)}</li>"
+
 # 生成 HTML 报告
-html_content = """
-<!DOCTYPE html>
+html_content = f"""<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
     <title>学生贷款数据 - 单表分析报告</title>
     <style>
-        body { font-family: "Microsoft YaHei", Arial, sans-serif; max-width: 1200px; margin: 0 auto; padding: 20px; background: #f5f5f5; }
-        .container { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-        h1 { color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 10px; }
-        h2 { color: #3498db; margin-top: 30px; }
-        .summary { background: #ecf0f1; padding: 15px; border-radius: 5px; margin: 20px 0; }
-        .finding { background: #e8f5e9; padding: 15px; margin: 10px 0; border-left: 4px solid #4caf50; }
-        img { max-width: 100%; height: auto; margin: 20px 0; border: 1px solid #ddd; border-radius: 4px; }
-        .footer { margin-top: 40px; text-align: center; color: #7f8c8d; font-size: 14px; }
+        body {{ font-family: "Microsoft YaHei", Arial, sans-serif; max-width: 1200px; margin: 0 auto; padding: 20px; background: #f5f5f5; }}
+        .container {{ background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }}
+        h1 {{ color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 10px; }}
+        h2 {{ color: #3498db; margin-top: 30px; }}
+        .summary {{ background: #ecf0f1; padding: 15px; border-radius: 5px; margin: 20px 0; }}
+        .finding {{ background: #e8f5e9; padding: 15px; margin: 10px 0; border-left: 4px solid #4caf50; }}
+        img {{ max-width: 100%; height: auto; margin: 20px 0; border: 1px solid #ddd; border-radius: 4px; }}
+        .footer {{ margin-top: 40px; text-align: center; color: #7f8c8d; font-size: 14px; }}
+        ul {{ line-height: 1.8; }}
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>学生贷款数据分析报告</h1>
+        <h1>学生贷款数据 - 单表分析报告</h1>
         
         <div class="summary">
             <h2>数据概况</h2>
-            <p><strong>数据库表数：</strong>10 个表</p>
-            <p><strong>分析轮次：</strong>3 轮</p>
-            <p><strong>生成文件：</strong>CSV 统计文件 + PNG 可视化图表</p>
+            <p><strong>数据库：</strong>student_loan.sqlite</p>
+            <p><strong>分析轮次：</strong>第 2-6 轮（单表分析）</p>
+            <p><strong>生成文件数：</strong>{len(generated_files)} 个</p>
+            <h3>各表记录数统计</h3>
+            <ul>{table_info}</ul>
         </div>
         
         <h2>分析结果</h2>
         
         <div class="finding">
-            <h3>发现 1：入学学校分布</h3>
-            <p>分析了 enrolled 表的学校分布，发现前 10 所学校占据了大部分学生。</p>
-            <img src="enrolled_school_dist.png" alt="学校分布图">
+            <h3>第 2 轮：enrolled 表分析</h3>
+            <p>分析了学生入学信息，包括学校分布和入学时间分布。</p>
+            <img src="enrolled_school_dist.png" alt="学校分布图" onerror="this.style.display='none'">
         </div>
         
         <div class="finding">
-            <h3>发现 2：入学月份趋势</h3>
-            <p>学生入学存在明显的季节性特征，9 月和 1 月为入学高峰期。</p>
-            <img src="enrolled_month_dist.png" alt="月份分布图">
+            <h3>第 3 轮：no_payment_due 表分析</h3>
+            <p>分析了学生还款状态分布。</p>
+            <img src="payment_status_dist.png" alt="还款状态分布" onerror="this.style.display='none'">
         </div>
+        
+        <div class="finding">
+            <h3>第 4 轮：longest_absense_from_school 表分析</h3>
+            <p>分析了学生缺勤时长分布。</p>
+            <img src="absense_month_dist.png" alt="缺勤时长分布" onerror="this.style.display='none'">
+        </div>
+        
+        <div class="finding">
+            <h3>第 5 轮：enlist 表分析</h3>
+            <p>分析了学生服役单位分布。</p>
+            <img src="enlist_organ_dist.png" alt="服役单位分布" onerror="this.style.display='none'">
+        </div>
+        
+        <div class="finding">
+            <h3>第 6 轮：disabled 表分析</h3>
+            <p>统计了残疾学生数量。</p>
+            <img src="disabled_vs_total.png" alt="残疾学生统计" onerror="this.style.display='none'">
+        </div>
+        
+        <h2>生成文件清单</h2>
+        <ul>{file_list}</ul>
         
         <h2>结论与建议</h2>
         <ul>
-            <li>数据质量良好，字段完整</li>
-            <li>建议进一步分析学校与还款能力的关系</li>
-            <li>可结合其他表（如 no_payment_due）进行深度分析</li>
+            <li>完成了 5 个表的单表分析</li>
+            <li>生成了描述性统计文件和可视化图表</li>
+            <li>建议进行多表关联分析以发现更深层次的规律</li>
         </ul>
         
         <div class="footer">
-            <p>生成时间：2025-12-22</p>
+            <p>生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
             <p>分析工具：DeepAnalyze + SQLite + Pandas</p>
         </div>
     </div>
@@ -454,7 +507,7 @@ html_content = """
 with open(OUTPUT_DIR / "single_table_analysis.html", "w", encoding="utf-8") as f:
     f.write(html_content)
 
-print("单表分析 HTML 报告已生成：generated/single_table_analysis.html")
+print("✅ 单表分析 HTML 报告已生成：generated/single_table_analysis.html")
 ```
 
 **注意事项**：
@@ -480,27 +533,56 @@ print("单表分析 HTML 报告已生成：generated/single_table_analysis.html"
 <Analyze>生成多表关联 HTML 报告</Analyze>
 
 <Code>
+import sqlite3
+import pandas as pd
 from pathlib import Path
+from datetime import datetime
 
+DB_PATH = r"/home/tdz/DeepAnalyze/demo/workspace/session_xxx/student_loan.sqlite"  # 使用第1轮提供的路径
 OUTPUT_DIR = Path("generated")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
+# 检查第7轮生成的文件
+try:
+    round7_files = list(OUTPUT_DIR.glob("*join*.png")) + list(OUTPUT_DIR.glob("*join*.csv"))
+    if not round7_files:
+        round7_files = list(OUTPUT_DIR.glob("*correlation*.png")) + list(OUTPUT_DIR.glob("*multi*.csv"))
+    round7_status = "成功" if round7_files else "未完成"
+    round7_file_list = "\n".join([f"<li>{f.name}</li>" for f in round7_files]) if round7_files else "<li>无文件生成</li>"
+except Exception as e:
+    round7_status = f"检查失败: {str(e)}"
+    round7_file_list = "<li>无法检查文件</li>"
+
+# 尝试读取第7轮的关联结果
+try:
+    with sqlite3.connect(DB_PATH, timeout=30) as conn:
+        # 简单统计多表关联的可能性
+        query = "SELECT COUNT(*) as cnt FROM unemployed"
+        unemployed_count = pd.read_sql_query(query, conn).iloc[0]['cnt']
+        query = "SELECT COUNT(*) as cnt FROM no_payment_due"
+        payment_count = pd.read_sql_query(query, conn).iloc[0]['cnt']
+        stats_info = f"<li>unemployed 表: {unemployed_count} 条</li><li>no_payment_due 表: {payment_count} 条</li>"
+except Exception as e:
+    stats_info = f"<li>统计失败: {str(e)}</li>"
+
 # 生成多表关联 HTML 报告
-html_content = """
-<!DOCTYPE html>
+html_content = f"""<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
     <title>学生贷款数据 - 多表关联分析报告</title>
     <style>
-        body { font-family: "Microsoft YaHei", Arial, sans-serif; max-width: 1200px; margin: 0 auto; padding: 20px; background: #f5f5f5; }
-        .container { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-        h1 { color: #2c3e50; border-bottom: 3px solid #e74c3c; padding-bottom: 10px; }
-        h2 { color: #e74c3c; margin-top: 30px; }
-        .summary { background: #ffe5e5; padding: 15px; border-radius: 5px; margin: 20px 0; }
-        .finding { background: #fff3cd; padding: 15px; margin: 10px 0; border-left: 4px solid #ffc107; }
-        img { max-width: 100%; height: auto; margin: 20px 0; border: 1px solid #ddd; border-radius: 4px; }
-        .footer { margin-top: 40px; text-align: center; color: #7f8c8d; font-size: 14px; }
+        body {{ font-family: "Microsoft YaHei", Arial, sans-serif; max-width: 1200px; margin: 0 auto; padding: 20px; background: #f5f5f5; }}
+        .container {{ background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }}
+        h1 {{ color: #2c3e50; border-bottom: 3px solid #e74c3c; padding-bottom: 10px; }}
+        h2 {{ color: #e74c3c; margin-top: 30px; }}
+        .summary {{ background: #ffe5e5; padding: 15px; border-radius: 5px; margin: 20px 0; }}
+        .finding {{ background: #fff3cd; padding: 15px; margin: 10px 0; border-left: 4px solid #ffc107; }}
+        .success {{ background: #e8f5e9; border-left: 4px solid #4caf50; }}
+        .warning {{ background: #fff3cd; border-left: 4px solid #ff9800; }}
+        img {{ max-width: 100%; height: auto; margin: 20px 0; border: 1px solid #ddd; border-radius: 4px; }}
+        .footer {{ margin-top: 40px; text-align: center; color: #7f8c8d; font-size: 14px; }}
+        ul {{ line-height: 1.8; }}
     </style>
 </head>
 <body>
@@ -510,27 +592,33 @@ html_content = """
         <div class="summary">
             <h2>分析概况</h2>
             <p><strong>数据源：</strong>SQLite 数据库（多表 JOIN）</p>
-            <p><strong>分析轮次：</strong>1 轮（第 7 轮）</p>
-            <p><strong>关联表：</strong>unemployed, male, no_payment_due 等</p>
+            <p><strong>分析轮次：</strong>第 7 轮</p>
+            <p><strong>分析状态：</strong>{round7_status}</p>
+            <h3>关联表统计</h3>
+            <ul>{stats_info}</ul>
         </div>
         
         <h2>多表关联分析结果</h2>
         
-        <div class="finding">
-            <h3>关联发现 1：失业学生的性别与还款情况</h3>
-            <p>通过关联 unemployed、male、no_payment_due 三个表，发现失业学生中男性占比更高，且还款情况较差。</p>
-            <img src="unemployed_gender_payment.png" alt="失业学生性别与还款关系">
+        <div class="finding {'success' if round7_status == '成功' else 'warning'}">
+            <h3>第 7 轮：多表关联分析</h3>
+            <p>{'分析了失业学生的性别与还款情况的关联关系。' if round7_status == '成功' else '多表关联分析未完成或部分完成。'}</p>
+            <img src="unemployed_gender_payment.png" alt="失业学生性别与还款关系" onerror="this.style.display='none'">
+            <img src="correlation_analysis.png" alt="关联分析" onerror="this.style.display='none'">
         </div>
+        
+        <h2>生成文件清单</h2>
+        <ul>{round7_file_list}</ul>
         
         <h2>多表关联结论</h2>
         <ul>
-            <li>数据之间存在明显的关联关系</li>
-            <li>多维度交叉分析揭示了更深层次的规律</li>
-            <li>为政策制定提供了数据支持</li>
+            <li>完成了多表关联分析尝试</li>
+            <li>{'揭示了数据之间的关联关系' if round7_status == '成功' else '建议优化SQL查询以提高关联分析成功率'}</li>
+            <li>为后续深度分析提供了基础</li>
         </ul>
         
         <div class="footer">
-            <p>生成时间：2025-12-22</p>
+            <p>生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
             <p>分析工具：DeepAnalyze + SQLite + Pandas</p>
         </div>
     </div>
@@ -542,7 +630,7 @@ html_content = """
 with open(OUTPUT_DIR / "multi_table_analysis.html", "w", encoding="utf-8") as f:
     f.write(html_content)
 
-print("多表关联 HTML 报告已生成：generated/multi_table_analysis.html")
+print("✅ 多表关联 HTML 报告已生成：generated/multi_table_analysis.html")
 </Code>
 ```
 
@@ -586,6 +674,12 @@ print("多表关联 HTML 报告已生成：generated/multi_table_analysis.html")
 - `enrolled_summary.csv`
 - `enrolled_school_dist.png`
 
+**完成标准**：
+- ✅ 生成 enrolled_summary.csv
+- ✅ 生成 enrolled_school_dist.png
+- ✅ **完成后立即进入第 3 轮,分析 no_payment_due 表**
+- ❌ **禁止继续分析 enrolled 表的其他维度**
+
 ### 第 3 轮：分析 no_payment_due 表
 **任务**：分析 `no_payment_due` 表的还款状态分布
 **表名**：`no_payment_due`
@@ -593,6 +687,11 @@ print("多表关联 HTML 报告已生成：generated/multi_table_analysis.html")
 **输出文件**：
 - `payment_status_summary.csv`
 - `payment_status_dist.png`
+
+**完成标准**：
+- ✅ 生成 payment_status_summary.csv
+- ✅ 生成 payment_status_dist.png
+- ✅ **完成后立即进入第 4 轮,分析 longest_absense_from_school 表**
 
 ### 第 4 轮：分析 longest_absense_from_school 表
 **任务**：分析 `longest_absense_from_school` 表的缺勤时长分布
@@ -602,6 +701,11 @@ print("多表关联 HTML 报告已生成：generated/multi_table_analysis.html")
 - `absense_summary.csv`
 - `absense_month_dist.png`
 
+**完成标准**：
+- ✅ 生成 absense_summary.csv
+- ✅ 生成 absense_month_dist.png
+- ✅ **完成后立即进入第 5 轮,分析 enlist 表**
+
 ### 第 5 轮：分析 enlist 表
 **任务**：分析 `enlist` 表的服役单位分布
 **表名**：`enlist`
@@ -610,6 +714,11 @@ print("多表关联 HTML 报告已生成：generated/multi_table_analysis.html")
 - `enlist_summary.csv`
 - `enlist_organ_dist.png`
 
+**完成标准**：
+- ✅ 生成 enlist_summary.csv
+- ✅ 生成 enlist_organ_dist.png
+- ✅ **完成后立即进入第 6 轮,分析 disabled 表**
+
 ### 第 6 轮：分析 disabled 表
 **任务**：统计 `disabled` 表的残疾学生数量
 **表名**：`disabled`
@@ -617,6 +726,11 @@ print("多表关联 HTML 报告已生成：generated/multi_table_analysis.html")
 **输出文件**：
 - `disabled_count.csv`
 - `disabled_vs_total.png`
+
+**完成标准**：
+- ✅ 生成 disabled_count.csv
+- ✅ 生成 disabled_vs_total.png
+- ✅ **完成后立即进入第 7 轮,进行多表关联分析**
 
 ### 第 7 轮：多表关联分析
 **任务**：使用 SQL JOIN 关联多个表，分析失业学生的性别和还款情况
