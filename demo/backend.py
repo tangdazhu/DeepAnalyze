@@ -939,6 +939,9 @@ def extract_table_mentions_from_text(
         elif tok_lower in COMMON_WORDS:
             continue
         else:
+            # 过滤掉 session ID 模式 (如 session_1766621865408_78qxk0ca9)
+            if tok_lower.startswith("session_"):
+                continue
             # 过滤掉文件名模式：如果 token 包含下划线且以文件后缀结尾，跳过
             if "_" in tok_lower:
                 parts = tok_lower.split("_")
