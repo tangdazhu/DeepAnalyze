@@ -1,0 +1,126 @@
+{
+  "description": "常见的非表名词汇配置文件，用于过滤表名提取时的误判",
+  "categories": {
+    "sql_system": [
+      "sqlite_master",
+      "sqlite_sequence"
+    ],
+    "sql_aliases": [
+      "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m",
+      "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z"
+    ],
+    "sql_keywords": [
+      "select", "from", "where", "join", "left", "right", "inner", "outer",
+      "group", "by", "order", "having", "limit", "offset", "distinct",
+      "count", "sum", "avg", "min", "max", "median", "as", "on", "and", "or", "not",
+      "pragma", "table_info", "create", "drop", "alter", "insert", "update", "delete"
+    ],
+    "system_tags": [
+      "execute", "analyze", "code", "file", "answer", "eda", "sqlite"
+    ],
+    "common_fields": [
+      "name", "id", "type", "value", "data", "time", "date", "year", "month", "day",
+      "hour", "minute", "second", "status", "code", "text", "number", "amount",
+      "price", "total", "count", "index", "key", "bool", "flag", "school", "organ",
+      "age", "gender", "address", "email", "phone"
+    ],
+    "composite_fields": [
+      "disability_status", "payment_status", "enlist_date", "loan_amount",
+      "student_id", "school_name", "organ_name", "gender_code", "payment_due",
+      "absense_month", "enrolled_month", "enlisted"
+    ],
+    "file_extensions": [
+      "csv", "png", "jpg", "jpeg", "pdf", "html", "json", "xml", "txt"
+    ],
+    "file_keywords": [
+      "file", "result", "chart", "summary", "report", "output", "generated", "dist",
+      "enrolled_month_dist", "enrolled_school_count", "person_summary", "person_dist",
+      "longest_absense", "absense"
+    ],
+    "analysis_keywords": [
+      "analysis", "distribution", "statistics", "correlation", "correlation_analysis",
+      "multi_table", "single_table", "multi_table_join", "multi_table_analysis",
+      "single_table_analysis", "trend", "pattern", "insight", "finding",
+      "conclusion", "recommendation"
+    ],
+    "python_keywords": [
+      "import", "def", "class", "return", "if", "else", "for", "while",
+      "try", "except", "with", "as", "in", "is", "not", "and", "or"
+    ],
+    "programming_languages": [
+      "python", "sql", "r", "java", "javascript", "c", "cpp"
+    ],
+    "python_libraries": [
+      "pandas", "pd", "numpy", "np", "matplotlib", "pyplot", "plt", "seaborn", "sns",
+      "sqlite3", "pathlib", "path", "os", "sys", "re", "json", "csv", "datetime",
+      "collections", "itertools", "functools"
+    ],
+    "pandas_methods": [
+      "read_sql", "read_sql_query", "read_csv", "read_excel", "to_csv", "to_excel",
+      "describe", "head", "tail", "info", "shape", "columns", "dtypes", "isnull",
+      "fillna", "dropna", "groupby", "merge", "concat", "pivot", "melt", "apply",
+      "map", "filter", "sort_values", "sort_index", "reset_index", "set_index",
+      "transpose", "astype", "unique", "nunique", "value_counts", "corr", "cov",
+      "std", "var", "mean", "median", "mode", "quantile", "cumsum", "cumprod",
+      "diff", "pct_change", "rank", "sample", "nlargest", "nsmallest", "clip",
+      "replace", "rename", "drop", "drop_duplicates", "duplicated", "isin",
+      "between", "query", "eval", "pipe", "agg", "aggregate", "transform",
+      "rolling", "expanding", "ewm", "resample", "shift", "tshift", "first",
+      "last", "nth", "size", "all", "any", "idxmax", "idxmin", "abs", "round",
+      "floor", "ceil", "clip_lower", "clip_upper", "interpolate", "ffill",
+      "bfill", "pad", "backfill", "include", "exclude"
+    ],
+    "matplotlib_methods": [
+      "figure", "subplot", "subplots", "plot", "scatter", "bar", "barh", "hist",
+      "boxplot", "violinplot", "heatmap", "pairplot", "countplot", "distplot",
+      "kdeplot", "lineplot", "scatterplot", "regplot", "lmplot", "jointplot",
+      "catplot", "relplot", "displot", "histplot", "ecdfplot", "rugplot",
+      "stripplot", "swarmplot", "pointplot", "barplot", "boxenplot", "title",
+      "xlabel", "ylabel", "legend", "grid", "xlim", "ylim", "xticks", "yticks",
+      "tight_layout", "savefig", "show", "close", "clf", "cla", "axis", "axes",
+      "gca", "gcf", "suptitle", "text", "annotate", "axhline", "axvline",
+      "axhspan", "axvspan", "colorbar", "clim", "imshow", "contour", "contourf",
+      "quiver", "streamplot", "fill", "fill_between", "fill_betweenx",
+      "errorbar", "stem", "step", "loglog", "semilogx", "semilogy", "polar",
+      "pie", "table", "stackplot", "broken_barh", "eventplot", "hexbin",
+      "xcorr", "acorr", "magnitude_spectrum", "angle_spectrum", "phase_spectrum",
+      "cohere", "csd", "psd", "specgram", "spy", "matshow", "figimage",
+      "figtext", "ginput", "waitforbuttonpress", "connect", "disconnect", "draw",
+      "pause", "ioff", "ion", "isinteractive", "rc", "rcdefaults", "style",
+      "use", "context", "set", "get", "setp", "getp", "findobj",
+      "switch_backend", "get_backend", "new_figure_manager", "draw_if_interactive"
+    ],
+    "sqlite3_methods": [
+      "connect", "cursor", "execute", "executemany", "executescript", "fetchone",
+      "fetchall", "fetchmany", "commit", "rollback", "close", "row_factory",
+      "text_factory", "total_changes", "isolation_level", "in_transaction",
+      "iterdump", "backup", "set_authorizer", "set_progress_handler",
+      "set_trace_callback", "enable_load_extension", "load_extension",
+      "create_function", "create_aggregate", "create_collation", "interrupt",
+      "set_busy_handler", "set_busy_timeout", "timeout", "busy_timeout",
+      "busy_handler"
+    ],
+    "common_words": [
+      "the", "a", "an", "this", "that", "these", "those", "is", "are", "was",
+      "were", "be", "been", "being", "have", "has", "had", "do", "does", "did",
+      "will", "would", "should", "could", "may", "might", "can", "must", "shall",
+      "to", "of", "at", "by", "for", "with"
+    ],
+    "path_components": [
+      "home", "user", "users", "root", "tmp", "var", "opt", "usr", "bin", "lib",
+      "etc", "mnt", "media", "srv", "workspace", "workspaces", "demo", "example",
+      "examples", "test", "tests", "src", "source", "app", "apps", "project",
+      "projects", "data", "dataset", "datasets", "deepanalyze", "DeepAnalyze",
+      "tdz", "session", "student_loan", "loan", "student"
+    ],
+    "output_filenames": [
+      "enrolled_summary", "enrolled_school_dist", "enrolled_school_month_heatmap",
+      "enrolled_month_dist", "no_payment_due_summary", "no_payment_due_bool_dist",
+      "longest_absense_summary", "longest_absense_month_dist", "enlist_summary",
+      "enlist_organ_dist", "disabled_summary", "disabled_dist",
+      "correlation_analysis", "multi_table_join", "single_table_analysis",
+      "multi_table_analysis", "school_month_heatmap", "bool_dist", "organ_dist",
+      "month_dist", "school_dist", "school_count", "person_summary", "person_dist"
+    ]
+  }
+}
