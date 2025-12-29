@@ -1235,7 +1235,7 @@ def build_schema_bootstrap_block(workspace_path: Path) -> str:
     else:
         code_parts.append('print("未找到 CSV 文件")\n')
 
-    # 添加 SQLite 表结构查询
+    # 添加 SQLite 表结构查询和CSV导出
     code_parts.extend(
         [
             "\n",
@@ -1256,6 +1256,18 @@ def build_schema_bootstrap_block(workspace_path: Path) -> str:
             "    columns = cursor.fetchall()\n",
             "    print(f'\\n表名: {table_name}')\n",
             "    print(f'字段: {\", \".join([col[1] for col in columns])}')\n",
+            "\n",
+            "# ========== 第三部分：导出表为CSV文件 ==========\n",
+            f"data_dir = Path(r'{str(workspace_path)}') / 'data'\n",
+            "data_dir.mkdir(parents=True, exist_ok=True)\n",
+            "print('\\n' + '='*80)\n",
+            "print('【导出CSV文件】')\n",
+            "print('='*80)\n",
+            "for table_name in schema_df['table_name']:\n",
+            "    df = pd.read_sql_query(f'SELECT * FROM {table_name}', conn)\n",
+            "    csv_path = data_dir / f'{table_name}.csv'\n",
+            "    df.to_csv(csv_path, index=False, encoding='utf-8')\n",
+            "    print(f'已导出: {table_name}.csv ({len(df)} 行)')\n",
             "conn.close()\n",
             "```\n",
             "</Code>",
