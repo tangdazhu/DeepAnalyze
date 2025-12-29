@@ -1377,39 +1377,18 @@ def run_schema_bootstrap(workspace_path: Path, session_id: str = None) -> str:
         f"⚠️ **第2-6轮严禁使用SQLite,必须使用CSV读取**。\n"
     )
 
-    # 添加强制立即执行指令(前置到消息开头)
+    # 添加简洁的开始指令(前置到消息开头)
     immediate_action = (
-        "=" * 80 + "\n"
-        "🚨 **立即执行第 2 轮分析** 🚨\n"
+        "\n" + "=" * 80 + "\n"
+        "🚨 **立即开始第 2 轮分析** 🚨\n"
         "=" * 80 + "\n\n"
-        "**你必须立即输出以下内容,不要输出任何其他文字**:\n\n"
-        "```\n"
-        "<Analyze>\n"
-        "分析 enrolled.csv 的学校分布\n"
-        "</Analyze>\n\n"
-        "<Code>\n"
-        "import pandas as pd\n"
-        "import matplotlib.pyplot as plt\n"
-        "import seaborn as sns\n"
-        "from pathlib import Path\n\n"
-        f'CSV_PATH = r"{str((workspace_path / "data" / "enrolled.csv").resolve())}"\n'
-        'OUTPUT_DIR = Path("generated")\n'
-        "OUTPUT_DIR.mkdir(parents=True, exist_ok=True)\n\n"
-        "df = pd.read_csv(CSV_PATH)\n"
-        "summary = df.describe(include='all').transpose().reset_index()\n"
-        "summary.to_csv(OUTPUT_DIR / 'enrolled_summary.csv', index=False, encoding='utf-8')\n\n"
-        "plt.figure(figsize=(8, 5))\n"
-        "sns.countplot(data=df, x='school')\n"
-        "plt.title('Enrolled Students by School')\n"
-        "plt.xticks(rotation=45)\n"
-        "plt.tight_layout()\n"
-        "plt.savefig(OUTPUT_DIR / 'enrolled_school_dist.png', dpi=120)\n"
-        "plt.close()\n"
-        "</Code>\n"
-        "```\n\n"
-        "❌ **禁止输出任何解释、问候、询问或其他内容**\n"
-        "❌ **禁止讨论分析方法或提出建议**\n"
-        "✅ **只输出上述 <Analyze> 和 <Code> 标签**\n\n"
+        "**现在立即开始第 2 轮分析,按照以下步骤执行**:\n\n"
+        "1. 从上方CSV文件列表中选择一个表进行分析\n"
+        "2. 输出 <Analyze> 标签,说明分析目标\n"
+        "3. 输出 <Code> 标签,使用 pd.read_csv() 读取CSV文件\n"
+        "4. 生成统计摘要CSV和可视化PNG文件\n\n"
+        "⚠️ **禁止输出任何解释、问候或讨论,直接输出 <Analyze> 和 <Code> 标签**\n"
+        "⚠️ **必须使用上方列出的CSV文件绝对路径**\n\n"
         "=" * 80 + "\n\n"
     )
 
