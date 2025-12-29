@@ -1377,9 +1377,44 @@ def run_schema_bootstrap(workspace_path: Path, session_id: str = None) -> str:
         f"⚠️ **第2-6轮严禁使用SQLite,必须使用CSV读取**。\n"
     )
 
-    # 移除硬编码的轮次指令,让提示词文件控制分析流程
+    # 添加强制立即执行指令
+    immediate_action = (
+        "\n\n"
+        "=" * 80 + "\n"
+        "🚨 **立即执行第 2 轮分析** 🚨\n"
+        "=" * 80 + "\n\n"
+        "**你必须立即输出以下内容,不要输出任何其他文字**:\n\n"
+        "```\n"
+        "<Analyze>\n"
+        "分析 enrolled.csv 的学校分布\n"
+        "</Analyze>\n\n"
+        "<Code>\n"
+        "import pandas as pd\n"
+        "import matplotlib.pyplot as plt\n"
+        "import seaborn as sns\n"
+        "from pathlib import Path\n\n"
+        f'CSV_PATH = r"{str((workspace_path / "data" / "enrolled.csv").resolve())}"\n'
+        'OUTPUT_DIR = Path("generated")\n'
+        "OUTPUT_DIR.mkdir(parents=True, exist_ok=True)\n\n"
+        "df = pd.read_csv(CSV_PATH)\n"
+        "summary = df.describe(include='all').transpose().reset_index()\n"
+        "summary.to_csv(OUTPUT_DIR / 'enrolled_summary.csv', index=False, encoding='utf-8')\n\n"
+        "plt.figure(figsize=(8, 5))\n"
+        "sns.countplot(data=df, x='school')\n"
+        "plt.title('Enrolled Students by School')\n"
+        "plt.xticks(rotation=45)\n"
+        "plt.tight_layout()\n"
+        "plt.savefig(OUTPUT_DIR / 'enrolled_school_dist.png', dpi=120)\n"
+        "plt.close()\n"
+        "</Code>\n"
+        "```\n\n"
+        "❌ **禁止输出任何解释、问候、询问或其他内容**\n"
+        "❌ **禁止讨论分析方法或提出建议**\n"
+        "✅ **只输出上述 <Analyze> 和 <Code> 标签**\n"
+    )
+
     file_block = "\n<File>\n暂无文件\n</File>\n"
-    return f"{block}{exe_block}{db_path_reminder}{file_block}"
+    return f"{block}{exe_block}{db_path_reminder}{immediate_action}{file_block}"
 
 
 def extract_effective_code(code_str: str) -> str:
