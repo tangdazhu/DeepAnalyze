@@ -1377,9 +1377,8 @@ def run_schema_bootstrap(workspace_path: Path, session_id: str = None) -> str:
         f"⚠️ **第2-6轮严禁使用SQLite,必须使用CSV读取**。\n"
     )
 
-    # 添加强制立即执行指令
+    # 添加强制立即执行指令(前置到消息开头)
     immediate_action = (
-        "\n\n"
         "=" * 80 + "\n"
         "🚨 **立即执行第 2 轮分析** 🚨\n"
         "=" * 80 + "\n\n"
@@ -1410,11 +1409,13 @@ def run_schema_bootstrap(workspace_path: Path, session_id: str = None) -> str:
         "```\n\n"
         "❌ **禁止输出任何解释、问候、询问或其他内容**\n"
         "❌ **禁止讨论分析方法或提出建议**\n"
-        "✅ **只输出上述 <Analyze> 和 <Code> 标签**\n"
+        "✅ **只输出上述 <Analyze> 和 <Code> 标签**\n\n"
+        "=" * 80 + "\n\n"
     )
 
     file_block = "\n<File>\n暂无文件\n</File>\n"
-    return f"{block}{exe_block}{db_path_reminder}{immediate_action}{file_block}"
+    # 将强制执行指令放在最前面,确保模型首先看到
+    return f"{immediate_action}{block}{exe_block}{db_path_reminder}{file_block}"
 
 
 def extract_effective_code(code_str: str) -> str:
