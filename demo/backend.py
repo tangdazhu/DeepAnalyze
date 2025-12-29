@@ -1302,28 +1302,42 @@ def run_schema_bootstrap(workspace_path: Path, session_id: str = None) -> str:
 
     exe_block = f"\n<Execute>\n```\n{output}\n```\n</Execute>\n"
 
+    # 查找 CSV 文件路径
+    data_dir = workspace_path / "data"
+    csv_files = []
+    if data_dir.exists():
+        csv_files = sorted([f for f in data_dir.glob("*.csv")])
+
+    # 构建 CSV 文件路径列表
+    csv_paths_text = ""
+    if csv_files:
+        csv_paths_text = "\n".join(
+            [f"- {f.name}: `{str(f.resolve())}`" for f in csv_files]
+        )
+
     # 明确告知模型数据库的绝对路径，并提供完整的代码模板
     db_path_reminder = (
         f"\n{'='*80}\n"
         f"**【数据库绝对路径】请在后续所有代码中使用以下路径**：\n\n"
         f"```python\n"
         f'DB_PATH = r"{db_name}"\n'
-        f"```\n\n"
+        f"```\n"
         f"{'='*80}\n\n"
-        "**【代码模板】第 2 轮起必须按以下结构编写**：\n"
+        f"**【CSV 文件路径】第 2-6 轮必须使用以下 CSV 文件**：\n\n"
+        f"{csv_paths_text}\n\n"
+        f"{'='*80}\n\n"
+        "**【代码模板 A】第 2-6 轮必须使用 CSV 读取**：\n"
         "```python\n"
-        "import sqlite3\n"
         "import pandas as pd\n"
         "import matplotlib.pyplot as plt\n"
         "import seaborn as sns\n"
         "from pathlib import Path\n\n"
-        f"# 复制上方的数据库路径\n"
-        f'DB_PATH = r"{db_name}"\n'
+        "# ⚠️ 第2-6轮必须使用CSV文件路径\n"
+        'CSV_PATH = r"/path/to/workspace/data/文件名.csv"  # 从上方列表复制\n'
         'OUTPUT_DIR = Path("generated")\n'
         "OUTPUT_DIR.mkdir(parents=True, exist_ok=True)\n\n"
-        "with sqlite3.connect(DB_PATH, timeout=30) as conn:\n"
-        '    conn.execute("PRAGMA busy_timeout = 30000;")\n'
-        '    df = pd.read_sql_query("SELECT * FROM <表名> LIMIT 1000", conn)\n\n'
+        "# ✅ 必须使用 pd.read_csv() 读取\n"
+        "df = pd.read_csv(CSV_PATH)\n\n"
         "# 保存 CSV\n"
         "summary = df.describe(include='all').transpose().reset_index()\n"
         "summary.to_csv(OUTPUT_DIR / '<表名>_summary.csv', index=False, encoding='utf-8')\n\n"
@@ -1335,7 +1349,20 @@ def run_schema_bootstrap(workspace_path: Path, session_id: str = None) -> str:
         "plt.savefig(OUTPUT_DIR / '<表名>_<字段名>_dist.png', dpi=120)\n"
         "plt.close()\n"
         "```\n\n"
-        f"⚠️ **严禁使用相对路径或示例路径**，必须使用上方标注的真实绝对路径。\n"
+        "**【代码模板 B】第 7 轮使用 SQLite 多表关联**：\n"
+        "```python\n"
+        "import sqlite3\n"
+        "import pandas as pd\n"
+        "import matplotlib.pyplot as plt\n"
+        "from pathlib import Path\n\n"
+        f'DB_PATH = r"{db_name}"\n'
+        'OUTPUT_DIR = Path("generated")\n'
+        "OUTPUT_DIR.mkdir(parents=True, exist_ok=True)\n\n"
+        "with sqlite3.connect(DB_PATH, timeout=30) as conn:\n"
+        '    conn.execute("PRAGMA busy_timeout = 30000;")\n'
+        '    df = pd.read_sql_query("SELECT * FROM <表名> LIMIT 1000", conn)\n'
+        "```\n\n"
+        f"⚠️ **第2-6轮严禁使用SQLite,必须使用CSV读取**。\n"
     )
 
     # 添加强制执行指令，防止模型输出解释性文字

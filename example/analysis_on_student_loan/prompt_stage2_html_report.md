@@ -2,29 +2,30 @@
 
 ## 任务目标
 
+**⚠️ 重要**: 此阶段只分析阶段1生成的文件,不读取原始数据库或数据文件。
+
 基于 `generated/` 目录下已生成的数据文件,创建一份完整的HTML分析报告。
 
-## 数据文件清单
+## 数据来源
 
-根据阶段1的分析,`generated/` 目录包含以下文件:
+**唯一数据来源**: `generated/README.md` 索引文件
 
-### CSV数据文件
-- `enrolled_summary.csv` - enrolled表描述性统计
-- `enrolled_monthly_distribution.csv` - 各学校入学月份分布
-- `enlist_monthly_distribution.csv` - 参军学生入学月份分布
-- `disabled_monthly_distribution.csv` - 残疾学生入学月份分布
-- `unemployed_monthly_distribution.csv` - 失业学生入学月份分布
+- 此文件由阶段1第8轮自动生成
+- 包含所有生成文件的清单和说明
+- 提供每轮分析的任务描述
 
-### PNG可视化文件
-- `enrolled_school_dist.png` - 学校分布图
-- `enrolled_monthly_heatmap.png` - 入学月份热力图
-- `enlist_monthly_distribution.png` - 参军学生月份分布
-- `disabled_monthly_distribution.png` - 残疾学生月份分布
-- `unemployed_monthly_distribution.png` - 失业学生月份分布
+**禁止操作**:
+- ❌ 不读取原始SQLite数据库
+- ❌ 不读取原始CSV/Excel文件
+- ❌ 不执行任何SQL查询
+- ❌ 不统计原始数据表的记录数
 
-### 执行日志文件
-- `execute_round_0_bootstrap.txt` - 数据库结构信息
-- `execute_round_2.txt` ~ `execute_round_12.txt` - 各轮执行记录
+**允许操作**:
+- ✅ 读取 `generated/` 目录下的所有文件
+- ✅ 解析 `README.md` 获取文件清单
+- ✅ 读取CSV文件提取关键数据
+- ✅ 嵌入PNG图表到HTML报告
+- ✅ 读取执行日志了解分析过程
 
 ## 报告要求
 
@@ -60,14 +61,36 @@ HTML报告应包含以下章节:
 ```python
 import pandas as pd
 from pathlib import Path
+import re
 
-# 读取CSV文件
-enrolled_summary = pd.read_csv("generated/enrolled_summary.csv")
-monthly_dist = pd.read_csv("generated/enrolled_monthly_distribution.csv")
+# 第一步: 读取README.md获取文件清单
+GENERATED_DIR = Path("generated")
+readme_path = GENERATED_DIR / "README.md"
 
-# 读取执行日志提取关键信息
-with open("generated/execute_round_0_bootstrap.txt", "r", encoding="utf-8") as f:
-    bootstrap_info = f.read()
+with open(readme_path, "r", encoding="utf-8") as f:
+    readme_content = f.read()
+
+# 第二步: 智能解析文件清单
+csv_files = list(GENERATED_DIR.glob("*.csv"))
+png_files = list(GENERATED_DIR.glob("*.png"))
+txt_files = list(GENERATED_DIR.glob("execute_round_*.txt"))
+
+# 第三步: 读取CSV文件(如果存在)
+data_summary = {}
+for csv_file in csv_files:
+    try:
+        df = pd.read_csv(csv_file)
+        data_summary[csv_file.name] = {
+            'rows': len(df),
+            'columns': list(df.columns),
+            'sample': df.head(3).to_dict()
+        }
+    except Exception as e:
+        data_summary[csv_file.name] = {'error': str(e)}
+
+# ⚠️ 禁止读取原始数据库
+# ❌ 错误示例: sqlite3.connect(DB_PATH)
+# ❌ 错误示例: pd.read_sql_query("SELECT COUNT(*) FROM table", conn)
 ```
 
 #### 2.2 图片嵌入
@@ -99,32 +122,52 @@ import base64
 
 # 路径配置
 GENERATED_DIR = Path("generated")
-OUTPUT_HTML = GENERATED_DIR / "comprehensive_analysis_report.html"
+ANALYZE_DIR = GENERATED_DIR / "analyze"  # ⚠️ 输出到analyze子目录
+ANALYZE_DIR.mkdir(parents=True, exist_ok=True)
 
-# 读取数据库信息
-DB_PATH = r"/home/tdz/DeepAnalyze/demo/workspace/session_1766646802631_jhpxph6cb/student_loan.sqlite"
+OUTPUT_HTML = ANALYZE_DIR / "comprehensive_analysis_report.html"
 
-# 统计生成文件
+# ⚠️ 只读取generated目录下的文件
 csv_files = list(GENERATED_DIR.glob("*.csv"))
 png_files = list(GENERATED_DIR.glob("*.png"))
 txt_files = list(GENERATED_DIR.glob("execute_round_*.txt"))
 
-# 读取关键数据
-enrolled_summary = pd.read_csv(GENERATED_DIR / "enrolled_summary.csv")
-monthly_dist = pd.read_csv(GENERATED_DIR / "enrolled_monthly_distribution.csv")
+# 读取README.md获取元数据
+readme_path = GENERATED_DIR / "README.md"
+if readme_path.exists():
+    with open(readme_path, "r", encoding="utf-8") as f:
+        readme_content = f.read()
+    # 从README提取文件数量信息
+    import re
+    csv_count_match = re.search(r'CSV文件数量.*?(\d+)', readme_content)
+    png_count_match = re.search(r'PNG图表数量.*?(\d+)', readme_content)
+    csv_count = int(csv_count_match.group(1)) if csv_count_match else len(csv_files)
+    png_count = int(png_count_match.group(1)) if png_count_match else len(png_files)
+else:
+    csv_count = len(csv_files)
+    png_count = len(png_files)
 
-# 计算关键指标
+# 智能读取CSV文件(动态文件名)
+data_insights = []
+for csv_file in csv_files:
+    try:
+        df = pd.read_csv(csv_file)
+        data_insights.append({
+            'file': csv_file.name,
+            'rows': len(df),
+            'columns': len(df.columns),
+            'summary': df.describe(include='all').to_dict() if len(df) > 0 else {}
+        })
+    except Exception as e:
+        data_insights.append({'file': csv_file.name, 'error': str(e)})
+
+# 计算关键指标(基于生成的文件,不查询原始数据库)
 total_files = len(csv_files) + len(png_files)
 analysis_rounds = len(txt_files) - 1  # 排除bootstrap
 
-# 读取数据库统计信息
-with sqlite3.connect(DB_PATH, timeout=30) as conn:
-    tables = pd.read_sql_query("SELECT name FROM sqlite_master WHERE type='table'", conn)
-    table_stats = []
-    for table in tables['name']:
-        count = pd.read_sql_query(f"SELECT COUNT(*) as cnt FROM {table}", conn).iloc[0]['cnt']
-        table_stats.append({"表名": table, "记录数": count})
-    table_stats_df = pd.DataFrame(table_stats)
+# ❌ 禁止的操作示例:
+# with sqlite3.connect(DB_PATH, timeout=30) as conn:  # 不要这样做!
+#     tables = pd.read_sql_query("SELECT name FROM sqlite_master WHERE type='table'", conn)
 
 # 生成HTML报告
 html_content = f"""<!DOCTYPE html>
@@ -322,34 +365,34 @@ html_content = f"""<!DOCTYPE html>
                 
                 <div class="stats-grid">
                     <div class="stat-card">
-                        <div class="label">数据库表数量</div>
-                        <div class="number">{len(tables)}</div>
+                        <div class="label">CSV数据文件</div>
+                        <div class="number">{csv_count}</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="label">PNG可视化图表</div>
+                        <div class="number">{png_count}</div>
                     </div>
                     <div class="stat-card">
                         <div class="label">分析轮次</div>
                         <div class="number">{analysis_rounds}</div>
                     </div>
                     <div class="stat-card">
-                        <div class="label">生成文件数</div>
+                        <div class="label">总文件数</div>
                         <div class="number">{total_files}</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="label">总记录数</div>
-                        <div class="number">{table_stats_df['记录数'].sum():,}</div>
                     </div>
                 </div>
 
-                <h3>表结构统计</h3>
+                <h3>生成文件统计</h3>
                 <table>
                     <thead>
                         <tr>
-                            <th>表名</th>
-                            <th>记录数</th>
-                            <th>占比</th>
+                            <th>文件名</th>
+                            <th>类型</th>
+                            <th>大小</th>
                         </tr>
                     </thead>
                     <tbody>
-                        {''.join([f"<tr><td>{row['表名']}</td><td>{row['记录数']:,}</td><td>{row['记录数']/table_stats_df['记录数'].sum()*100:.1f}%</td></tr>" for _, row in table_stats_df.iterrows()])}
+                        {''.join([f"<tr><td>{f.name}</td><td>{'CSV数据' if f.suffix == '.csv' else 'PNG图表'}</td><td>{f.stat().st_size:,} bytes</td></tr>" for f in (csv_files + png_files)[:20]])}
                     </tbody>
                 </table>
             </section>
@@ -450,8 +493,9 @@ html_content = f"""<!DOCTYPE html>
         </div>
 
         <div class="footer">
-            <p><strong>DeepAnalyze</strong> - 数据驱动决策 | 智能分析平台</p>
-            <p>本报告基于 {total_files} 个数据文件自动生成</p>
+            <p><strong>DeepAnalyze 阶段2报告</strong> - 基于阶段1生成文件的智能分析</p>
+            <p>本报告基于 {total_files} 个生成文件自动创建</p>
+            <p>数据来源: generated/ 目录 | 报告位置: generated/analyze/</p>
             <p>© 2025 DeepAnalyze Project. All rights reserved.</p>
         </div>
     </div>
@@ -459,14 +503,15 @@ html_content = f"""<!DOCTYPE html>
 </html>
 """
 
-# 保存HTML报告
+# 保存HTML报告到analyze子目录
 with open(OUTPUT_HTML, "w", encoding="utf-8") as f:
     f.write(html_content)
 
 print(f"✅ HTML报告已生成: {OUTPUT_HTML}")
-print(f"📊 包含 {len(tables)} 个表的分析结果")
-print(f"📁 基于 {total_files} 个数据文件")
+print(f"📊 分析了 {analysis_rounds} 轮数据处理")
+print(f"📁 基于 {total_files} 个生成文件")
 print(f"🎨 包含 {len(png_files)} 个可视化图表")
+print(f"📂 报告保存在: generated/analyze/ 目录")
 ```
 
 ## 执行方式
@@ -485,20 +530,21 @@ print(f"🎨 包含 {len(png_files)} 个可视化图表")
 将上述代码模板保存为 `generate_html_report.py`,直接执行:
 
 ```bash
-cd ~/DeepAnalyze/demo/workspace/session_1766646802631_jhpxph6cb
+cd ~/DeepAnalyze/demo/workspace/session_XXXXX
 python generate_html_report.py
 ```
 
 ## 输出文件
 
-- `generated/comprehensive_analysis_report.html` - 完整的HTML报告
-- 报告包含所有图表的嵌入引用
+- `generated/analyze/comprehensive_analysis_report.html` - 完整的HTML报告
+- 报告包含所有图表的相对路径引用(如 `../enrolled_school_dist.png`)
 - 支持在浏览器中直接打开查看
 
 ## 注意事项
 
-1. **路径一致性**: 确保HTML中的图片路径与实际文件位置一致
+1. **路径一致性**: HTML中的图片使用相对路径 `../图片名.png` 引用上级目录的PNG文件
 2. **中文编码**: 使用 `encoding="utf-8"` 确保中文正常显示
 3. **响应式设计**: 报告支持PC和移动端查看
-4. **数据真实性**: 所有统计数据从实际文件中读取,不使用示例数据
-5. **可扩展性**: 可根据实际生成的文件动态调整报告内容
+4. **数据来源**: 只从 `generated/` 目录读取文件,不访问原始数据库
+5. **输出隔离**: 报告输出到 `generated/analyze/` 子目录,避免与阶段1文件冲突
+6. **智能解析**: 基于 `README.md` 智能识别文件,适应动态文件名
