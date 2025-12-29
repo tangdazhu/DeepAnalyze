@@ -1900,16 +1900,18 @@ def bot_stream(messages, workspace, session_id="default"):
                 refund_iteration()
                 continue
 
-            if (
-                schema_confirmed
-                and "列出" in analyze_content
-                and "表结构" in analyze_content
-            ):
-                messages.append({"role": "assistant", "content": cur_res})
-                advance_prompt = "表结构已在首轮列出，请基于已知表/字段提出新的分析目标，换用真实查询或 EDA 任务。"
-                messages.append({"role": "user", "content": advance_prompt})
-                refund_iteration()
-                continue
+            # 修复17: 移除这个判断,它会干扰正常的分析流程
+            # 提示词已经明确规定了第2-6轮的分析流程,不应该让系统注入"请提出分析目标"
+            # if (
+            #     schema_confirmed
+            #     and "列出" in analyze_content
+            #     and "表结构" in analyze_content
+            # ):
+            #     messages.append({"role": "assistant", "content": cur_res})
+            #     advance_prompt = "表结构已在首轮列出，请基于已知表/字段提出新的分析目标，换用真实查询或 EDA 任务。"
+            #     messages.append({"role": "user", "content": advance_prompt})
+            #     refund_iteration()
+            #     continue
 
             known_mentions = set()
             unknown_mentions = set()
