@@ -2142,20 +2142,44 @@ def bot_stream(messages, workspace, session_id="default"):
                         refund_iteration()
                         continue
 
-                    # 强制检查：代码必须包含 import sqlite3
-                    if "import sqlite3" not in effective_code:
+                    # 检查代码是否包含必要的导入（根据代码类型判断）
+                    # CSV读取代码需要pandas,SQLite代码需要sqlite3
+                    has_pandas = (
+                        "import pandas" in effective_code
+                        or "import pd" in effective_code
+                    )
+                    has_sqlite3 = "import sqlite3" in effective_code
+                    uses_csv = (
+                        "pd.read_csv" in effective_code
+                        or "pandas.read_csv" in effective_code
+                    )
+                    uses_sqlite = (
+                        "sqlite3.connect" in effective_code
+                        or "pd.read_sql" in effective_code
+                    )
+
+                    # 如果使用CSV但没有导入pandas,或使用SQLite但没有导入sqlite3,则拒绝
+                    if uses_csv and not has_pandas:
                         logger.warning(
-                            f"[bot_stream] Code rejected: missing 'import sqlite3'"
+                            f"[bot_stream] Code rejected: CSV code missing pandas import"
                         )
                         messages.append(
                             {
                                 "role": "user",
-                                "content": (
-                                    "你的 <Code> 缺少 `import sqlite3`。每个脚本都必须是完整可独立运行的，"
-                                    "请在开头添加所有必要的 import 语句（import sqlite3, import pandas as pd, "
-                                    "import matplotlib.pyplot as plt 等），并定义所有变量（如 DB_PATH）。"
-                                    "参考提示词中的完整代码模板。"
-                                ),
+                                "content": "你的代码使用了 `pd.read_csv()` 但缺少 `import pandas as pd`。请添加必要的导入语句。",
+                            }
+                        )
+                        refund_iteration()
+                        continue
+
+                    if uses_sqlite and not has_sqlite3:
+                        logger.warning(
+                            f"[bot_stream] Code rejected: SQLite code missing sqlite3 import"
+                        )
+                        messages.append(
+                            {
+                                "role": "user",
+                                "content": "你的代码使用了 `sqlite3.connect()` 但缺少 `import sqlite3`。请添加必要的导入语句。",
                             }
                         )
                         refund_iteration()
@@ -2363,17 +2387,9 @@ def bot_stream(messages, workspace, session_id="default"):
                         refund_iteration()
                         continue
 
-                    if "sqlite3.connect" not in effective_code:
-                        logger.warning(
-                            f"[bot_stream] Code rejected: missing sqlite3.connect"
-                        )
-                        sqlite_prompt = (
-                            "每个 <Code> 脚本都需显式 `import sqlite3` 并建立数据库连接。"
-                            " 请将完整脚本补全（含 import / connect / 执行 / close）后再运行。"
-                        )
-                        messages.append({"role": "user", "content": sqlite_prompt})
-                        refund_iteration()
-                        continue
+                    # 移除强制要求sqlite3.connect的检查
+                    # CSV读取代码不需要sqlite3连接,只有SQLite操作才需要
+                    # 该检查已被上面的智能检查替代
 
                     connect_paths = SQLITE_CONNECT_PATTERN.findall(effective_code)
                     if connect_paths:
