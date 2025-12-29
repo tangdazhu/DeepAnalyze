@@ -1365,17 +1365,9 @@ def run_schema_bootstrap(workspace_path: Path, session_id: str = None) -> str:
         f"⚠️ **第2-6轮严禁使用SQLite,必须使用CSV读取**。\n"
     )
 
-    # 添加强制执行指令，防止模型输出解释性文字
-    next_step_instruction = (
-        "\n\n"
-        "【当前轮次：第 2 轮】\n"
-        "【必须分析的表：enrolled】\n"
-        "【必须生成的文件：enrolled_summary.csv + enrolled_school_dist.png】\n\n"
-        "立即输出 <Analyze> 和 <Code> 标签，禁止输出任何解释性文字。\n"
-    )
-
+    # 移除硬编码的轮次指令,让提示词文件控制分析流程
     file_block = "\n<File>\n暂无文件\n</File>\n"
-    return f"{block}{exe_block}{db_path_reminder}{next_step_instruction}{file_block}"
+    return f"{block}{exe_block}{db_path_reminder}{file_block}"
 
 
 def extract_effective_code(code_str: str) -> str:
