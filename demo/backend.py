@@ -1377,24 +1377,9 @@ def run_schema_bootstrap(workspace_path: Path, session_id: str = None) -> str:
         f"⚠️ **第2-6轮严禁使用SQLite,必须使用CSV读取**。\n"
     )
 
-    # 添加简洁的开始指令(前置到消息开头)
-    immediate_action = (
-        "\n" + "=" * 80 + "\n"
-        "🚨 **立即开始第 2 轮分析** 🚨\n"
-        "=" * 80 + "\n\n"
-        "**现在立即开始第 2 轮分析,按照以下步骤执行**:\n\n"
-        "1. 从上方CSV文件列表中选择一个表进行分析\n"
-        "2. 输出 <Analyze> 标签,说明分析目标\n"
-        "3. 输出 <Code> 标签,使用 pd.read_csv() 读取CSV文件\n"
-        "4. 生成统计摘要CSV和可视化PNG文件\n\n"
-        "⚠️ **禁止输出任何解释、问候或讨论,直接输出 <Analyze> 和 <Code> 标签**\n"
-        "⚠️ **必须使用上方列出的CSV文件绝对路径**\n\n"
-        "=" * 80 + "\n\n"
-    )
-
     file_block = "\n<File>\n暂无文件\n</File>\n"
-    # 将强制执行指令放在最前面,确保模型首先看到
-    return f"{immediate_action}{block}{exe_block}{db_path_reminder}{file_block}"
+    # Bootstrap只提供信息,不强制任务,让提示词自然引导
+    return f"{block}{exe_block}{db_path_reminder}{file_block}"
 
 
 def extract_effective_code(code_str: str) -> str:
