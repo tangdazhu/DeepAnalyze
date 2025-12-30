@@ -1472,6 +1472,7 @@ def bot_stream(messages, workspace, session_id="default"):
     recent_tables_used: set[str] = set()
     schema_summary_injected = False
     schema_bootstrap_used = False
+    unknown_table_warnings: set[str] = set()  # 跟踪已警告的未知表名,防止重复警告
 
     def refund_iteration():
         nonlocal iteration
@@ -1934,16 +1935,26 @@ def bot_stream(messages, workspace, session_id="default"):
                     )
                     known_mentions = set()
                     unknown_mentions = set()
+                # 修复20: 防止重复警告导致无限循环
                 if schema_confirmed and unknown_mentions:
-                    messages.append({"role": "assistant", "content": cur_res})
-                    warn_unknown = (
-                        "检测到你引用了不存在于实际 SQLite 中的表："
-                        + ", ".join(sorted(unknown_mentions))
-                        + "。请重新查看 sqlite_master 结果，仅使用真实表名。"
-                    )
-                    messages.append({"role": "user", "content": warn_unknown})
-                    refund_iteration()
-                    continue
+                    # 只对新出现的未知表名发出警告
+                    new_unknown = unknown_mentions - unknown_table_warnings
+                    if new_unknown:
+                        unknown_table_warnings.update(new_unknown)
+                        messages.append({"role": "assistant", "content": cur_res})
+                        warn_unknown = (
+                            "检测到你引用了不存在于实际 SQLite 中的表："
+                            + ", ".join(sorted(new_unknown))
+                            + "。请重新查看 sqlite_master 结果，仅使用真实表名。"
+                        )
+                        messages.append({"role": "user", "content": warn_unknown})
+                        refund_iteration()
+                        continue
+                    else:
+                        # 已经警告过的表名,不再重复警告,直接跳过验证
+                        logger.warning(
+                            f"[bot_stream] Skipping repeated unknown table warning: {unknown_mentions}"
+                        )
                 # 修复18: 只在execute_rounds>=2时才强制要求表名引用
                 # Bootstrap后的首轮输出可能是总结性的,不涉及具体表分析
                 if (

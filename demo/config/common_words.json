@@ -22,7 +22,8 @@
       "name", "id", "type", "value", "data", "time", "date", "year", "month", "day",
       "hour", "minute", "second", "status", "code", "text", "number", "amount",
       "price", "total", "count", "index", "key", "bool", "flag", "school", "organ",
-      "age", "gender", "address", "email", "phone"
+      "age", "gender", "address", "email", "phone", "term", "loan", "student",
+      "payment", "disability", "absence", "bankrupt", "unemployed", "male", "female"
     ],
     "composite_fields": [
       "disability_status", "payment_status", "enlist_date", "loan_amount",
