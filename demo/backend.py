@@ -1944,9 +1944,15 @@ def bot_stream(messages, workspace, session_id="default"):
                     messages.append({"role": "user", "content": warn_unknown})
                     refund_iteration()
                     continue
-                if require_known_reference and not known_mentions:
+                # 修复18: 只在execute_rounds>=2时才强制要求表名引用
+                # Bootstrap后的首轮输出可能是总结性的,不涉及具体表分析
+                if (
+                    require_known_reference
+                    and not known_mentions
+                    and execute_rounds >= 2
+                ):
                     logger.warning(
-                        f"[bot_stream] Code rejected: no known table mentions in <Analyze>"
+                        f"[bot_stream] Code rejected: no known table mentions in <Analyze> (execute_rounds={execute_rounds})"
                     )
                     messages.append({"role": "assistant", "content": cur_res})
                     table_samples = sorted(known_tables)
