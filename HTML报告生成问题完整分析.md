@@ -1700,12 +1700,349 @@ else:
 - 按照提示词要求的顺序执行第2-9轮分析
 - 完成所有9轮分析,生成README.md和最终Answer
 
+**实际效果**：❌ 部分失败,修复19提示不够强,模型仍然重复输出Bootstrap代码,且第7轮后出现无限循环
+
+---
+
+### 修复 19 增强版：使用更强的指令和完整代码模板（2024-12-30）✅
+
+#### 问题 19.1：修复19提示不够强,模型仍重复输出Bootstrap代码
+
+**问题现象**（2024-12-30 第十次测试）：
+- ❌ **模型在第2轮重复输出Bootstrap代码**,未遵循修复19的指令
+- ❌ **后续轮次表顺序错误**:第2轮分析person(应该是enrolled)
+- ❌ **只执行了6轮就停止**,未完成9轮分析
+
+**根本原因**：
+
+修复19的提示信息不够强:
+```python
+code_prompt = (
+    "Bootstrap已完成,现在必须立即开始第2轮分析。\n\n"
+    "**第2轮任务**: 分析 enrolled.csv 文件\n"
+    "- 使用 pd.read_csv() 读取 enrolled.csv\n"
+    "- 生成 enrolled_summary.csv + enrolled_school_dist.png\n"
+    "- 必须输出 <Analyze>...</Analyze> 和 <Code>...</Code> 标签\n\n"
+    "请立即按照提示词要求输出第2轮的<Analyze>和<Code>。"
+)
+```
+
+**问题**:
+1. **缺少禁止性指令**: 没有明确禁止重复输出Bootstrap代码
+2. **缺少具体代码**: 只提供了任务描述,没有提供完整的代码模板
+3. **提示不够醒目**: 没有使用emoji或强调符号引起模型注意
+
+**为什么之前没发现这个问题**：
+- 修复19是首次针对Bootstrap后缺少代码的情况,之前没有实际测试过效果
+- 假设简单的任务描述就能引导模型,低估了模型理解偏差的可能性
+
+**修复方案**：
+
+修改`@backend.py:2040-2072`,使用更强的指令和完整的代码模板:
+```python
+# 修复19增强版: 当execute_rounds=1(Bootstrap后)且缺少代码时,明确指导开始第2轮分析
+if execute_rounds == 1:
+    code_prompt = (
+        "⚠️ Bootstrap已完成,禁止重复输出Bootstrap代码!\n\n"
+        "🚨 立即开始第2轮分析 - enrolled.csv 🚨\n\n"
+        "必须按照以下格式输出:\n\n"
+        "<Analyze>\n"
+        "第2轮任务:分析enrolled.csv文件,统计学校分布和月份分布\n"
+        "</Analyze>\n\n"
+        "<Code>\n"
+        "import pandas as pd\n"
+        "import matplotlib.pyplot as plt\n"
+        "import seaborn as sns\n"
+        "from pathlib import Path\n\n"
+        "# 读取enrolled.csv\n"
+        "CSV_PATH = r'/home/tdz/DeepAnalyze/demo/workspace/session_xxx/data/enrolled.csv'\n"
+        "df = pd.read_csv(CSV_PATH)\n\n"
+        "# 生成enrolled_summary.csv\n"
+        "OUTPUT_DIR = Path('generated')\n"
+        "OUTPUT_DIR.mkdir(parents=True, exist_ok=True)\n"
+        "summary = df.describe(include='all').transpose().reset_index()\n"
+        "summary.to_csv(OUTPUT_DIR / 'enrolled_summary.csv', index=False, encoding='utf-8')\n\n"
+        "# 生成enrolled_school_dist.png\n"
+        "plt.figure(figsize=(10, 6))\n"
+        "sns.countplot(data=df, x='school')\n"
+        "plt.title('School Distribution')\n"
+        "plt.xticks(rotation=45)\n"
+        "plt.tight_layout()\n"
+        "plt.savefig(OUTPUT_DIR / 'enrolled_school_dist.png', dpi=120)\n"
+        "plt.close()\n"
+        "</Code>\n\n"
+        "请立即按照上述格式输出第2轮分析!"
+    )
+```
+
+**修复逻辑**：
+- ⚠️ 明确禁止重复输出Bootstrap代码
+- 🚨 使用emoji引起模型注意
+- 提供完整的代码模板,包括import、读取CSV、生成文件等所有步骤
+- 明确要求按照格式输出<Analyze>和<Code>标签
+
+**预期效果**：
+- Bootstrap后模型收到强烈的禁止重复提示
+- 模型直接使用提供的代码模板,不再自由发挥
+- 轮次编号正确,按顺序执行第2-9轮分析
+
+**实际效果**：❌ 仍然失败,第7轮后出现新问题:无限循环警告
+
+---
+
+### 修复 20：防止表名验证无限循环（2024-12-30）✅
+
+#### 问题 20：字段名被误识别为表名,触发无限循环警告
+
+**问题现象**（2024-12-30 第十一次测试）：
+- ✅ 前6轮分析正常,按顺序完成CSV文件分析
+- ❌ **第7轮开始页面疯狂输出重复警告**:
+  ```
+  检测到你引用了不存在于实际 SQLite 中的表：term。请重新查看 sqlite_master 结果，仅使用真实表名。
+  ```
+- ❌ **系统陷入无限循环**,不断重复发送相同的警告
+- ❌ **分析在第7轮后停止**,未完成后续轮次
+
+**根本原因**：
+
+**问题链**:
+1. **模型在第7轮分析中提到"term"字段**: 这是CSV文件中的真实字段名
+2. **表名提取逻辑误判**: `extract_table_mentions_from_text`使用`TABLE_TOKEN_PATTERN`提取所有标识符,但"term"不在`common_words.json`的过滤列表中
+3. **触发未知表名警告**: 系统检测到"term"不在`known_tables`中,发送警告并`refund_iteration()`
+4. **模型收到警告后继续提到"term"**: 因为"term"是真实字段名,模型在分析中必然会提到
+5. **再次触发警告**: 系统再次检测到"term",再次发送警告
+6. **无限循环**: 警告→refund→模型输出→再次提到term→再次警告→...
+
+**为什么之前没发现这个问题**：
+1. **触发条件特殊**: 只有当模型在第7轮后的分析中提到"term"字段时才会触发,前6轮分析的是其他表,不涉及"term"字段
+2. **日志掩盖**: 前6轮的表名验证警告是正常的(如提醒使用CSV而非表名),没有引起注意
+3. **无限循环隐蔽**: 系统在第7轮后才开始疯狂输出重复警告,但日志中没有明确显示"循环次数"或"重复警告计数"
+4. **字段名vs表名混淆**: `extract_table_mentions_from_text`函数提取所有标识符,但`common_words.json`中缺少"term"等常见字段名,导致误判
+5. **之前修复的局限性**:
+   - 修复18只放宽了`execute_rounds>=2`的表名引用要求,但没有解决字段名误判问题
+   - 修复19只处理了Bootstrap后缺少代码的情况,没有涉及表名验证逻辑
+
+**修复方案**：
+
+**修复20.1**: 添加常见字段名到`common_words.json`
+
+修改`@config/common_words.json:21-27`,添加"term"等常见字段名:
+```json
+"common_fields": [
+  "name", "id", "type", "value", "data", "time", "date", "year", "month", "day",
+  "hour", "minute", "second", "status", "code", "text", "number", "amount",
+  "price", "total", "count", "index", "key", "bool", "flag", "school", "organ",
+  "age", "gender", "address", "email", "phone", "term", "loan", "student",
+  "payment", "disability", "absence", "bankrupt", "unemployed", "male", "female"
+],
+```
+
+**修复20.2**: 添加重复警告检测机制
+
+修改`@backend.py:1475`,添加`unknown_table_warnings`集合:
+```python
+unknown_table_warnings: set[str] = set()  # 跟踪已警告的未知表名,防止重复警告
+```
+
+修改`@backend.py:1938-1957`,只对新出现的未知表名发出警告:
+```python
+# 修复20: 防止重复警告导致无限循环
+if schema_confirmed and unknown_mentions:
+    # 只对新出现的未知表名发出警告
+    new_unknown = unknown_mentions - unknown_table_warnings
+    if new_unknown:
+        unknown_table_warnings.update(new_unknown)
+        messages.append({"role": "assistant", "content": cur_res})
+        warn_unknown = (
+            "检测到你引用了不存在于实际 SQLite 中的表："
+            + ", ".join(sorted(new_unknown))
+            + "。请重新查看 sqlite_master 结果，仅使用真实表名。"
+        )
+        messages.append({"role": "user", "content": warn_unknown})
+        refund_iteration()
+        continue
+    else:
+        # 已经警告过的表名,不再重复警告,直接跳过验证
+        logger.warning(
+            f"[bot_stream] Skipping repeated unknown table warning: {unknown_mentions}"
+        )
+```
+
+**修复逻辑**：
+- 将"term"等常见字段名添加到过滤列表,防止被误识别为表名
+- 使用`unknown_table_warnings`集合跟踪已发送的警告
+- 只对新出现的未知表名发出警告,已警告过的直接跳过
+- 避免同一个未知表名触发无限循环
+
+**预期效果**：
+- "term"等字段名不再被误识别为表名
+- 表名验证警告不会无限循环
+- 模型能正常完成第7-9轮分析
+
+**实际效果**：✅ 成功,修复20生效,但暴露了新问题:模型执行到第10轮,代码执行失败且没有生成README.md
+
+---
+
+### 修复 21：改进代码提取逻辑,正确处理```python标记（2024-12-30）✅
+
+#### 问题 21：模型输出的代码包含```python标记,导致执行失败
+
+**问题现象**（2024-12-30 第十二次测试）：
+- ✅ 前6轮分析正常,修复20生效(无限循环问题已解决)
+- ❌ **第3-10轮代码都执行失败**,报错`SyntaxError: invalid syntax`
+- ❌ **所有execute_round_X.txt文件显示代码以```python开头**
+- ❌ **没有生成README.md文件**
+- ❌ **第10轮后模型开始重复输出空的<Analyze>和<Code>标签**
+
+**根本原因**：
+
+从`execute_round_3.txt`到`execute_round_10.txt`看到,模型输出的代码格式是:
+```
+<Code>
+```python
+import pandas as pd
+...
+```
+</Code>
+```
+
+**问题链**:
+1. **模型在<Code>标签内输出markdown代码块标记**: ````python`
+2. **系统的正则表达式提取失败**: `r"```(?:python)?(.*?)```"`只能匹配一层,当代码本身以````python`开头时会提取失败
+3. **extract_effective_code返回空字符串或错误内容**: 导致代码执行失败
+4. **SyntaxError**: 第一行是````python`,Python解释器无法执行
+5. **系统没有将执行错误反馈给模型**: 模型不知道代码失败,继续按提示词输出下一轮
+6. **第10轮后模型困惑**: 完成了所有分析但没有生成README.md,不知道该做什么
+
+**为什么之前没发现这个问题**：
+1. **修复20之前系统陷入无限循环**: 第7轮后就停止了,没有执行到第10轮
+2. **代码提取逻辑的假设错误**: 假设模型不会在<Code>标签内再输出markdown标记
+3. **日志不够详细**: 没有记录提取后的代码内容,难以发现提取失败
+
+**修复方案**：
+
+修改`@backend.py:2140-2156`,改进代码提取逻辑:
+```python
+# 修复21: 改进markdown代码块提取逻辑
+# 如果代码以```python或```开头,去除markdown标记
+if code_content.startswith("```"):
+    # 找到第一个换行符,去除```python或```行
+    first_newline = code_content.find("\n")
+    if first_newline != -1:
+        code_content = code_content[first_newline + 1:]
+    # 去除末尾的```
+    if code_content.endswith("```"):
+        code_content = code_content[:-3]
+    code_str = code_content.strip()
+else:
+    # 尝试使用正则提取(兼容旧格式)
+    md_match = re.search(
+        r"```(?:python)?(.*?)```", code_content, re.DOTALL
+    )
+    code_str = md_match.group(1).strip() if md_match else code_content
+effective_code = extract_effective_code(code_str)
+```
+
+**修复逻辑**：
+- 检查代码是否以````开头
+- 如果是,去除第一行(````python`或`````)和最后一行(`````)
+- 如果不是,使用原有的正则提取逻辑(兼容旧格式)
+- 确保提取到的是纯Python代码,不包含任何markdown标记
+
+**预期效果**：
+- 代码提取正确,不再包含````python`标记
+- 第3-10轮代码能正常执行
+- 模型能按照提示词要求完成所有9轮分析
+
+**实际效果**：⏳ 待验证,但暴露了新问题:模型没有按提示词顺序执行
+
+---
+
+### 修复 22：添加轮次任务映射,明确指导模型按顺序执行（2024-12-30）✅
+
+#### 问题 22：模型没有按提示词规定的第2-9轮顺序执行
+
+**问题现象**（2024-12-30 第十二次测试）：
+- ❌ **模型完全偏离提示词规定的分析顺序**:
+  - 第3轮应该分析enrolled.csv,实际分析unemployed vs bankrupcy
+  - 第4轮应该分析no_payment_due.csv,实际分析disabled vs absense
+  - 第5轮应该分析longest_absense_from_school.csv,实际分析unemployed distribution
+  - 第6轮应该分析enlist.csv,实际分析disabled vs absense
+  - 第7轮应该分析disabled.csv,实际分析unemployed vs bankrupcy
+  - 第8轮应该生成README.md,实际分析disabled vs bankrupcy
+  - 第9轮应该输出<Answer>,实际分析unemployed vs absense
+  - 第10轮应该停止,实际继续分析disabled vs absense
+- ❌ **没有生成README.md文件**
+- ❌ **没有输出<Answer>总结**
+
+**根本原因**：
+
+**问题链**:
+1. **修复19增强版只在execute_rounds=1时提供enrolled.csv指令**: 第2轮执行Bootstrap后不再触发
+2. **系统在每轮执行后发送"立即开始第X轮"提示**: 但没有指定第X轮应该分析哪个表
+3. **模型收不到明确的任务指导**: 开始自由发挥,分析不同的表组合
+4. **提示词的局限性**: 提示词中明确了第2-9轮任务,但系统没有强制验证
+5. **代码执行失败没有反馈**: 第3-10轮代码都失败了,但模型不知道,继续输出下一轮
+
+**为什么之前没发现这个问题**：
+1. **修复20之前系统陷入无限循环**: 第7轮后就停止了,没有暴露顺序问题
+2. **假设模型会严格遵守提示词**: 低估了模型自由发挥的可能性
+3. **缺少轮次任务验证机制**: 系统没有检查模型是否按顺序执行
+
+**修复方案**：
+
+修改`@backend.py:2740-2769`,添加轮次任务映射:
+```python
+# 修复22: 在非bootstrap代码执行成功后,添加明确的轮次任务提示
+if (
+    not is_schema_code
+    and non_schema_exec_rounds > 0
+    and non_schema_exec_rounds < 9
+):
+    next_round = non_schema_exec_rounds + 1
+    # 定义每轮的具体任务
+    round_tasks = {
+        2: "分析 enrolled.csv (字段: name, school, month) → 生成 enrolled_summary.csv + enrolled_school_dist.png",
+        3: "分析 no_payment_due.csv (字段: name, bool) → 生成 payment_status_summary.csv + payment_status_dist.png",
+        4: "分析 longest_absense_from_school.csv (字段: name, month) → 生成 absense_summary.csv + absense_month_dist.png",
+        5: "分析 enlist.csv (字段: name, organ) → 生成 enlist_summary.csv + enlist_organ_dist.png",
+        6: "分析 disabled.csv (字段: name) → 生成 disabled_count.csv + disabled_vs_total.png",
+        7: "使用 SQLite 进行多表关联分析 → 生成关联分析结果",
+        8: "生成 README.md 索引文件 → 记录所有生成的文件及其说明",
+        9: "输出 <Answer> 总结所有分析结果和发现"
+    }
+    
+    if next_round <= 9 and next_round in round_tasks:
+        task_desc = round_tasks[next_round]
+        continue_prompt = (
+            f"✅ 第 {non_schema_exec_rounds} 轮已完成。\n\n"
+            f"⚡ 立即开始第 {next_round} 轮分析（不要等待指令，不要输出任何解释）。\n\n"
+            f"**第 {next_round} 轮任务**: {task_desc}\n\n"
+            f"直接输出 <Analyze> 和 <Code> 标签。"
+        )
+        messages.append(
+            {"role": "user", "content": continue_prompt}
+        )
+```
+
+**修复逻辑**：
+- 定义`round_tasks`字典,明确每轮的具体任务
+- 在每轮执行成功后,根据`next_round`查找对应的任务描述
+- 在"立即开始第X轮"提示中包含具体的任务要求
+- 确保模型知道每轮应该分析哪个表,生成哪些文件
+
+**预期效果**：
+- 模型按照提示词规定的顺序执行第2-9轮
+- 第2轮分析enrolled.csv,第3轮分析no_payment_due.csv,依此类推
+- 第8轮生成README.md索引文件
+- 第9轮输出<Answer>总结
+
 **实际效果**：⏳ 待重启后端服务并重新测试
 
 ---
 
-**文档版本**:v16.0(修复 19 最终版)  
-**最后更新**:2024-12-30 11:20  
+**文档版本**:v18.0(修复 21 + 修复 22)  
+**最后更新**:2024-12-30 21:45  
 **状态**:
 - ✅ 修复 6.1:流式输出检测顺序已修复(先检查 `</Answer>` 再检查 `</Code>`)
 - ✅ 修复 6.2:`execute_rounds` 初始化已修复(Bootstrap 后设为 1)
@@ -1724,7 +2061,11 @@ else:
 - ✅ 修复 16:移除提示词中的静态轮次指令(已完成提示词修改,失败)
 - ✅ 修复 17:移除backend.py中错误的"请提出分析目标"逻辑(已完成后端修改,部分成功)
 - ✅ 修复 18:放宽表名验证逻辑,允许Bootstrap后首轮输出(已完成后端修改,部分成功)
-- ✅ 修复 19:优化Bootstrap后缺少代码时的提示信息(已完成后端修改)
+- ✅ 修复 19:优化Bootstrap后缺少代码时的提示信息(已完成后端修改,部分失败)
+- ✅ 修复 19增强版:使用更强的指令和完整代码模板(已完成后端修改,部分成功)
+- ✅ 修复 20:防止表名验证无限循环(已完成后端修改+配置修改,成功但暴露新问题)
+- ✅ 修复 21:改进代码提取逻辑,正确处理```python标记(已完成后端修改)
+- ✅ 修复 22:添加轮次任务映射,明确指导模型按顺序执行(已完成后端修改)
 - ⏳ 待重启后端服务并重新测试
 
 **修复历史总结**:
@@ -1744,7 +2085,11 @@ else:
 - 修复 16:移除提示词中的静态轮次指令(解决提示词问题,但暴露backend.py问题)
 - 修复 17:移除backend.py中错误的"请提出分析目标"逻辑(解决注入提示问题,但暴露表名验证问题)
 - 修复 18:放宽表名验证逻辑,允许Bootstrap后首轮输出(解决验证过严问题,但暴露缺少代码提示问题)
-- **修复 19:优化Bootstrap后缺少代码时的提示信息(当前修复)**
+- 修复 19:优化Bootstrap后缺少代码时的提示信息(添加了指导,但提示不够强)
+- 修复 19增强版:使用更强的指令和完整代码模板(强化了提示,但暴露了表名验证无限循环问题)
+- 修复 20:防止表名验证无限循环(解决了循环问题,但暴露了代码提取和顺序执行问题)
+- 修复 21:改进代码提取逻辑,正确处理```python标记(解决了代码执行失败,但暴露了顺序执行问题)
+- **修复 22:添加轮次任务映射,明确指导模型按顺序执行(当前修复)**
 
 **核心教训**:
 - ✅ 不仅要检查拦截逻辑,还要检查系统是否会主动触发被拦截的行为
@@ -1778,3 +2123,9 @@ else:
 - ✅ **系统提示需要针对性:Bootstrap后缺少代码时,应明确告知"开始第2轮分析",而非泛泛要求"输出Code标签"**
 - ✅ **模型需要明确的任务指导:通用提示容易让模型困惑,具体的任务要求更有效**
 - ✅ **连续修复的价值:修复17+18暴露了修复19的问题,每次修复都在逼近根本原因**
+- ✅ **提示强度需要足够:简单的任务描述不够,需要禁止性指令+完整代码模板+醒目标记**
+- ✅ **字段名vs表名混淆:验证逻辑需要区分字段名和表名,常见字段名应加入过滤列表**
+- ✅ **防止无限循环:重复警告会导致无限循环,需要跟踪已警告的内容,避免重复发送**
+- ✅ **问题触发条件的隐蔽性:只在特定轮次(第7轮)提到特定字段("term")时才触发,前期测试难以发现**
+- ✅ **日志的局限性:日志中没有"循环次数"或"重复警告计数",无限循环问题不易察觉**
+- ✅ **修复的连锁反应:修复19增强版让模型执行到第7轮,暴露了修复20的表名验证无限循环问题**

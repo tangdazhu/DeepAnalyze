@@ -2137,10 +2137,25 @@ def bot_stream(messages, workspace, session_id="default"):
                     logger.info(
                         f"[bot_stream] Code content extracted, length={len(code_content)}"
                     )
-                    md_match = re.search(
-                        r"```(?:python)?(.*?)```", code_content, re.DOTALL
-                    )
-                    code_str = md_match.group(1).strip() if md_match else code_content
+                    # 修复21: 改进markdown代码块提取逻辑
+                    # 如果代码以```python或```开头,去除markdown标记
+                    if code_content.startswith("```"):
+                        # 找到第一个换行符,去除```python或```行
+                        first_newline = code_content.find("\n")
+                        if first_newline != -1:
+                            code_content = code_content[first_newline + 1 :]
+                        # 去除末尾的```
+                        if code_content.endswith("```"):
+                            code_content = code_content[:-3]
+                        code_str = code_content.strip()
+                    else:
+                        # 尝试使用正则提取(兼容旧格式)
+                        md_match = re.search(
+                            r"```(?:python)?(.*?)```", code_content, re.DOTALL
+                        )
+                        code_str = (
+                            md_match.group(1).strip() if md_match else code_content
+                        )
                     effective_code = extract_effective_code(code_str)
                     logger.info(
                         f"[bot_stream] Effective code extracted, length={len(effective_code) if effective_code else 0}"
@@ -2722,17 +2737,31 @@ def bot_stream(messages, workspace, session_id="default"):
                     if answer_requested:
                         answer_waiting_rounds = 0
 
-                    # 在非bootstrap代码执行成功后,添加明确的"继续下一轮"提示
+                    # 修复22: 在非bootstrap代码执行成功后,添加明确的轮次任务提示
                     if (
                         not is_schema_code
                         and non_schema_exec_rounds > 0
                         and non_schema_exec_rounds < 9
                     ):
                         next_round = non_schema_exec_rounds + 1
-                        if next_round <= 10:
+                        # 定义每轮的具体任务
+                        round_tasks = {
+                            2: "分析 enrolled.csv (字段: name, school, month) → 生成 enrolled_summary.csv + enrolled_school_dist.png",
+                            3: "分析 no_payment_due.csv (字段: name, bool) → 生成 payment_status_summary.csv + payment_status_dist.png",
+                            4: "分析 longest_absense_from_school.csv (字段: name, month) → 生成 absense_summary.csv + absense_month_dist.png",
+                            5: "分析 enlist.csv (字段: name, organ) → 生成 enlist_summary.csv + enlist_organ_dist.png",
+                            6: "分析 disabled.csv (字段: name) → 生成 disabled_count.csv + disabled_vs_total.png",
+                            7: "使用 SQLite 进行多表关联分析 → 生成关联分析结果",
+                            8: "生成 README.md 索引文件 → 记录所有生成的文件及其说明",
+                            9: "输出 <Answer> 总结所有分析结果和发现",
+                        }
+
+                        if next_round <= 9 and next_round in round_tasks:
+                            task_desc = round_tasks[next_round]
                             continue_prompt = (
                                 f"✅ 第 {non_schema_exec_rounds} 轮已完成。\n\n"
                                 f"⚡ 立即开始第 {next_round} 轮分析（不要等待指令，不要输出任何解释）。\n\n"
+                                f"**第 {next_round} 轮任务**: {task_desc}\n\n"
                                 f"直接输出 <Analyze> 和 <Code> 标签。"
                             )
                             messages.append(
