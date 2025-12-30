@@ -2037,10 +2037,21 @@ def bot_stream(messages, workspace, session_id="default"):
                         assistant_reply += violation_block
                         yield violation_block
                         return
-                    code_prompt = (
-                        f"你的输出缺少 <Code> 段（已连续 {missing_code_rounds} 轮）。请在 <Analyze> 后立刻提供完整的 Python 代码（含 import/连接/EDA/plt 保存/conn.close()），"
-                        "以便系统执行。参考提示词中的代码模板，必须输出 <Code>...</Code> 标签。"
-                    )
+                    # 修复19: 当execute_rounds=1(Bootstrap后)且缺少代码时,明确指导开始第2轮分析
+                    if execute_rounds == 1:
+                        code_prompt = (
+                            "Bootstrap已完成,现在必须立即开始第2轮分析。\n\n"
+                            "**第2轮任务**: 分析 enrolled.csv 文件\n"
+                            "- 使用 pd.read_csv() 读取 enrolled.csv\n"
+                            "- 生成 enrolled_summary.csv + enrolled_school_dist.png\n"
+                            "- 必须输出 <Analyze>...</Analyze> 和 <Code>...</Code> 标签\n\n"
+                            "请立即按照提示词要求输出第2轮的<Analyze>和<Code>。"
+                        )
+                    else:
+                        code_prompt = (
+                            f"你的输出缺少 <Code> 段（已连续 {missing_code_rounds} 轮）。请在 <Analyze> 后立刻提供完整的 Python 代码（含 import/连接/EDA/plt 保存/conn.close()），"
+                            "以便系统执行。参考提示词中的代码模板，必须输出 <Code>...</Code> 标签。"
+                        )
                     messages.append({"role": "user", "content": code_prompt})
                 refund_iteration()
                 continue
