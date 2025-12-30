@@ -1631,12 +1631,81 @@ if require_known_reference and not known_mentions and execute_rounds >= 2:
 - 按照提示词要求的顺序执行第2-9轮分析
 - 完成所有9轮分析,生成README.md和最终Answer
 
+**实际效果**：✅ 部分成功,修复18生效(首轮输出不被拒绝),但暴露了修复19的问题(模型没有输出代码)
+
+---
+
+### 修复 19：优化Bootstrap后缺少代码时的提示信息（2024-12-30）✅
+
+#### 问题 19：Bootstrap后模型没有输出代码,系统提示不明确
+
+**问题现象**（2024-12-30 第九次测试）：
+- ✅ 修复18生效,Bootstrap后首轮输出不被拒绝
+- ❌ **模型第1轮只输出9个字符,没有<Analyze>和<Code>标签**
+- ❌ **轮次编号错位**:
+  - execute_round_2.txt = Bootstrap代码(应该是round 0)
+  - execute_round_3.txt = person分析(应该是round 2,但提示词要求enrolled)
+- ❌ **只执行了3轮就停止**,模型提前输出<Answer>
+
+**根本原因**：
+
+从日志看:
+```
+2025-12-30 09:19:12,193 [INFO] iteration=1 finish_reason=stop has_code=False len=9
+2025-12-30 09:19:12,193 [INFO] iteration=1 analyze_signature= last_signature=None
+```
+
+**问题链**:
+1. **Bootstrap在iteration=0执行**: 生成execute_round_0_bootstrap.txt,execute_rounds=1
+2. **模型第1轮(iteration=1)只输出9个字符**: 没有<Analyze>和<Code>标签
+3. **系统判断为"缺少代码"**: 触发`@backend.py:2040-2044`的通用提示
+4. **通用提示不明确**: "你的输出缺少<Code>段...请输出<Code>标签"
+5. **模型理解错误**: 可能认为Bootstrap已完成,不知道需要开始第2轮分析
+6. **轮次编号错位**: refund_iteration()后,iteration重试但execute_rounds未增加
+7. **模型自由发挥**: 没有按照提示词要求的顺序分析表
+
+**为什么之前没发现这个问题**：
+- 修复18之前,模型第1轮输出会被表名验证拒绝,掩盖了"缺少代码"的问题
+- 修复18放宽验证后,"缺少代码"的问题暴露出来
+
+**修复方案**：
+
+修改`@backend.py:2040-2055`,当`execute_rounds=1`(Bootstrap后)且缺少代码时,明确告知需要开始第2轮分析:
+```python
+# 修复19: 当execute_rounds=1(Bootstrap后)且缺少代码时,明确指导开始第2轮分析
+if execute_rounds == 1:
+    code_prompt = (
+        "Bootstrap已完成,现在必须立即开始第2轮分析。\n\n"
+        "**第2轮任务**: 分析 enrolled.csv 文件\n"
+        "- 使用 pd.read_csv() 读取 enrolled.csv\n"
+        "- 生成 enrolled_summary.csv + enrolled_school_dist.png\n"
+        "- 必须输出 <Analyze>...</Analyze> 和 <Code>...</Code> 标签\n\n"
+        "请立即按照提示词要求输出第2轮的<Analyze>和<Code>。"
+    )
+else:
+    code_prompt = (
+        f"你的输出缺少 <Code> 段（已连续 {missing_code_rounds} 轮）。请在 <Analyze> 后立刻提供完整的 Python 代码..."
+    )
+```
+
+**修复逻辑**：
+- Bootstrap后(execute_rounds=1)如果模型没有输出代码,明确告知"开始第2轮分析enrolled.csv"
+- 提供具体的任务要求:读取文件、生成输出、输出标签格式
+- 其他轮次仍使用通用的"缺少<Code>段"提示
+
+**预期效果**：
+- Bootstrap后模型收到明确的第2轮任务指导
+- 模型按照提示词要求开始分析enrolled.csv
+- 轮次编号正确: round 0(Bootstrap) → round 2(enrolled) → round 3(no_payment_due) → ...
+- 按照提示词要求的顺序执行第2-9轮分析
+- 完成所有9轮分析,生成README.md和最终Answer
+
 **实际效果**：⏳ 待重启后端服务并重新测试
 
 ---
 
-**文档版本**:v15.0(修复 18 最终版)  
-**最后更新**:2024-12-30 09:15  
+**文档版本**:v16.0(修复 19 最终版)  
+**最后更新**:2024-12-30 11:20  
 **状态**:
 - ✅ 修复 6.1:流式输出检测顺序已修复(先检查 `</Answer>` 再检查 `</Code>`)
 - ✅ 修复 6.2:`execute_rounds` 初始化已修复(Bootstrap 后设为 1)
@@ -1654,7 +1723,8 @@ if require_known_reference and not known_mentions and execute_rounds >= 2:
 - ✅ 修复 15:完全移除强制执行指令(已完成后端修改,部分成功)
 - ✅ 修复 16:移除提示词中的静态轮次指令(已完成提示词修改,失败)
 - ✅ 修复 17:移除backend.py中错误的"请提出分析目标"逻辑(已完成后端修改,部分成功)
-- ✅ 修复 18:放宽表名验证逻辑,允许Bootstrap后首轮输出(已完成后端修改)
+- ✅ 修复 18:放宽表名验证逻辑,允许Bootstrap后首轮输出(已完成后端修改,部分成功)
+- ✅ 修复 19:优化Bootstrap后缺少代码时的提示信息(已完成后端修改)
 - ⏳ 待重启后端服务并重新测试
 
 **修复历史总结**:
@@ -1673,7 +1743,8 @@ if require_known_reference and not known_mentions and execute_rounds >= 2:
 - 修复 15:完全移除强制执行指令(解决Bootstrap重复,但暴露提示词问题)
 - 修复 16:移除提示词中的静态轮次指令(解决提示词问题,但暴露backend.py问题)
 - 修复 17:移除backend.py中错误的"请提出分析目标"逻辑(解决注入提示问题,但暴露表名验证问题)
-- **修复 18:放宽表名验证逻辑,允许Bootstrap后首轮输出(当前修复)**
+- 修复 18:放宽表名验证逻辑,允许Bootstrap后首轮输出(解决验证过严问题,但暴露缺少代码提示问题)
+- **修复 19:优化Bootstrap后缺少代码时的提示信息(当前修复)**
 
 **核心教训**:
 - ✅ 不仅要检查拦截逻辑,还要检查系统是否会主动触发被拦截的行为
@@ -1704,3 +1775,6 @@ if require_known_reference and not known_mentions and execute_rounds >= 2:
 - ✅ **验证逻辑需要考虑边界情况:Bootstrap后的首轮输出可能是总结性的,不涉及具体表分析**
 - ✅ **过于严格的验证会误杀正常输出:需要根据轮次(execute_rounds)调整验证强度**
 - ✅ **修复的连锁反应:修复17移除了掩盖性提示,暴露了修复18的表名验证问题**
+- ✅ **系统提示需要针对性:Bootstrap后缺少代码时,应明确告知"开始第2轮分析",而非泛泛要求"输出Code标签"**
+- ✅ **模型需要明确的任务指导:通用提示容易让模型困惑,具体的任务要求更有效**
+- ✅ **连续修复的价值:修复17+18暴露了修复19的问题,每次修复都在逼近根本原因**
