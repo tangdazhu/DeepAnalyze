@@ -383,6 +383,33 @@ if answer_requested and execute_rounds >= MIN_REQUIRED_ROUNDS:
     messages.append({"role": "user", "content": reminder})
 ```
 
+---
+
+### 修复 9：剥离模型响应外层 HTML 包裹（12月 31 日）✅
+
+#### 新增问题概述
+
+- **现象**：第 3 轮执行成功后，模型响应被包装为 `<div class="response">...</div>`，实际内容只有 “🔍 Analyze / 💻 Code” 等提示性文字，没有真正的 `<Analyze>` / `<Code>` 标签。
+- **后果**：后端在 `normalize_model_tags()` 阶段无法解析出 `<Code>`，触发 `missing_code_rounds` 计数；达到 `MAX_MISSING_CODE_ROUNDS=3` 即强制终止，流程停在第 3 轮，`README.md` 等后续产物全部缺失。
+
+#### 为什么之前没有出现？
+
+1. **前端指令最近才启用**：早期前端只要求模型输出纯文本；近期 UI 增加了“统一 HTML 容器”要求，强制模型把完整响应包在 `<div class="response">` 里。
+2. **之前的解析逻辑只处理 Markdown，不剥 HTML**：`normalize_model_tags()` 只做 emoji→标准标签替换，对 HTML 外壳完全保留，导致 `<Analyze>` 被包裹后判定为普通文本。
+3. **旧日志没有相关报错**：在 HTML 包裹启用前，模型直接输出 `<Analyze>/<Code>`，所以 `missing_code_rounds` 逻辑不会触发，自然没有暴露这条链路。
+
+#### 修复细节
+
+- **新增函数**：`strip_outer_html_wrappers()`（@demo/backend.py#1140-1158），支持剥离 `div/section/article/main/blockquote/response` 等常见容器，最多递归 5 层。
+- **调用位置**：`normalize_model_tags()` 入口处先执行 `strip_outer_html_wrappers()`（@demo/backend.py#1161-1169），再进入原有的 emoji / 标签归一化流程。
+- **效果**：即便前端继续包裹 HTML，后端仍能拿到标准 `<Analyze>/<Code>`，不会再因为“缺少代码块”而提前终止。
+
+#### 验证与回归
+
+1. 重启后端服务，确保新逻辑加载。
+2. 重新跑分析流程，观察 `generated/execute_round_4.txt` 是否正常生成。
+3. 如果仍出现终止，检查 `backend.log` 中是否还有 `MAX_MISSING_CODE_ROUNDS` 日志；若没有，说明该问题已解决，可继续排查其他错误。
+
 **修改位置 2**：`backend.py:2342-2348` (有 Code 时的处理)
 ```python
 # 修改前

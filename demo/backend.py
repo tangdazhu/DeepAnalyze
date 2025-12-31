@@ -1137,11 +1137,34 @@ def strip_model_file_blocks(content: str) -> str:
     return cleaned
 
 
+HTML_WRAPPER_TAGS = ("div", "section", "article", "main", "blockquote", "response")
+HTML_WRAPPER_PATTERN = re.compile(
+    r"^\s*<(?P<tag>"
+    + "|".join(HTML_WRAPPER_TAGS)
+    + r")\b[^>]*>(?P<body>.*)</(?P=tag)>\s*$",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def strip_outer_html_wrappers(content: str) -> str:
+    """剥离模型响应外层纯展示用的 HTML 容器，保留核心 <Analyze>/<Code> 内容。"""
+    if not content:
+        return content
+    trimmed = content.strip()
+    # 最多剥 5 层，避免无限循环
+    for _ in range(5):
+        match = HTML_WRAPPER_PATTERN.match(trimmed)
+        if not match:
+            break
+        trimmed = match.group("body").strip()
+    return trimmed
+
+
 def normalize_model_tags(content: str) -> str:
     """将常见的 emoji 标签转换为标准 <Tag> 形式，并移除重复的分隔线和 assistant 回显。"""
     if not content:
         return content
-    normalized = content
+    normalized = strip_outer_html_wrappers(content)
     for emoji_tag, canonical in EMOJI_TAG_MAP.items():
         normalized = normalized.replace(emoji_tag, canonical)
     normalized = HEADING_TAG_PATTERN.sub(lambda m: f"<{m.group(1)}>", normalized)
