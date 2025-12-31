@@ -2144,9 +2144,8 @@ def bot_stream(messages, workspace, session_id="default"):
                         first_newline = code_content.find("\n")
                         if first_newline != -1:
                             code_content = code_content[first_newline + 1 :]
-                        # 去除末尾的```
-                        if code_content.endswith("```"):
-                            code_content = code_content[:-3]
+                        # 去除末尾可能带空白的```标记
+                        code_content = re.sub(r"```[\t ]*$", "", code_content.rstrip())
                         code_str = code_content.strip()
                     else:
                         # 尝试使用正则提取(兼容旧格式)
