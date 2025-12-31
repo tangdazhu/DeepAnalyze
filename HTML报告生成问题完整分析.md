@@ -391,17 +391,6 @@ if answer_requested and execute_rounds >= MIN_REQUIRED_ROUNDS:
 
 - **现象**：第 3 轮执行成功后，模型响应被包装为 `<div class="response">...</div>`，实际内容只有 “🔍 Analyze / 💻 Code” 等提示性文字，没有真正的 `<Analyze>` / `<Code>` 标签。
 - **后果**：后端在 `normalize_model_tags()` 阶段无法解析出 `<Code>`，触发 `missing_code_rounds` 计数；达到 `MAX_MISSING_CODE_ROUNDS=3` 即强制终止，流程停在第 3 轮，`README.md` 等后续产物全部缺失。
-
-#### 为什么之前没有出现？
-
-1. **前端指令最近才启用**：早期前端只要求模型输出纯文本；近期 UI 增加了“统一 HTML 容器”要求，强制模型把完整响应包在 `<div class="response">` 里。
-2. **之前的解析逻辑只处理 Markdown，不剥 HTML**：`normalize_model_tags()` 只做 emoji→标准标签替换，对 HTML 外壳完全保留，导致 `<Analyze>` 被包裹后判定为普通文本。
-3. **旧日志没有相关报错**：在 HTML 包裹启用前，模型直接输出 `<Analyze>/<Code>`，所以 `missing_code_rounds` 逻辑不会触发，自然没有暴露这条链路。
-
-#### 修复细节
-
-- **新增函数**：`strip_outer_html_wrappers()`（@demo/backend.py#1140-1158），支持剥离 `div/section/article/main/blockquote/response` 等常见容器，最多递归 5 层。
-- **调用位置**：`normalize_model_tags()` 入口处先执行 `strip_outer_html_wrappers()`（@demo/backend.py#1161-1169），再进入原有的 emoji / 标签归一化流程。
 - **效果**：即便前端继续包裹 HTML，后端仍能拿到标准 `<Analyze>/<Code>`，不会再因为“缺少代码块”而提前终止。
 
 #### 验证与回归
@@ -425,6 +414,33 @@ if answer_requested and execute_rounds >= MIN_REQUIRED_ROUNDS:
     reminder = (...)
     messages.append({"role": "user", "content": reminder})
 ```
+
+---
+
+### 修复 10：轮次计数未回滚导致第 7 轮后任务错乱（12月 31 日）✅
+
+#### 新增问题概述
+
+- **现象**：本轮测试中，模型顺利完成第 2-6 轮 CSV 分析，第 7 轮应进行 SQLite 多表关联。但在第 7 轮代码失败（`FileNotFoundError: student_loan_status.csv`）后，系统紧接着注入了“第 8 轮：生成 README.md 索引文件”的提示，模型随即尝试读取 `student_loan_status.csv`，最终在第 7 轮就终止，README 也未生成。
+- **原因**：`refund_iteration()` 仅回退 `iteration` 计数，没有回退 `execute_rounds / non_schema_exec_rounds`。因此即便第 7 轮执行失败，`execute_rounds` 仍自增到 7，`round_tasks` 认为下一轮是第 8 轮，从而提前发出 README 任务。
+
+#### 为什么之前没有出现？
+
+1. **此前的修复主要围绕 Answer 阈值与 HTML 包裹问题**：我们一直聚焦在“第 3 轮提前输出 Answer”与“缺失 `<Code>` 标签”的 bug，未注意到轮次计数在失败时没有回滚。
+2. **多表关联之前是“最后一道关卡”**：以往多表 SQL 常常因为表名/字段检查被直接拦截，流程根本到不了第 7 轮代码执行阶段，问题自然暴露不出来。
+3. **最近才开始要求第 8 轮一定要生成 README**：只有当系统依赖 `round_tasks` 精准推动第 8、9 轮时，回滚缺失才导致错位。
+
+#### 修复细节
+
+- **新增 `refund_round_progress()`**：在 `refund_iteration()` 之外同步回退 `execute_rounds` 与 `non_schema_exec_rounds`，确保本轮失败不会影响下一轮提示（@demo/backend.py#1494-1511）。
+- **在所有关键“退票”路径调用**：如代码执行报错、伪造 `<Execute>`、缺少 `<Code>`、SQL 字段错误等处，`refund_iteration()` 之后立即调用 `refund_round_progress(is_schema_code)`，确保计数一致。
+
+#### 验证与回归计划
+
+1. 重启后端服务，重新跑 Student Loan 流程。
+2. 观察 `generated/execute_round_7.txt`：失败后是否仍提示继续第 7 轮（而非跳到第 8 轮）。
+3. 确认第 8 轮提示仅在多表成功或系统判定“必须继续”时才注入。
+4. 若仍提前进入 README 任务，请附上新的 `execute_round_*.txt` 与 `backend.log`，进一步定位。
 
 **修复逻辑**：
 - 保留 `answer_requested` 机制的灵活性

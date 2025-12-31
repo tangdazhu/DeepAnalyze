@@ -1501,6 +1501,15 @@ def bot_stream(messages, workspace, session_id="default"):
         nonlocal iteration
         iteration = max(0, iteration - 1)
 
+    def refund_round_progress(is_schema_round: bool):
+        """在执行失败或被退票时，回滚 execute_rounds / non_schema_exec_rounds 计数。"""
+        nonlocal execute_rounds, non_schema_exec_rounds
+        min_rounds = 1 if schema_bootstrap_used else 0
+        if execute_rounds > min_rounds:
+            execute_rounds -= 1
+        if not is_schema_round and non_schema_exec_rounds > 0:
+            non_schema_exec_rounds -= 1
+
     def ensure_known_tables(latest: set[str]):
         nonlocal known_tables, initial_tables_locked
         if initial_tables_locked:
