@@ -2225,6 +2225,23 @@ def bot_stream(messages, workspace, session_id="default"):
                     else:
                         empty_code_rounds = 0  # 重置计数
 
+                    # 拦截 HTML/前端模板被误当作 Python 代码的情况
+                    if re.search(
+                        r"<!doctype html|</?(html|head|body|section|div)\b",
+                        effective_code,
+                        re.IGNORECASE,
+                    ):
+                        logger.warning(
+                            "[bot_stream] Code rejected: detected HTML content instead of Python script"
+                        )
+                        html_prompt = (
+                            "检测到你在 <Code> 中输出了 HTML 模板，但系统需要的是 Python 脚本。"
+                            " 请提供可执行的 Python 代码（以生成 README.md/CSV/PNG 等文件），不要直接输出 HTML 页面内容。"
+                        )
+                        messages.append({"role": "user", "content": html_prompt})
+                        refund_iteration()
+                        continue
+
                     # 计算代码签名，用于重复检测
                     code_signature = "\n".join(
                         line.strip() for line in effective_code.splitlines()
@@ -2589,6 +2606,7 @@ def bot_stream(messages, workspace, session_id="default"):
                             continue
 
                     last_code_signature = code_signature
+                    current_round = execute_rounds + 1
 
                     logger.info(
                         f"[bot_stream] session={session_id} iteration={iteration} executing code, length={len(code_str)}"
@@ -2705,6 +2723,23 @@ def bot_stream(messages, workspace, session_id="default"):
                             artifact_paths.append(dest_path.resolve())
                         except Exception as e:
                             logger.error(f"Error copying modified file {p}: {e}")
+
+                    if current_round == 8:
+                        has_readme = any(
+                            Path(p).name.lower() == "readme.md" for p in artifact_paths
+                        )
+                        if not has_readme:
+                            logger.warning(
+                                "[bot_stream] Round 8 missing README.md output, rejecting code"
+                            )
+                            readme_prompt = (
+                                "第 8 轮必须遍历 generated/ 目录并写入 generated/README.md，"
+                                "请在 Python 代码中创建/更新该文件后重新提交。"
+                            )
+                            messages.append({"role": "user", "content": readme_prompt})
+                            refund_iteration()
+                            refund_round_progress(False)
+                            continue
 
                     exe_str = f"\n<Execute>\n```\n{exe_output}\n```\n</Execute>\n"
                     actual_files = {
@@ -2882,6 +2917,7 @@ def bot_stream(messages, workspace, session_id="default"):
                                 )
                             messages.append({"role": "user", "content": error_warning})
                             refund_iteration()
+                            refund_round_progress(is_schema_code)
                             continue
 
                     # 检测伪造 Execute：模型不能在自己的输出中包含 <Execute> 标签
