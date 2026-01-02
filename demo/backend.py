@@ -468,7 +468,6 @@ def extract_table_mentions_from_text(
         "chart",
         "plot",
         "graph",
-        "join",
         "readme",
         "report",
         "analysis",
@@ -488,6 +487,9 @@ def extract_table_mentions_from_text(
             if len(parts) >= 3 and lowered not in normalized_known:
                 return False
         if lowered.endswith(("csv", "png", "txt")):
+            return False
+        # 针对 multi_table_join_result 这类生成文件的命名进行额外过滤
+        if lowered.endswith(("join_result", "join_results")):
             return False
         if (
             lowered.startswith(("multi_", "single_"))

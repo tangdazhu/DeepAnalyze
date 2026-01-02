@@ -1107,6 +1107,41 @@ unknown={'enrolled_school_month_heatmap'}
 
 ---
 
+### 修复 12：第 7 轮缺少 SQLite JOIN 导致 `multi_table_join_result.csv` 未生成（2026 年 1 月 2 日）✅
+
+**新增现象**
+
+- 重新回归 Student Loan 提示词后，前 6 轮均按要求生成了 CSV/PNG，但第 7 轮 `execute_round_7.txt` 报告 `FileNotFoundError: .../multi_table_join_result.csv`。
+- 前端持续注入“请勿引用 join/the 表”之类的警告，模型被迫重复说明“文件名不是表名”，却始终无法进入第 8 轮 README 任务，导致整个阶段卡死。
+
+**为什么之前没有暴露**
+
+1. 早期回归主要卡在“表名/字段误判”或 SQL 字段错误上，模型往往在真正执行 SQLite JOIN 之前就被拦截，无法触发“读取未生成文件”的路径。
+2. 后端针对第 7 轮仅检查了“必须输出 CSV/PNG”，没有强调“必须连接 SQLite 并写入 JOIN 结果”，因此模型可以继续沿用 CSV 模板或直接假设 JOIN 结果已存在。
+3. 提示词虽然写明“生成 multi_table_join_result.csv”，但缺乏强制校验，导致这一隐患在前几次测试中被忽略。
+
+**根本原因**
+
+- 第 7 轮 `<Code>` 可以只包含 `pd.read_csv('multi_table_join_result.csv')` 或继续使用单表 CSV，不做任何 SQLite JOIN。由于缺少针对第 7 轮的特殊约束，系统无法判断该 CSV 是否真实生成，最终在读取阶段报错并无限重试。
+
+**修复内容**（@demo/backend.py#2581-2632）
+
+1. **强制 SQLite JOIN**：当 `execute_rounds + 1 == 7` 时，若代码中未出现 `sqlite3.connect` 或 `pd.read_sql*`，立即拒绝并注入提示，要求严格按照 SQLite 多表 JOIN 模板生成 `multi_table_join_result.csv`。
+2. **阻止读取不存在的 JOIN CSV**：如果第 7 轮尝试 `pd.read_csv(...multi_table_join_result.csv)`，但 `generated/` 目录下不存在该文件且当前代码也没有 `.to_csv('multi_table_join_result.csv')`，则直接退票并提示“先生成再读取”。
+
+**效果**
+
+- 第 7 轮必须先执行 SQLite JOIN 写出 CSV/PNG，才能继续做高风险人群分析；一旦 JOIN 失败，会即时给出明确提示，而不是拖到读取阶段才报错。
+- 由于 JOIN 结果真实存在，第 8 轮 README 索引才能顺利扫描并产出，后续阶段不再被第 7 轮阻塞。
+
+**验证步骤**
+
+1. 重跑阶段 1 流程，确认 `execute_round_7.txt` 中包含 SQLite JOIN 和 `.to_csv('multi_table_join_result.csv')`，且 `generated/` 目录出现对应 CSV/PNG。
+2. 观察系统是否在第 7 轮后自动注入“第 8 轮生成 README.md”的提示，并成功生成 README。
+3. 如仍出现 `FileNotFoundError`，请提供新的 `execute_round_7.txt` 与 `backend.log`，继续收紧校验逻辑。
+
+---
+
 ## 测试结果总结(2024-12-25)
 
 ### 第一次测试(修复 11.1 前)
