@@ -452,14 +452,11 @@ DDL_TABLE_PATTERN = re.compile(
 def extract_table_mentions_from_text(
     text: str, known_tables: set[str]
 ) -> tuple[set[str], set[str]]:
+    """从自然语言描述中提取疑似表名。仅用于提示，不触发强制校验。"""
     tokens = set(TABLE_TOKEN_PATTERN.findall(text or ""))
     normalized_known = {tbl.lower() for tbl in known_tables}
 
-    # 使用全局加载的常见词汇配置(从config/common_words.json)
-    # 注意: COMMON_WORDS_GLOBAL 在程序启动时已强制加载,如果加载失败程序会终止
     COMMON_WORDS = COMMON_WORDS_GLOBAL
-
-    # 文件名后缀模式（用于过滤文件名）
     FILE_SUFFIXES = {
         "summary",
         "dist",
@@ -471,7 +468,33 @@ def extract_table_mentions_from_text(
         "chart",
         "plot",
         "graph",
+        "join",
+        "readme",
+        "report",
+        "analysis",
     }
+
+    def is_likely_table(token: str) -> bool:
+        lowered = token.lower()
+        if not lowered:
+            return False
+        if lowered in COMMON_WORDS or lowered.startswith("session_"):
+            return False
+        if "_" in lowered:
+            parts = lowered.split("_")
+            if len(parts) >= 2 and parts[-1] in FILE_SUFFIXES:
+                return False
+            # 长下划线 token 很可能是文件/字段描述,两段以上直接跳过
+            if len(parts) >= 3 and lowered not in normalized_known:
+                return False
+        if lowered.endswith(("csv", "png", "txt")):
+            return False
+        if (
+            lowered.startswith(("multi_", "single_"))
+            and lowered not in normalized_known
+        ):
+            return False
+        return True
 
     known: set[str] = set()
     unknown: set[str] = set()
@@ -479,18 +502,10 @@ def extract_table_mentions_from_text(
         tok_lower = tok.lower()
         if tok_lower in normalized_known:
             known.add(next(tbl for tbl in known_tables if tbl.lower() == tok_lower))
-        elif tok_lower in COMMON_WORDS:
             continue
-        else:
-            # 过滤掉 session ID 模式 (如 session_1766621865408_78qxk0ca9)
-            if tok_lower.startswith("session_"):
-                continue
-            # 过滤掉文件名模式：如果 token 包含下划线且以文件后缀结尾，跳过
-            if "_" in tok_lower:
-                parts = tok_lower.split("_")
-                if len(parts) >= 2 and parts[-1] in FILE_SUFFIXES:
-                    continue
-            unknown.add(tok)
+        if not is_likely_table(tok):
+            continue
+        unknown.add(tok)
     return known, unknown
 
 
@@ -1979,47 +1994,22 @@ def bot_stream(messages, workspace, session_id="default"):
                     unknown_mentions = set()
                 # 修复20: 防止重复警告导致无限循环
                 if schema_confirmed and unknown_mentions:
-                    # 只对新出现的未知表名发出警告
                     new_unknown = unknown_mentions - unknown_table_warnings
                     if new_unknown:
                         unknown_table_warnings.update(new_unknown)
+                        logger.info(
+                            f"[bot_stream] Unknown table hints (Analyze only): {new_unknown}"
+                        )
                         messages.append({"role": "assistant", "content": cur_res})
                         warn_unknown = (
-                            "检测到你引用了不存在于实际 SQLite 中的表："
+                            "检测到你在 <Analyze> 中提到了未出现在 sqlite_master 的名称："
                             + ", ".join(sorted(new_unknown))
-                            + "。请重新查看 sqlite_master 结果，仅使用真实表名。"
+                            + "。如果这是文件/字段/图表名称，请忽略此提示；若确实是表名，请参考首轮 sqlite_master 结果，仅使用真实表名。"
                         )
                         messages.append({"role": "user", "content": warn_unknown})
                         refund_iteration()
                         continue
-                    else:
-                        # 已经警告过的表名,不再重复警告,直接跳过验证
-                        logger.warning(
-                            f"[bot_stream] Skipping repeated unknown table warning: {unknown_mentions}"
-                        )
-                # 修复18: 只在execute_rounds>=2时才强制要求表名引用
-                # Bootstrap后的首轮输出可能是总结性的,不涉及具体表分析
-                if (
-                    require_known_reference
-                    and not known_mentions
-                    and execute_rounds >= 2
-                ):
-                    logger.warning(
-                        f"[bot_stream] Code rejected: no known table mentions in <Analyze> (execute_rounds={execute_rounds})"
-                    )
-                    messages.append({"role": "assistant", "content": cur_res})
-                    table_samples = sorted(known_tables)
-                    sample_hint = (
-                        ", ".join(table_samples[:3]) if table_samples else "真实表"
-                    )
-                    ref_prompt = (
-                        "请在 <Analyze> 中引用 sqlite_master 返回的真实表名（如："
-                        + sample_hint
-                        + "），并结合这些表/字段制定下一步分析计划。"
-                    )
-                    messages.append({"role": "user", "content": ref_prompt})
-                    refund_iteration()
-                    continue
+                # Analyze 文本仅用于提示，不再强制要求含已知表名
 
             if finished:
                 # 检查是否提前输出 Answer（在完成足够轮次之前）

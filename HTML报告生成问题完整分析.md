@@ -390,19 +390,6 @@ if answer_requested and execute_rounds >= MIN_REQUIRED_ROUNDS:
 #### 新增问题概述
 
 - **现象**：第 3 轮执行成功后，模型响应被包装为 `<div class="response">...</div>`，实际内容只有 “🔍 Analyze / 💻 Code” 等提示性文字，没有真正的 `<Analyze>` / `<Code>` 标签。
-- **后果**：后端在 `normalize_model_tags()` 阶段无法解析出 `<Code>`，触发 `missing_code_rounds` 计数；达到 `MAX_MISSING_CODE_ROUNDS=3` 即强制终止，流程停在第 3 轮，`README.md` 等后续产物全部缺失。
-- **效果**：即便前端继续包裹 HTML，后端仍能拿到标准 `<Analyze>/<Code>`，不会再因为“缺少代码块”而提前终止。
-
-#### 验证与回归
-
-1. 重启后端服务，确保新逻辑加载。
-2. 重新跑分析流程，观察 `generated/execute_round_4.txt` 是否正常生成。
-3. 如果仍出现终止，检查 `backend.log` 中是否还有 `MAX_MISSING_CODE_ROUNDS` 日志；若没有，说明该问题已解决，可继续排查其他错误。
-
-**修改位置 2**：`backend.py:2342-2348` (有 Code 时的处理)
-```python
-# 修改前
-if answer_requested:
     messages.append({"role": "assistant", "content": cur_res})
     reminder = (...)
     messages.append({"role": "user", "content": reminder})
