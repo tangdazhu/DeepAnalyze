@@ -630,16 +630,29 @@ print(f"📊 记录了 {len(csv_files)} 个CSV文件, {len(png_files)} 个PNG文
 - ✅ **完成后立即进入第 7 轮,进行多表关联分析**
 
 ### 第 7 轮：多表关联分析
-**任务**：使用 SQL JOIN 关联多个表，分析失业学生的性别和还款情况
-**表名**：`unemployed`, `male`, `no_payment_due`
-**输出文件**：
-- `unemployed_gender_payment.csv`
-- `unemployed_gender_payment.png`
+**任务**：使用 SQL JOIN 关联多个表，分析失业学生的性别和还款情况  
+**表名**：`unemployed`, `male`, `no_payment_due`  
+**输出文件**：  
+- `unemployed_gender_payment.csv`  
+- `unemployed_gender_payment.png`  
+
+**写作要求（务必遵守）**：  
+- 代码片段必须以 `import sqlite3`、`import pandas as pd`、`import matplotlib.pyplot as plt` 开头，禁止遗漏导入。  
+- 先用 `sqlite3.connect(DB_PATH, timeout=30)` 建立连接，执行多表 JOIN，并写入 `generated/unemployed_gender_payment.csv`。  
+- 随后再对 JOIN 结果进行 pandas 统计与绘图，输出 `generated/unemployed_gender_payment.png`，确保 `plt.savefig(...); plt.close()`。  
+- 禁止直接读取 `multi_table_join_result.csv` 作为数据源，必须在本轮脚本中重新执行 SQL JOIN。  
+- 若需要复用第 2-6 轮产生的 CSV，请在 JOIN 后再读入；禁止跳过 SQL。  
 
 ### 第 8 轮：生成 README.md 索引文件
-**任务**：记录所有生成的文件及其说明
-**输出文件**：
-- `README.md`
+**任务**：记录所有生成的文件及其说明  
+**输出文件**：  
+- `README.md`  
+
+**写作要求（务必遵守）**：  
+- 仅遍历 `generated/` 目录，对 CSV/PNG/TXT 等产物写入 Markdown 索引，禁止执行 SQL 或绘图。  
+- 允许只写 README.md，而无需额外生成 CSV/PNG（该轮将豁免文件输出检查）。  
+- 推荐使用 `pathlib.Path` 读取文件列表，并用 Markdown 表格展示文件名、用途与生成轮次。  
+- README 须以 `# 学生贷款分析产物索引` 为标题，并附上简要概述、文件清单、后续使用提示。  
 
 ### 第 9 轮：输出最终答案
 **任务**：输出 `<Answer>` 标签，总结分析结果

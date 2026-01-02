@@ -2669,32 +2669,37 @@ def bot_stream(messages, workspace, session_id="default"):
                             refund_iteration()
                             continue
 
-                    # 强制检查：第2轮起必须包含文件写入操作
+                    # 强制检查：第2轮起必须包含文件写入操作（README 轮除外）
                     if non_schema_exec_rounds > 0:  # 跳过首轮 schema 查询
-                        has_csv_output = ".to_csv(" in normalized_code
-                        has_png_output = (
-                            "plt.savefig(" in normalized_code
-                            or ".savefig(" in normalized_code
-                        )
-                        logger.info(
-                            f"[bot_stream] File output check: non_schema_exec_rounds={non_schema_exec_rounds}, has_csv={has_csv_output}, has_png={has_png_output}"
-                        )
-                        if not has_csv_output and not has_png_output:
-                            logger.warning(
-                                f"[bot_stream] Code rejected: missing file output (CSV/PNG)"
+                        if current_round == 8:
+                            logger.info(
+                                "[bot_stream] File output check skipped for README round"
                             )
-                            file_output_prompt = (
-                                "根据提示词要求，第 2 轮起每个 <Code> 必须同时生成 CSV 和 PNG 文件。"
-                                " 请在代码中添加：\n"
-                                "1. `summary.to_csv(OUTPUT_DIR / '<表名>_summary.csv', index=False, encoding='utf-8')`\n"
-                                "2. `plt.savefig(OUTPUT_DIR / '<表名>_<字段名>_dist.png', dpi=120)` 和 `plt.close()`\n"
-                                "确保每轮都有真实产物写入 `generated/` 目录。"
+                        else:
+                            has_csv_output = ".to_csv(" in normalized_code
+                            has_png_output = (
+                                "plt.savefig(" in normalized_code
+                                or ".savefig(" in normalized_code
                             )
-                            messages.append(
-                                {"role": "user", "content": file_output_prompt}
+                            logger.info(
+                                f"[bot_stream] File output check: non_schema_exec_rounds={non_schema_exec_rounds}, has_csv={has_csv_output}, has_png={has_png_output}"
                             )
-                            refund_iteration()
-                            continue
+                            if not has_csv_output and not has_png_output:
+                                logger.warning(
+                                    f"[bot_stream] Code rejected: missing file output (CSV/PNG)"
+                                )
+                                file_output_prompt = (
+                                    "根据提示词要求，第 2 轮起每个 <Code> 必须同时生成 CSV 和 PNG 文件。"
+                                    " 请在代码中添加：\n"
+                                    "1. `summary.to_csv(OUTPUT_DIR / '<表名>_summary.csv', index=False, encoding='utf-8')`\n"
+                                    "2. `plt.savefig(OUTPUT_DIR / '<表名>_<字段名>_dist.png', dpi=120)` 和 `plt.close()`\n"
+                                    "确保每轮都有真实产物写入 `generated/` 目录。"
+                                )
+                                messages.append(
+                                    {"role": "user", "content": file_output_prompt}
+                                )
+                                refund_iteration()
+                                continue
 
                     last_code_signature = code_signature
 
