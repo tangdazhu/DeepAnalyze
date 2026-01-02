@@ -1406,22 +1406,32 @@ def run_schema_bootstrap(workspace_path: Path, session_id: str = None) -> str:
 
 
 def extract_effective_code(code_str: str) -> str:
-    """若 <Code> 中包裹三引号字符串，提取其中的实际脚本内容。"""
+    """若 <Code> 中包裹代码块/三引号，提取其中的实际脚本内容。"""
     if not code_str:
         return ""
+
+    code = code_str.strip()
+
+    # 兼容仍残留的 markdown 代码围栏
+    fence_match = re.match(r"^```(?:[\w+-]+)?\s*(.*?)\s*```$", code, re.DOTALL)
+    if fence_match:
+        code = fence_match.group(1).strip()
+    elif code.endswith("```"):
+        code = re.sub(r"```[\t ]*$", "", code).rstrip()
+
     for quote in ('"""', "'''"):
-        start = code_str.find(quote)
+        start = code.find(quote)
         if start != -1:
-            end = code_str.find(quote, start + 3)
+            end = code.find(quote, start + 3)
             if end != -1:
-                inner = code_str[start + 3 : end].strip()
+                inner = code[start + 3 : end].strip()
                 # 如果内层脚本仍包含 import / SELECT 等关键字，则认为是有效脚本
                 if any(
                     token in inner
                     for token in ["import", "select", "plt.", "sns.", "pd."]
                 ):
                     return inner
-    return code_str
+    return code
 
 
 def bot_stream(messages, workspace, session_id="default"):
