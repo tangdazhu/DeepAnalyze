@@ -1516,6 +1516,15 @@ def bot_stream(messages, workspace, session_id="default"):
     MAX_MISSING_CODE_ROUNDS = 3
     duplicate_analyze_rounds = 0  # 连续重复 <Analyze> 的轮数
     MAX_DUPLICATE_ANALYZE_ROUNDS = 5  # 最多允许 5 轮重复（增加容忍度）
+    suppress_duplicate_analyze_once = (
+        False  # 遇到可重试错误时，允许下一轮重复 <Analyze>
+    )
+
+    def allow_duplicate_analyze_retry():
+        """标记下一轮允许重复 <Analyze>（通常用于同一轮的纠错重试）。"""
+        nonlocal suppress_duplicate_analyze_once
+        suppress_duplicate_analyze_once = True
+
     baseline_tables = list_sqlite_tables(workspace_path)
     known_tables = set(baseline_tables)
     initial_tables_locked = bool(known_tables)
@@ -1904,39 +1913,48 @@ def bot_stream(messages, workspace, session_id="default"):
             # 【关键】在所有拦截逻辑之前检测重复 <Analyze>
             # 这样可以在模型被拦截并 refund_iteration 后，下次循环时检测到重复
             if last_analyze_signature and analyze_signature == last_analyze_signature:
-                duplicate_analyze_rounds += 1
-                logger.warning(
-                    f"[bot_stream] session={session_id} iteration={iteration} "
-                    f"Detected duplicate <Analyze> signature (round {duplicate_analyze_rounds}/{MAX_DUPLICATE_ANALYZE_ROUNDS}): "
-                    f"{analyze_signature[:100]}"
-                )
-
-                if duplicate_analyze_rounds >= MAX_DUPLICATE_ANALYZE_ROUNDS:
-                    forced_reason = (
-                        f"连续 {MAX_DUPLICATE_ANALYZE_ROUNDS} 轮输出相同的 <Analyze> 内容，"
-                        "系统判定模型陷入重复循环，强制终止任务。"
+                if suppress_duplicate_analyze_once:
+                    logger.info(
+                        f"[bot_stream] session={session_id} iteration={iteration} "
+                        "Duplicate <Analyze> tolerated once due to pending retry"
                     )
-                    violation_block = f"\n<Answer>\n{forced_reason}\n</Answer>\n"
-                    assistant_reply += violation_block
-                    yield violation_block
-                    logger.error(
-                        f"[bot_stream] session={session_id} Force terminated due to duplicate <Analyze>"
+                    suppress_duplicate_analyze_once = False
+                    duplicate_analyze_rounds = 0
+                else:
+                    duplicate_analyze_rounds += 1
+                    logger.warning(
+                        f"[bot_stream] session={session_id} iteration={iteration} "
+                        f"Detected duplicate <Analyze> signature (round {duplicate_analyze_rounds}/{MAX_DUPLICATE_ANALYZE_ROUNDS}): "
+                        f"{analyze_signature[:100]}"
                     )
-                    return
 
-                messages.append({"role": "assistant", "content": cur_res})
-                diff_prompt = (
-                    f"【警告】你的 <Analyze> 内容与上一轮完全相同（已连续 {duplicate_analyze_rounds} 轮）。\n\n"
-                    "请立即采取以下行动之一：\n"
-                    "1. 如果已完成所有分析，直接输出 <Answer> 总结结论（包含 2+ 条定量发现和后续建议）\n"
-                    "2. 如果还需继续分析，必须提出**完全不同**的分析目标（例如：分析其他表、其他字段、不同维度的聚合等）\n\n"
-                    "禁止重复相同的分析步骤。"
-                )
-                messages.append({"role": "user", "content": diff_prompt})
-                refund_iteration()
-                continue
+                    if duplicate_analyze_rounds >= MAX_DUPLICATE_ANALYZE_ROUNDS:
+                        forced_reason = (
+                            f"连续 {MAX_DUPLICATE_ANALYZE_ROUNDS} 轮输出相同的 <Analyze> 内容，"
+                            "系统判定模型陷入重复循环，强制终止任务。"
+                        )
+                        violation_block = f"\n<Answer>\n{forced_reason}\n</Answer>\n"
+                        assistant_reply += violation_block
+                        yield violation_block
+                        logger.error(
+                            f"[bot_stream] session={session_id} Force terminated due to duplicate <Analyze>"
+                        )
+                        return
+
+                    messages.append({"role": "assistant", "content": cur_res})
+                    diff_prompt = (
+                        f"【警告】你的 <Analyze> 内容与上一轮完全相同（已连续 {duplicate_analyze_rounds} 轮）。\n\n"
+                        "请立即采取以下行动之一：\n"
+                        "1. 如果已完成所有分析，直接输出 <Answer> 总结结论（包含 2+ 条定量发现和后续建议）\n"
+                        "2. 如果还需继续分析，必须提出**完全不同**的分析目标（例如：分析其他表、其他字段、不同维度的聚合等）\n\n"
+                        "禁止重复相同的分析步骤。"
+                    )
+                    messages.append({"role": "user", "content": diff_prompt})
+                    refund_iteration()
+                    continue
             else:
                 duplicate_analyze_rounds = 0
+                suppress_duplicate_analyze_once = False
 
             # 【关键】在所有拦截逻辑之前更新 last_analyze_signature
             # 这样即使后续逻辑 continue，下次循环也能检测到重复
@@ -2744,7 +2762,15 @@ def bot_stream(messages, workspace, session_id="default"):
                     ]
 
                     artifact_paths = []
-                    generated_dir_str = str(generated_dir.resolve())
+                    generated_dir_path = generated_dir.resolve()
+                    generated_dir_str = str(generated_dir_path)
+
+                    def is_in_generated(path_obj: Path) -> bool:
+                        try:
+                            return str(path_obj.resolve()).startswith(generated_dir_str)
+                        except Exception:
+                            return False
+
                     logger.info(
                         f"[bot_stream] Added files: {[str(p) for p in added_paths]}"
                     )
@@ -2753,28 +2779,41 @@ def bot_stream(messages, workspace, session_id="default"):
                     )
                     for p in added_paths:
                         try:
+                            resolved = p.resolve()
                             # 如果文件已经在 generated 目录下,直接使用,不要创建副本
-                            if str(p.resolve()).startswith(generated_dir_str):
+                            if is_in_generated(resolved):
                                 logger.info(
-                                    f"[bot_stream] File already in generated: {p}"
+                                    f"[bot_stream] File already in generated: {resolved}"
                                 )
-                                artifact_paths.append(p.resolve())
+                                artifact_paths.append(resolved)
                             else:
                                 # 文件在其他位置,需要复制到 generated 目录
-                                target_path = generated_dir / p.name
+                                target_path = generated_dir_path / resolved.name
                                 dest_path = uniquify_path(target_path)
-                                logger.info(f"[bot_stream] Copying {p} -> {dest_path}")
-                                shutil.copy2(p, dest_path)
+                                logger.info(
+                                    f"[bot_stream] Copying {resolved} -> {dest_path}"
+                                )
+                                shutil.copy2(resolved, dest_path)
                                 artifact_paths.append(dest_path.resolve())
                         except Exception as e:
                             logger.error(f"[bot_stream] Error processing file {p}: {e}")
 
                     for p in modified_paths:
                         try:
+                            resolved = p.resolve()
+                            if is_in_generated(resolved):
+                                # 已在 generated 中的文件(如 execute_round_x.txt)直接纳入,避免生成 _modified 副本
+                                logger.info(
+                                    f"[bot_stream] Modified file already in generated: {resolved}"
+                                )
+                                if resolved not in artifact_paths:
+                                    artifact_paths.append(resolved)
+                                continue
                             dest_path = uniquify_path(
-                                generated_dir / f"{p.stem}_modified{p.suffix}"
+                                generated_dir_path
+                                / f"{resolved.stem}_modified{resolved.suffix}"
                             )
-                            shutil.copy2(p, dest_path)
+                            shutil.copy2(resolved, dest_path)
                             artifact_paths.append(dest_path.resolve())
                         except Exception as e:
                             logger.error(f"Error copying modified file {p}: {e}")
@@ -2971,6 +3010,7 @@ def bot_stream(messages, workspace, session_id="default"):
                                     "请修正代码后重新提交。如果部分代码已成功执行，可以基于已生成的文件继续分析。"
                                 )
                             messages.append({"role": "user", "content": error_warning})
+                            allow_duplicate_analyze_retry()
                             refund_iteration()
                             refund_round_progress(is_schema_code)
                             continue
