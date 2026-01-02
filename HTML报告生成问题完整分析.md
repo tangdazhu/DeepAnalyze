@@ -2073,6 +2073,47 @@ if (
 
 ---
 
+### 修复 23：第 8 轮未生成 README.md（2026-01-02）✅
+
+**新增现象**
+
+- 2026-01-02 的回归中，流程执行到第 8 轮时，`backend.log` 连续报错 `Code rejected: invalid tables {'the'}`，`execute_round_8.txt` 内含 SQL 片段与 `SyntaxError: invalid character '✅'`。
+- 由于被误判为“引用不存在的表”，系统不断回滚同一轮，始终没有写出 `generated/README.md`。
+
+**为什么之前没有暴露**
+
+1. 过去的失败多发生在第 7 轮（JOIN 或 CSV 校验），流程很少真正进入第 8 轮。
+2. 表名提取函数在 SQL 代码路径上未引用 `COMMON_WORDS_GLOBAL`，即便 `common_words.json` 里已有 “the”，依旧会被记录到 `invalid_tables`。
+3. 第 8 轮提示词缺少“禁止 SQL/DB 操作”的硬性约束，模型常用上一轮的 SQLite 模板继续写 SQL。
+
+**根本原因**
+
+- `extract_sql_table_names()` 只过滤了 `PYTHON_KEYWORDS`，未同步过滤 `COMMON_WORDS_GLOBAL`，导致 SQL 中的常见单词被当作表名。
+- `invalid_tables` 校验同样缺少 `COMMON_WORDS_GLOBAL` 过滤，进一步放大误判。
+- 第 8 轮缺乏针对 README 的专用约束，模型仍尝试连库、写 SQL，触发未知表校验并陷入循环。
+
+**修复内容**
+
+- @demo/backend.py#618-634：在 `extract_sql_table_names()` 中引入 `COMMON_WORDS_GLOBAL` 过滤，剔除 “the”等常用词。
+- @demo/backend.py#2390-2420：在 `invalid_tables` 计算处同步排除 `COMMON_WORDS_GLOBAL`；若 `current_round == 8` 仍检测到 SQL 语句，立即拒绝并提示“第 8 轮仅允许遍历 generated/ 目录，禁止执行 SQL”。
+- @example/analysis_on_student_loan/prompt_complete.txt#414-536：为第 8 轮示例代码增加双重警告（禁止连接 SQLite/禁止 SQL），并在“注意事项”中强调只能使用 pathlib/os/json 操作文件系统。
+
+**效果**
+
+- 第 8 轮不再把常用英文视为未知表名，README 生成逻辑恢复正常。
+- 就算模型误写 SQL，也会在后端被精准拦截并收到“只允许写文件索引脚本”的纠错提示。
+- 提示词层面同步约束输出格式，降低模型“带入上一轮 SQL 模板”的概率。
+
+**验证步骤**
+
+1. 重启后端并跑完整的 Phase 1：
+   - 确认 `execute_round_8.txt` 中只有遍历 generated 目录的 Python 代码。
+   - `generated/README.md` 成功创建，日志不再出现 `invalid tables {'the'}`。
+2. 检查 `backend.log`，确保没有新的 round-8 SQL 拒绝；若出现，会给出“禁止 SQL”提示而非未知表名。
+3. 若 README 仍缺失，请提供最新的 `execute_round_8.txt` 与 `backend.log` 以便继续收紧校验。
+
+---
+
 **文档版本**:v18.0(修复 21 + 修复 22)  
 **最后更新**:2024-12-30 21:45  
 **状态**:

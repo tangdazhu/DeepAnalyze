@@ -2696,7 +2696,6 @@ def bot_stream(messages, workspace, session_id="default"):
                             continue
 
                     last_code_signature = code_signature
-                    current_round = execute_rounds + 1
 
                     logger.info(
                         f"[bot_stream] session={session_id} iteration={iteration} executing code, length={len(code_str)}"
