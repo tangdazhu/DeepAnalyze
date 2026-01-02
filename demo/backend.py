@@ -2578,6 +2578,59 @@ def bot_stream(messages, workspace, session_id="default"):
                         refund_iteration()
                         continue
 
+                    target_round = execute_rounds + 1
+                    if target_round == 7:
+                        uses_sqlite_join = any(
+                            key in normalized_code
+                            for key in [
+                                "sqlite3.connect",
+                                "pd.read_sql(",
+                                "pd.read_sql_query",
+                                "pd.read_sql_table",
+                            ]
+                        )
+                        if not uses_sqlite_join:
+                            logger.warning(
+                                "[bot_stream] Code rejected: round 7 must use SQLite join"
+                            )
+                            join_prompt = (
+                                "第 7 轮必须使用 SQLite 多表 JOIN：\n"
+                                "1. 在 <Code> 开头通过 `sqlite3.connect(DB_PATH, timeout=30)` 建立连接\n"
+                                "2. 基于 `enrolled/no_payment_due/longest_absense_from_school/enlist/disabled` 等真实表执行 JOIN 查询\n"
+                                "3. 将 JOIN 结果写入 `generated/multi_table_join_result.csv`\n"
+                                "4. 再对合并结果做统计与绘图\n\n"
+                                "请使用 SQLite 查询而不是直接使用 CSV/multi_table_join_result.csv。"
+                            )
+                            messages.append({"role": "user", "content": join_prompt})
+                            refund_iteration()
+                            continue
+
+                        join_csv_path = generated_dir / "multi_table_join_result.csv"
+                        references_join_csv = (
+                            "multi_table_join_result" in normalized_code
+                            and "pd.read_csv" in normalized_code
+                        )
+                        writes_join_csv = (
+                            "multi_table_join_result" in normalized_code
+                            and ".to_csv" in normalized_code
+                        )
+                        if (
+                            references_join_csv
+                            and not join_csv_path.exists()
+                            and not writes_join_csv
+                        ):
+                            logger.warning(
+                                "[bot_stream] Code rejected: round 7 reading missing multi_table_join_result.csv"
+                            )
+                            warn_join_file = (
+                                "检测到你尝试 `pd.read_csv('.../multi_table_join_result.csv')`，"
+                                "但该文件尚未生成。第 7 轮必须先通过 SQLite JOIN 生成该 CSV，"
+                                "再基于结果做分析。请在同一段代码中完成 SQL JOIN 并写入 `generated/multi_table_join_result.csv`。"
+                            )
+                            messages.append({"role": "user", "content": warn_join_file})
+                            refund_iteration()
+                            continue
+
                     # 强制检查：第2轮起必须包含文件写入操作
                     if non_schema_exec_rounds > 0:  # 跳过首轮 schema 查询
                         has_csv_output = ".to_csv(" in normalized_code

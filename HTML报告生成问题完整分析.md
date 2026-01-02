@@ -140,7 +140,7 @@ else:
 - 注入明确的继续执行提示，包含具体轮次和任务
 - 允许模型恢复并继续后续轮次
 
-**实际效果**：❌ 无效，拦截逻辑仍未被触发
+**实际效果**：❌ 无效,模型仍在第3轮后提前终止
 
 **失败原因**：修复 5 只修改了判断条件，但忽略了两个更深层的问题：
 1. **流式输出检测顺序错误**：检测到 `</Code>` 就立即 `break`，永远不会执行到 `</Answer>` 检测
@@ -301,7 +301,7 @@ if (
         "你已完成至少两轮代码执行。请停止继续编写 <Code>，在下一轮直接输出 <Answer>，"
         "总结上述 <Execute>/<File> 结果并给出后续建议。"
     )
-    messages.append({"role": "user", "content": answer_prompt})
+    messages.append({"role": "assistant", "content": answer_prompt})
 ```
 
 **为什么日志中没有拦截警告**：
@@ -365,7 +365,7 @@ ANSWER_MIN_NON_SCHEMA_ROUNDS = 8  # 对应 8 轮非 schema 代码执行(第 2-9 
 
 **已实施的修复方案**：
 
-在 `answer_requested` 的两个使用点增加轮次检查，确保只有在达到最小轮次后才响应 `answer_requested` 标志。
+在 `answer_requested` 的两个使用点增加轮次检查,确保只有在达到最小轮次后才响应 `answer_requested` 标志。
 
 **修改位置 1**：`backend.py:2284-2292` (缺少 Code 时的处理)
 ```python
@@ -390,44 +390,11 @@ if answer_requested and execute_rounds >= MIN_REQUIRED_ROUNDS:
 #### 新增问题概述
 
 - **现象**：第 3 轮执行成功后，模型响应被包装为 `<div class="response">...</div>`，实际内容只有 “🔍 Analyze / 💻 Code” 等提示性文字，没有真正的 `<Analyze>` / `<Code>` 标签。
-    messages.append({"role": "assistant", "content": cur_res})
-    reminder = (...)
-    messages.append({"role": "user", "content": reminder})
 
-# 修改后
-MIN_REQUIRED_ROUNDS = 9
-if answer_requested and execute_rounds >= MIN_REQUIRED_ROUNDS:
-    messages.append({"role": "assistant", "content": cur_res})
-    reminder = (...)
-    messages.append({"role": "user", "content": reminder})
-```
+**问题分析**：
 
----
+1. **HTML 包裹导致模型响应不被识别**：后端在接收到模型响应后，会将其包装在 `<div class="response">...</div>` 中。但是，这个包裹导致模型响应不被识别为 `<Analyze>` 或 `<Code>`，从而无法继续执行后续轮次。
 
-### 修复 10：轮次计数未回滚导致第 7 轮后任务错乱（12月 31 日）✅
-
-#### 新增问题概述
-
-- **现象**：本轮测试中，模型顺利完成第 2-6 轮 CSV 分析，第 7 轮应进行 SQLite 多表关联。但在第 7 轮代码失败（`FileNotFoundError: student_loan_status.csv`）后，系统紧接着注入了“第 8 轮：生成 README.md 索引文件”的提示，模型随即尝试读取 `student_loan_status.csv`，最终在第 7 轮就终止，README 也未生成。
-- **原因**：`refund_iteration()` 仅回退 `iteration` 计数，没有回退 `execute_rounds / non_schema_exec_rounds`。因此即便第 7 轮执行失败，`execute_rounds` 仍自增到 7，`round_tasks` 认为下一轮是第 8 轮，从而提前发出 README 任务。
-
-#### 为什么之前没有出现？
-
-1. **此前的修复主要围绕 Answer 阈值与 HTML 包裹问题**：我们一直聚焦在“第 3 轮提前输出 Answer”与“缺失 `<Code>` 标签”的 bug，未注意到轮次计数在失败时没有回滚。
-2. **多表关联之前是“最后一道关卡”**：以往多表 SQL 常常因为表名/字段检查被直接拦截，流程根本到不了第 7 轮代码执行阶段，问题自然暴露不出来。
-3. **最近才开始要求第 8 轮一定要生成 README**：只有当系统依赖 `round_tasks` 精准推动第 8、9 轮时，回滚缺失才导致错位。
-
-#### 修复细节
-
-- **新增 `refund_round_progress()`**：在 `refund_iteration()` 之外同步回退 `execute_rounds` 与 `non_schema_exec_rounds`，确保本轮失败不会影响下一轮提示（@demo/backend.py#1494-1511）。
-- **在所有关键“退票”路径调用**：如代码执行报错、伪造 `<Execute>`、缺少 `<Code>`、SQL 字段错误等处，`refund_iteration()` 之后立即调用 `refund_round_progress(is_schema_code)`，确保计数一致。
-
-#### 验证与回归计划
-
-1. 重启后端服务，重新跑 Student Loan 流程。
-2. 观察 `generated/execute_round_7.txt`：失败后是否仍提示继续第 7 轮（而非跳到第 8 轮）。
-3. 确认第 8 轮提示仅在多表成功或系统判定“必须继续”时才注入。
-4. 若仍提前进入 README 任务，请附上新的 `execute_round_*.txt` 与 `backend.log`，进一步定位。
 
 **修复逻辑**：
 - 保留 `answer_requested` 机制的灵活性
