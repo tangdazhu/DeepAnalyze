@@ -1606,6 +1606,7 @@ def bot_stream(messages, workspace, session_id="default"):
     ):
         raw_iterations += 1
         iteration += 1
+        current_round = execute_rounds + 1
         premature_answer_detected = False
         logger.info(
             f"[bot_stream] session={session_id} iteration={iteration} raw={raw_iterations} starting, messages={len(messages)}"
