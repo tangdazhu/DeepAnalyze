@@ -421,6 +421,9 @@ from pathlib import Path
 from datetime import datetime
 import json
 
+# ⚠️ 本轮禁止连接 SQLite 或执行 SQL，只能遍历 generated/ 目录的文件。
+# ⚠️ 如需数据，请直接读取 generated/ 下已生成的 CSV/PNG/TXT。
+
 OUTPUT_DIR = Path("generated")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -528,6 +531,7 @@ print(f"📊 记录了 {len(csv_files)} 个CSV文件, {len(png_files)} 个PNG文
 - 记录文件名和大小信息
 - 为每轮分析添加说明
 - 为阶段2提供清晰的文件索引
+- ❌ 禁止引用 DB_PATH、sqlite3、SQL 查询；本轮只允许使用 pathlib/os/json 等文件操作
 
 ### 8. 第 9 轮：输出最终答案
 
