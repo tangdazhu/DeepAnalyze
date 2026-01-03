@@ -1,37 +1,30 @@
 import contextlib
+import http.server
 import io
 import json
+import logging
 import os
 import re
 import shutil
-import sqlite3
-import subprocess
-import sys
-import tempfile
-import logging
-from pathlib import Path
-from typing import Iterable
-
-import openai
-import subprocess
-import sys
-import tempfile
-import requests
-import threading
-import http.server
-from functools import partial
 import socketserver
 import sqlite3
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Query, Body
-from fastapi.responses import JSONResponse, Response, StreamingResponse
-from fastapi.middleware.cors import CORSMiddleware
-from typing import List, Optional, Dict, Tuple
+import subprocess
+import sys
+import tempfile
+import textwrap
+import threading
 from collections import defaultdict
+from functools import partial
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Optional, Tuple
+
 import httpx
+import openai
+import requests
 import uvicorn
-import os
-import re
-import json
+from fastapi import Body, FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from copy import deepcopy
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -1832,68 +1825,301 @@ def bot_stream(messages, workspace, session_id="default"):
                 if empty_retry < 3:
                     # 根据当前轮次给出具体指导
                     next_round = execute_rounds + 1
-                    if next_round == 2:
-                        table_hint = "enrolled（必须分析字段：name, school, month）"
-                        file_hint = "enrolled_summary.csv, enrolled_school_dist.png"
-                    elif next_round == 3:
-                        table_hint = "no_payment_due（必须分析字段：name, bool）"
-                        file_hint = (
-                            "no_payment_due_summary.csv, no_payment_due_bool_dist.png"
-                        )
-                    elif next_round == 4:
-                        table_hint = (
-                            "longest_absense_from_school（必须分析字段：name, month）"
-                        )
-                        file_hint = "longest_absense_summary.csv, longest_absense_month_dist.png"
-                    elif next_round == 5:
-                        table_hint = "enlist（必须分析字段：name, organ）"
-                        file_hint = "enlist_summary.csv, enlist_organ_dist.png"
-                    elif next_round == 6:
-                        table_hint = "disabled（必须分析字段：name）"
-                        file_hint = "disabled_summary.csv, disabled_count.png"
-                    elif next_round == 7:
-                        table_hint = "多表关联分析（JOIN enrolled, no_payment_due, disabled 等表）"
-                        file_hint = (
-                            "multi_table_join_result.csv, correlation_analysis.png"
-                        )
-                    elif next_round == 8:
-                        table_hint = "生成单表分析 HTML 报告"
-                        file_hint = "single_table_analysis.html"
-                    elif next_round == 9:
-                        table_hint = "生成多表关联 HTML 报告"
-                        file_hint = "multi_table_analysis.html"
-                    else:
-                        table_hint = "完成剩余分析或输出最终 <Answer>"
-                        file_hint = "根据任务要求生成相应文件"
+                    round_retry_configs: dict[int, dict[str, str]] = {
+                        2: {
+                            "title": "enrolled.csv（字段：name, school, month）→ enrolled_summary.csv + enrolled_school_dist.png",
+                            "guidance": "严格使用第 1 轮提供的 CSV 绝对路径，输出 1 个 CSV + 1 张 PNG。",
+                            "mode": "code",
+                            "analyze": "第 2 轮：分析 enrolled.csv 的学校分布",
+                            "code": textwrap.dedent(
+                                """\
+<Code>
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from pathlib import Path
 
-                    retry_prompt = (
-                        f"⚠️ 检测到第 {next_round} 轮输出为空（已重试 {empty_retry}/3 次）。\n\n"
-                        f"**🔴 强制要求：立即开始第 {next_round} 轮分析 🔴**\n\n"
-                        f"**第 {next_round} 轮任务**：\n"
-                        f"- 必须分析的表/任务：{table_hint}\n"
-                        f"- 必须生成的文件：{file_hint}\n\n"
-                        "**⚡ 立即输出以下格式（不要输出任何其他内容）**：\n\n"
-                        "<Analyze>\n"
-                        f"第 {next_round} 轮分析：{table_hint}\n"
-                        "</Analyze>\n\n"
-                        "<Code>\n"
-                        "import sqlite3\n"
-                        "import pandas as pd\n"
-                        "import matplotlib.pyplot as plt\n"
-                        "from pathlib import Path\n\n"
-                        "# 使用第1轮提供的数据库绝对路径\n"
-                        'DB_PATH = r"<从第1轮Bootstrap复制路径>"\n'
-                        'OUTPUT_DIR = Path("generated")\n'
-                        "OUTPUT_DIR.mkdir(parents=True, exist_ok=True)\n\n"
-                        "# 编写完整可执行代码\n"
-                        "</Code>\n\n"
-                        f"**❌ 禁止行为**：\n"
-                        f"- 禁止返回空响应\n"
-                        f"- 禁止跳过第 {next_round} 轮\n"
-                        f"- 禁止输出任何解释或等待指令\n"
-                        f"- 禁止提前输出 <Answer>\n\n"
-                        f"**✅ 必须行为**：立即输出完整的 <Analyze> 和 <Code> 标签"
+CSV_PATH = r"<第 1 轮提供的 enrolled.csv 绝对路径>"
+OUTPUT_DIR = Path("generated")
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+df = pd.read_csv(CSV_PATH)
+summary = df.describe(include="all").transpose().reset_index()
+summary.to_csv(OUTPUT_DIR / "enrolled_summary.csv", index=False, encoding="utf-8")
+
+plt.figure(figsize=(8, 4))
+sns.countplot(y="school", data=df, order=df["school"].value_counts().index[:15])
+plt.tight_layout()
+plt.savefig(OUTPUT_DIR / "enrolled_school_dist.png", dpi=120)
+plt.close()
+</Code>
+"""
+                            ),
+                        },
+                        3: {
+                            "title": "no_payment_due.csv（字段：name, bool）→ payment_status_summary.csv + payment_status_dist.png",
+                            "guidance": "bool 为 'pos'/'neg'，先做 value_counts 再绘图。",
+                            "mode": "code",
+                            "analyze": "第 3 轮：分析 no_payment_due.csv 的还款状态",
+                            "code": textwrap.dedent(
+                                """\
+<Code>
+import pandas as pd
+import matplotlib.pyplot as plt
+from pathlib import Path
+
+CSV_PATH = r"<第 1 轮提供的 no_payment_due.csv 绝对路径>"
+OUTPUT_DIR = Path("generated")
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+df = pd.read_csv(CSV_PATH)
+counts = df["bool"].value_counts().reset_index()
+counts.columns = ["status", "count"]
+counts.to_csv(OUTPUT_DIR / "payment_status_summary.csv", index=False, encoding="utf-8")
+
+plt.figure(figsize=(6, 4))
+plt.bar(counts["status"], counts["count"])
+plt.tight_layout()
+plt.savefig(OUTPUT_DIR / "payment_status_dist.png", dpi=120)
+plt.close()
+</Code>
+"""
+                            ),
+                        },
+                        4: {
+                            "title": "longest_absense_from_school.csv（字段：name, month）→ absense_summary.csv + absense_month_dist.png",
+                            "guidance": "month 转数值，输出描述统计 + 直方图。",
+                            "mode": "code",
+                            "analyze": "第 4 轮：分析缺勤月份分布",
+                            "code": textwrap.dedent(
+                                """\
+<Code>
+import pandas as pd
+import matplotlib.pyplot as plt
+from pathlib import Path
+
+CSV_PATH = r"<第 1 轮提供的 longest_absense_from_school.csv 绝对路径>"
+OUTPUT_DIR = Path("generated")
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+df = pd.read_csv(CSV_PATH)
+df["month"] = pd.to_numeric(df["month"], errors="coerce").fillna(0)
+df.describe(include="all").to_csv(OUTPUT_DIR / "absense_summary.csv", encoding="utf-8")
+
+plt.figure(figsize=(8, 4))
+plt.hist(df["month"], bins=12)
+plt.tight_layout()
+plt.savefig(OUTPUT_DIR / "absense_month_dist.png", dpi=120)
+plt.close()
+</Code>
+"""
+                            ),
+                        },
+                        5: {
+                            "title": "enlist.csv（字段：name, organ）→ enlist_summary.csv + enlist_organ_dist.png",
+                            "guidance": "依旧只允许 CSV，统计 organ 频次并绘图。",
+                            "mode": "code",
+                            "analyze": "第 5 轮：分析 enlist.csv 的 organ 分布",
+                            "code": textwrap.dedent(
+                                """\
+<Code>
+import pandas as pd
+import matplotlib.pyplot as plt
+from pathlib import Path
+
+CSV_PATH = r"<第 1 轮提供的 enlist.csv 绝对路径>"
+OUTPUT_DIR = Path("generated")
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+df = pd.read_csv(CSV_PATH)
+counts = df["organ"].value_counts().reset_index()
+counts.columns = ["organ", "count"]
+counts.to_csv(OUTPUT_DIR / "enlist_summary.csv", index=False, encoding="utf-8")
+
+plt.figure(figsize=(10, 5))
+plt.bar(counts["organ"], counts["count"])
+plt.xticks(rotation=45, ha="right")
+plt.tight_layout()
+plt.savefig(OUTPUT_DIR / "enlist_organ_dist.png", dpi=120)
+plt.close()
+</Code>
+"""
+                            ),
+                        },
+                        6: {
+                            "title": "disabled.csv（字段：name）→ disabled_count.csv + disabled_vs_total.png",
+                            "guidance": "统计 name 频次即可，输出 CSV+条形图。",
+                            "mode": "code",
+                            "analyze": "第 6 轮：统计 disabled.csv",
+                            "code": textwrap.dedent(
+                                """\
+<Code>
+import pandas as pd
+import matplotlib.pyplot as plt
+from pathlib import Path
+
+CSV_PATH = r"<第 1 轮提供的 disabled.csv 绝对路径>"
+OUTPUT_DIR = Path("generated")
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+df = pd.read_csv(CSV_PATH)
+counts = df["name"].value_counts().reset_index()
+counts.columns = ["name", "count"]
+counts.to_csv(OUTPUT_DIR / "disabled_count.csv", index=False, encoding="utf-8")
+
+plt.figure(figsize=(6, 4))
+plt.bar(counts["name"], counts["count"])
+plt.tight_layout()
+plt.savefig(OUTPUT_DIR / "disabled_vs_total.png", dpi=120)
+plt.close()
+</Code>
+"""
+                            ),
+                        },
+                        7: {
+                            "title": "SQLite 多表 JOIN → multi_table_join_result.csv + multi_table_join_result.png",
+                            "guidance": "必须使用 sqlite3 JOIN，'pos'/'neg' 需映射为 0/1，禁止复用旧 CSV。",
+                            "mode": "code",
+                            "analyze": "第 7 轮：多表关联分析",
+                            "code": textwrap.dedent(
+                                '''\
+<Code>
+import sqlite3
+import pandas as pd
+import matplotlib.pyplot as plt
+from pathlib import Path
+
+DB_PATH = r"<第 1 轮提供的 student_loan.sqlite 绝对路径>"
+OUTPUT_DIR = Path("generated")
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+query = """
+SELECT e.name,
+       e.school,
+       e.month AS enrolled_month,
+       n.bool AS payment_flag_raw,
+       l.month AS absence_month,
+       d.name AS disabled_flag
+FROM enrolled e
+LEFT JOIN no_payment_due n ON e.name = n.name
+LEFT JOIN longest_absense_from_school l ON e.name = l.name
+LEFT JOIN disabled d ON e.name = d.name
+"""
+
+with sqlite3.connect(DB_PATH, timeout=30) as conn:
+    conn.execute("PRAGMA busy_timeout = 30000;")
+    df = pd.read_sql_query(query, conn)
+
+df["payment_flag"] = df["payment_flag_raw"].eq("pos").astype(int)
+df.to_csv(OUTPUT_DIR / "multi_table_join_result.csv", index=False, encoding="utf-8")
+
+plt.figure(figsize=(8, 4))
+plt.scatter(df["absence_month"].fillna(0), df["payment_flag"])
+plt.tight_layout()
+plt.savefig(OUTPUT_DIR / "multi_table_join_result.png", dpi=150)
+plt.close()
+</Code>
+'''
+                            ),
+                        },
+                        8: {
+                            "title": "遍历 generated/ 目录生成 README.md 索引",
+                            "guidance": "禁止执行 SQL，统计需覆盖 README 自身和所有 execute_round_*.txt。",
+                            "mode": "code",
+                            "analyze": "第 8 轮：生成 README.md 索引",
+                            "code": textwrap.dedent(
+                                """\
+<Code>
+from pathlib import Path
+
+OUTPUT_DIR = Path("generated")
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+files = sorted(p for p in OUTPUT_DIR.iterdir() if p.is_file())
+html_files = [p.name for p in files if p.suffix.lower() == ".html"]
+csv_files = [p.name for p in files if p.suffix.lower() == ".csv"]
+other_files = [
+    p.name
+    for p in files
+    if p.suffix.lower() not in {".html", ".csv"}
+]
+
+execute_files = [name for name in other_files if name.startswith("execute_round_")]
+if "README.md" not in other_files:
+    other_files.append("README.md (本文件)")
+
+summary_lines = [
+    "# 生成文件目录",
+    "",
+    f"- 总文件数: {len(files) + (1 if 'README.md (本文件)' in other_files else 0)}",
+    f"- HTML 文件: {len(html_files)}",
+    f"- CSV 文件: {len(csv_files)}",
+    f"- 其他文件: {len(other_files)}",
+    "",
+    "### HTML 报告",
+    "; ".join(html_files) if html_files else "无",
+    "",
+    "### CSV 数据文件",
+    "; ".join(csv_files) if csv_files else "无",
+    "",
+    "### 其他文件",
+    "; ".join(sorted(other_files)) if other_files else "无",
+]
+
+(OUTPUT_DIR / "README.md").write_text("\n".join(summary_lines), encoding="utf-8")
+</Code>
+"""
+                            ),
+                        },
+                        9: {
+                            "title": "仅输出 `<Answer>` 总结所有轮次结果（禁止 <Analyze>/<Code>）",
+                            "guidance": "引用真实生成的 CSV/PNG/README 等文件，总结至少 2 条定量结论并给出建议。",
+                            "mode": "answer",
+                            "analyze": "",
+                            "code": "",
+                        },
+                    }
+
+                    retry_cfg = round_retry_configs.get(next_round)
+                    if retry_cfg:
+                        if retry_cfg["mode"] == "answer":
+                            retry_prompt = (
+                                f"⚠️ 检测到第 {next_round} 轮输出为空（已重试 {empty_retry}/3 次）。\n\n"
+                                f"**第 {next_round} 轮任务**：{retry_cfg['title']}\n\n"
+                                f"{retry_cfg['guidance']}\n\n"
+                                "**⚡ 立即输出以下格式（不要输出任何其他内容）**：\n\n"
+                                "<Answer>\n"
+                                "1. 数据概况……\n"
+                                "2. 关键发现……\n"
+                                "3. 后续建议……\n"
+                                "</Answer>"
+                            )
+                        else:
+                            retry_prompt = (
+                                f"⚠️ 检测到第 {next_round} 轮输出为空（已重试 {empty_retry}/3 次）。\n\n"
+                                f"**第 {next_round} 轮任务**：{retry_cfg['title']}\n\n"
+                                f"{retry_cfg['guidance']}\n\n"
+                                "**⚡ 立即输出以下格式（不要输出任何其他内容）**：\n\n"
+                                "<Analyze>\n"
+                                f"{retry_cfg['analyze']}\n"
+                                "</Analyze>\n\n"
+                                f"{retry_cfg['code']}\n\n"
+                            )
+                    else:
+                        retry_prompt = (
+                            f"⚠️ 检测到第 {next_round} 轮输出为空（已重试 {empty_retry}/3 次）。\n\n"
+                            "请继续完成剩余分析或输出最终 <Answer>。"
+                        )
+
+                    retry_prompt += (
+                        "\n\n**❌ 禁止行为**：\n"
+                        "- 禁止返回空响应\n"
+                        "- 禁止跳过本轮任务\n"
+                        "- 禁止输出无关解释或等待指令\n"
+                        "- 禁止提前输出 <Answer>\n\n"
+                        "**✅ 必须行为**：立即按照上方模板输出完整内容"
                     )
+
                     messages.append({"role": "user", "content": retry_prompt})
                     refund_iteration()  # 关键：退还迭代计数
                     continue

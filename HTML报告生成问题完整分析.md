@@ -58,6 +58,24 @@
 > 结论：随着上游缺陷被修复，提示词与 backend 的历史差异被放大成新的回归，需要统一来源并在日志中校验提示内容。
 
 ---
+## 新增修复（2026-01-03）
+
+### 1. 后端回退提示同步 9 轮任务
+- **问题**：`bot_stream` 在空响应或回退时仍注入旧的 10 轮/HTML 指令，导致模型重复执行 bootstrap，甚至重新运行 HTML 任务。
+- **修复**：重新实现 `round_retry_configs`，为第 2-9 轮提供与提示词一致的 `<Analyze>/<Code>` 模板，第 7 轮模板包含正确的 SQLite JOIN 代码与 `'pos'/'neg'` 映射，第 8 轮示例遍历 `generated/` 统计 README，自第 9 轮起仅输出 `<Answer>`。（@demo/backend.py#1820-2125）
+- **影响**：回退提示与真实轮次保持一致，不再触发旧 bootstrap/HTML 任务，模型可以按 9 轮流程恢复执行。
+
+### 2. 提示词第 7/8/9 轮要求完善
+- **问题**：第 7 轮缺乏导入与布尔转换约束，第 8 轮未要求 README 统计自身/`execute_round_*.txt`，第 9 轮未强调只能输出 `<Answer>`。
+- **修复**：更新 `prompt_complete.txt` 第 7-9 轮描述：  
+  1. 第 7 轮强调导入顺序、JOIN 使用、`eq("pos").astype(int)` 映射及禁止复用旧 CSV；  
+  2. 第 8 轮要求 README 统计覆盖 README 自身与所有 `execute_round_*.txt`，标题固定为 `# 生成文件目录`；  
+  3. 第 9 轮仅允许输出 `<Answer>`，需引用真实产物并说明失败轮次。（@example/analysis_on_student_loan/prompt_complete.txt#632-661）
+- **影响**：模型在关键轮次获得明确约束，README 统计与 `generated/` 目录保持一致，最终答案只会在完成前 8 轮后输出。
+
+> 目前尚未重新跑全链路回归，后续需确认 round 7/8/9 均能顺利产出期望文件与 `<Answer>`。
+
+---
 ## 根本原因分析
 
 ### 1. 提前终止的技术原因
