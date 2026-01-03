@@ -3145,68 +3145,6 @@ summary_lines = [
                     if answer_requested:
                         answer_waiting_rounds = 0
 
-                    # 修复22增强: 在非bootstrap代码执行成功后,添加正确的轮次任务提示
-                    if not is_schema_code:
-                        next_round = execute_rounds + 1
-                        round_tasks = {
-                            2: {
-                                "desc": "分析 enrolled.csv (字段: name, school, month) → 生成 enrolled_summary.csv + enrolled_school_dist.png",
-                                "guidance": "直接输出 <Analyze> 和 <Code>，按照 CSV 模板读取 enrolled.csv，生成 1 个 CSV + 1 个 PNG。",
-                            },
-                            3: {
-                                "desc": "分析 no_payment_due.csv (字段: name, bool) → 生成 payment_status_summary.csv + payment_status_dist.png",
-                                "guidance": "直接输出 <Analyze> 和 <Code>，仅使用 CSV 路径 no_payment_due.csv。",
-                            },
-                            4: {
-                                "desc": "分析 longest_absense_from_school.csv (字段: name, month) → 生成 absense_summary.csv + absense_month_dist.png",
-                                "guidance": "直接输出 <Analyze> 和 <Code>，按 CSV 模板完成统计+可视化。",
-                            },
-                            5: {
-                                "desc": "分析 enlist.csv (字段: name, organ) → 生成 enlist_summary.csv + enlist_organ_dist.png",
-                                "guidance": "直接输出 <Analyze> 和 <Code>，确保写入 generated/。",
-                            },
-                            6: {
-                                "desc": "分析 disabled.csv (字段: name) → 生成 disabled_count.csv + disabled_vs_total.png",
-                                "guidance": "直接输出 <Analyze> 和 <Code>，统计 disabled.csv。",
-                            },
-                            7: {
-                                "desc": "使用 SQLite 进行多表关联分析 → 生成 multi_table_join_result.csv + 可视化结果",
-                                "guidance": "直接输出 <Analyze> 和 <Code>，使用 sqlite3.connect(DB_PATH) 完成关联分析。",
-                            },
-                            8: {
-                                "desc": "生成 README.md 索引文件 → 扫描 generated/ 下的 CSV/PNG/execute_round_X.txt 并写入说明",
-                                "guidance": (
-                                    "直接输出 <Analyze> 和 <Code>，脚本需遍历 generated/ 目录，统计所有文件并写入 generated/README.md。"
-                                ),
-                            },
-                            9: {
-                                "desc": "输出 <Answer> 总结所有分析结果与关键发现",
-                                "guidance": (
-                                    "本轮只允许输出 <Answer>，总结 2+ 条定量结论、失败轮次说明、后续建议。⚠️ 禁止再输出 <Analyze>/<Code>。"
-                                ),
-                            },
-                        }
-
-                        if 2 <= next_round <= 9 and next_round in round_tasks:
-                            task = round_tasks[next_round]
-                            if next_round == 9:
-                                continue_prompt = (
-                                    f"✅ 已完成第 {execute_rounds} 轮。\n\n"
-                                    f"⚡ 立即开始第 9 轮总结，不要等待指令。\n\n"
-                                    f"**第 9 轮任务**：{task['desc']}\n\n"
-                                    f"{task['guidance']}"
-                                )
-                            else:
-                                continue_prompt = (
-                                    f"✅ 已完成第 {execute_rounds} 轮。\n\n"
-                                    f"⚡ 立即开始第 {next_round} 轮分析（不要等待指令，不要输出任何解释）。\n\n"
-                                    f"**第 {next_round} 轮任务**：{task['desc']}\n\n"
-                                    f"{task['guidance']}"
-                                )
-                            messages.append(
-                                {"role": "user", "content": continue_prompt}
-                            )
-
                     # 检测代码执行错误：只要有 Traceback/Error/Exception 就警告模型
                     # 不管是否生成了文件，因为部分成功的代码仍可能包含严重错误
                     if not is_schema_code and non_schema_exec_rounds > 0:
@@ -3283,6 +3221,73 @@ summary_lines = [
                         )
                         refund_iteration()  # 退还迭代计数，避免伪造输出被计入有效迭代
                         continue
+
+                    # 修复22增强: 仅在代码完全通过校验后再注入下一轮任务提示
+                    if not is_schema_code:
+                        next_round = execute_rounds + 1
+                        round_tasks = {
+                            2: {
+                                "desc": "分析 enrolled.csv (字段: name, school, month) → 生成 enrolled_summary.csv + enrolled_school_dist.png",
+                                "guidance": "直接输出 <Analyze> 和 <Code>，按照 CSV 模板读取 enrolled.csv，生成 1 个 CSV + 1 个 PNG。",
+                            },
+                            3: {
+                                "desc": "分析 no_payment_due.csv (字段: name, bool) → 生成 payment_status_summary.csv + payment_status_dist.png",
+                                "guidance": "直接输出 <Analyze> 和 <Code>，仅使用 CSV 路径 no_payment_due.csv。",
+                            },
+                            4: {
+                                "desc": "分析 longest_absense_from_school.csv (字段: name, month) → 生成 absense_summary.csv + absense_month_dist.png",
+                                "guidance": "直接输出 <Analyze> 和 <Code>，按 CSV 模板完成统计+可视化。",
+                            },
+                            5: {
+                                "desc": "分析 enlist.csv (字段: name, organ) → 生成 enlist_summary.csv + enlist_organ_dist.png",
+                                "guidance": "直接输出 <Analyze> 和 <Code>，确保写入 generated/。",
+                            },
+                            6: {
+                                "desc": "分析 disabled.csv (字段: name) → 生成 disabled_count.csv + disabled_vs_total.png",
+                                "guidance": "直接输出 <Analyze> 和 <Code>，统计 disabled.csv。",
+                            },
+                            7: {
+                                "desc": "使用 SQLite 进行多表关联分析 → 生成 multi_table_join_result.csv + 可视化结果",
+                                "guidance": "直接输出 <Analyze> 和 <Code>，使用 sqlite3.connect(DB_PATH) 完成关联分析。",
+                            },
+                            8: {
+                                "desc": "生成 README.md 索引文件 → 扫描 generated/ 下的 CSV/PNG/execute_round_X.txt 并写入说明",
+                                "guidance": (
+                                    "直接输出 <Analyze> 和 <Code>，脚本需遍历 generated/ 目录，统计所有文件并写入 generated/README.md。"
+                                ),
+                            },
+                            9: {
+                                "desc": "输出 <Answer> 总结所有分析结果与关键发现",
+                                "guidance": (
+                                    "本轮只允许输出 <Answer>，总结 2+ 条定量结论、失败轮次说明、后续建议。⚠️ 禁止再输出 <Analyze>/<Code>。"
+                                ),
+                            },
+                        }
+
+                        if 2 <= next_round <= 9 and next_round in round_tasks:
+                            task = round_tasks[next_round]
+                            if next_round == 9:
+                                continue_prompt = (
+                                    f"✅ 已完成第 {execute_rounds} 轮。\n\n"
+                                    f"⚡ 立即开始第 9 轮总结，不要等待指令。\n\n"
+                                    f"**第 9 轮任务**：{task['desc']}\n\n"
+                                    f"{task['guidance']}"
+                                )
+                            else:
+                                continue_prompt = (
+                                    f"✅ 已完成第 {execute_rounds} 轮。\n\n"
+                                    f"⚡ 立即开始第 {next_round} 轮分析（不要等待指令，不要输出任何解释）。\n\n"
+                                    f"**第 {next_round} 轮任务**：{task['desc']}\n\n"
+                                    f"{task['guidance']}"
+                                )
+                            logger.info(
+                                "[bot_stream] Injecting continue prompt for round %s: %.120s",
+                                next_round,
+                                continue_prompt.replace("\n", " ")[:120],
+                            )
+                            messages.append(
+                                {"role": "user", "content": continue_prompt}
+                            )
                     if (
                         execute_rounds >= ANSWER_MIN_EXEC_ROUNDS
                         and non_schema_exec_rounds >= ANSWER_MIN_NON_SCHEMA_ROUNDS
