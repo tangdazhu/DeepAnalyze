@@ -2557,6 +2557,8 @@ summary_lines = [
                         refund_iteration()
                         continue
 
+                    target_round = execute_rounds + 1
+
                     # Round 2-6 必须严格按 CSV 模板执行，不得触发 SQLite
                     if 2 <= target_round <= 6:
                         if not uses_csv:
