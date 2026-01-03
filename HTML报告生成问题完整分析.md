@@ -16,8 +16,48 @@
 - 第 3 轮后模型直接输出 `<Answer>` 标签
 - 后续轮次未执行，HTML 报告未生成
 
----
 
+## 追加问题：README.md 生成回归（2026-01-02）
+
+### 现象
+
+- 近期回归测试中，流程在第 7 轮完成后进入“重复输出 `<Analyze>` / `<Code>`”循环，迟迟无法进入第 8 轮 README 生成。
+- `backend.log` 显示连续告警：“你已连续 1 轮未输出 `<Code>`”、“Detected duplicate `<Analyze>` signature”，并在 round=8 再次提示“missing file output (CSV/PNG)”。
+- `generated/` 目录存在第 2-7 轮 CSV/PNG 产物，但始终缺少 `README.md`、`execute_round_8.txt` 和 round 9 最终 `<Answer>`。
+
+### 根本原因
+
+1. **后端文件输出校验未豁免 README 轮**  
+   `bot_stream` 将 round 8 当作普通分析轮处理，仍要求代码包含 `.to_csv(` 或 `.savefig(`。然而 README 轮的任务仅需遍历文件系统写 Markdown，自然不会生成 CSV/PNG，于是被强制退票，导致轮次无法推进。@demo/backend.py#2672-2701
+
+2. **第 7 轮提示词缺少硬性导入要求**  
+   Prompt 中只描述了“使用 SQL JOIN”，未明确“pandas/matplotlib/sqlite3 导入必须保留”。模型经常在第 7 轮漏写 `import pandas as pd`，触发“Code rejected: missing imports ['import pandas as pd']”回滚，进一步放大重复 `<Analyze>` 检测的概率。@example/analysis_on_student_loan/prompt_complete.txt#632-655
+
+### 修复措施
+
+1. **后端豁免 README 文件输出检查**  
+   在 `non_schema_exec_rounds > 0` 的校验中新增 `current_round == 8` 分支：README 轮只需写 Markdown，无需输出 CSV/PNG。日志中会记录“File output check skipped for README round”，避免误判。@demo/backend.py#2672-2701
+
+2. **强化第 7/8 轮提示词指令**  
+   - 第 7 轮新增“代码必须以 `import sqlite3` / `import pandas as pd` / `import matplotlib.pyplot as plt` 开头，必须先执行 SQL JOIN，再写 CSV + PNG，不得直接读历史 CSV”的硬性条款。  
+   - 第 8 轮明确“仅遍历 `generated/` 目录生成 Markdown，允许只写 README.md，禁止 SQL/绘图”，并要求 README 标题格式统一。@example/analysis_on_student_loan/prompt_complete.txt#632-655
+
+### 验证与影响
+
+- 修改后，round 8 会直接执行 README 代码，无需额外产物；round 9 仍需输出 `<Answer>`，流程总轮次不变。
+- 第 7 轮缺导入的场景在提示层被提前约束，减少因导入缺失触发的回滚；若模型仍违规，后端的“missing imports”拦截依旧生效。
+- 由于仅放宽 README 轮的文件输出要求，对 round 2-7 的 CSV/PNG 强制检查不会受影响，整体产物集仍可完全复现。
+
+### 为何此前未发现该回归
+
+- **旧缺陷屏蔽了新问题**：在 2025 年底我们尚未修复 round 7 SQL/导入、README 文件检测等阻塞点，流程通常在第 7 轮前就终止，无法进入 README 轮，自然观察不到 prompt 注入错轮的情况。
+- **提示词/后端双轨维护**：round task 描述分别散落在 `prompt_complete.txt` 和 `backend.py`，长期没有统一来源。之前即便被回滚，旧提示仍然让模型继续“10 轮 HTML”路径，与当时尚未启用的 README 任务并不冲突。
+- **缺少对“回滚提示内容”的监控**：日志只记录了轮次/执行结果，没有校验“注入提示是否与当前轮一致”，导致“student 表分析”这种旧模板重现时没有告警。
+- **回归测试覆盖不足**：最近才开始跑到 round 7 的整链路回归，新的阻塞点（提示词与 backend 不一致）才暴露出来。
+
+> 结论：随着上游缺陷被修复，提示词与 backend 的历史差异被放大成新的回归，需要统一来源并在日志中校验提示内容。
+
+---
 ## 根本原因分析
 
 ### 1. 提前终止的技术原因
