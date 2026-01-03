@@ -564,21 +564,21 @@ print(f"📊 记录了 {len(csv_files)} 个CSV文件, {len(png_files)} 个PNG文
 **⚠️ 强制执行流程 - 必须严格按照以下顺序执行，禁止跳过或调整顺序 ⚠️**
 
 ### 第 2 轮（当前轮次）：分析 enrolled 表
-**任务**：分析 `enrolled` 表的学校分布
+**任务**：分析 `enrolled` 表的学校分布（**严禁使用 SQLite，必须走 `pd.read_csv()`**）
 **表名**：`enrolled`
 **字段**：name, school, month
 **输出文件**：
-- `enrolled_summary.csv`
-- `enrolled_school_dist.png`
+- `enrolled_summary.csv`（必须写入 `generated/`，文件名不可改）
+- `enrolled_school_dist.png`（必须写入 `generated/`，文件名不可改）
 
 **完成标准**：
-- ✅ 生成 enrolled_summary.csv
-- ✅ 生成 enrolled_school_dist.png
+- ✅ 生成 `enrolled_summary.csv`
+- ✅ 生成 `enrolled_school_dist.png`
 - ✅ **完成后立即进入第 3 轮,分析 no_payment_due 表**
 - ❌ **禁止继续分析 enrolled 表的其他维度**
 
 ### 第 3 轮：分析 no_payment_due 表
-**任务**：分析 `no_payment_due` 表的还款状态分布
+**任务**：分析 `no_payment_due` 表的还款状态分布（**只允许 CSV 读取，不得连 SQLite**）
 **表名**：`no_payment_due`
 **字段**：name, bool
 **输出文件**：
@@ -591,7 +591,7 @@ print(f"📊 记录了 {len(csv_files)} 个CSV文件, {len(png_files)} 个PNG文
 - ✅ **完成后立即进入第 4 轮,分析 longest_absense_from_school 表**
 
 ### 第 4 轮：分析 longest_absense_from_school 表
-**任务**：分析 `longest_absense_from_school` 表的缺勤时长分布
+**任务**：分析 `longest_absense_from_school` 表的缺勤时长分布（**严禁 SQLite**）
 **表名**：`longest_absense_from_school`
 **字段**：name, month
 **输出文件**：
@@ -604,7 +604,7 @@ print(f"📊 记录了 {len(csv_files)} 个CSV文件, {len(png_files)} 个PNG文
 - ✅ **完成后立即进入第 5 轮,分析 enlist 表**
 
 ### 第 5 轮：分析 enlist 表
-**任务**：分析 `enlist` 表的服役单位分布
+**任务**：分析 `enlist` 表的服役单位分布（**只准 CSV → pandas → PNG**）
 **表名**：`enlist`
 **字段**：name, organ
 **输出文件**：
@@ -617,7 +617,7 @@ print(f"📊 记录了 {len(csv_files)} 个CSV文件, {len(png_files)} 个PNG文
 - ✅ **完成后立即进入第 6 轮,分析 disabled 表**
 
 ### 第 6 轮：分析 disabled 表
-**任务**：统计 `disabled` 表的残疾学生数量
+**任务**：统计 `disabled` 表的残疾学生数量（**依旧只能读 CSV，不可引用 SQLite**）
 **表名**：`disabled`
 **字段**：name
 **输出文件**：
@@ -632,12 +632,12 @@ print(f"📊 记录了 {len(csv_files)} 个CSV文件, {len(png_files)} 个PNG文
 ### 第 7 轮：多表关联分析
 **任务**：使用 SQLite JOIN 关联 `enrolled` / `no_payment_due` / `longest_absense_from_school` / `enlist` / `disabled` 等表，输出 1 个 CSV + 1 张 PNG  
 **输出文件**：  
-- `multi_table_join_result.csv`  
-- `multi_table_join_result.png`  
+- `multi_table_join_result.csv`（必须为此文件名）  
+- `multi_table_join_result.png`（文件名必须与 CSV 对应，不得改为其他名字）  
 
 **写作要求（务必遵守）**：  
 1. 代码必须以 `import sqlite3`, `import pandas as pd`, `import matplotlib.pyplot as plt`, `from pathlib import Path` 开头，禁止遗漏导入。  
-2. 使用第 1 轮提供的 `DB_PATH`，通过 `sqlite3.connect(DB_PATH, timeout=30)` 建立连接，并执行 `PRAGMA busy_timeout = 30000`。  
+2. 使用第 1 轮提供的 `DB_PATH`，通过 `sqlite3.connect(DB_PATH, timeout=30)` 建立连接，并执行 `conn.execute("PRAGMA busy_timeout = 30000;")`。  
 3. JOIN 查询只能引用真实表/字段；若需布尔变量，使用 `CASE WHEN` 或 `Series.eq("pos").astype(int)` 将 `'pos'/'neg'` 映射为 0/1，严禁对字符串直接 `astype(int)`。  
 4. 同一段脚本中必须先执行 SQL JOIN 将结果写入 `generated/multi_table_join_result.csv`，再基于结果生成可视化 `multi_table_join_result.png`，最后 `plt.close()`。  
 5. 禁止读取旧的 `multi_table_join_result.csv` 做分析；必须重新执行 SQL。  
@@ -648,9 +648,10 @@ print(f"📊 记录了 {len(csv_files)} 个CSV文件, {len(png_files)} 个PNG文
 - `README.md`  
 
 **写作要求（务必遵守）**：  
-1. 仅使用文件系统操作，禁止执行 SQL 或绘图。允许只写 README.md，该轮豁免 CSV/PNG 输出检查。  
-2. 推荐使用 `pathlib.Path` 遍历目录，按 HTML/CSV/其他分类统计，**必须把 README.md 本身及所有 `execute_round_*.txt` 计入“其他文件”**。  
-3. README 须以 `# 生成文件目录` 为标题，包含“总体概览 + 各类型清单”，统计数字需与 `ls generated/` 一致。  
+1. 仅使用文件系统操作（`pathlib/os`），禁止执行 SQL 或绘图。允许只写 README.md，该轮豁免 CSV/PNG 输出检查。  
+2. README 必须以 `# 生成文件目录` 开头，并至少包含 `## HTML 报告 / ## CSV 数据文件 / ## 其他文件` 三个小节。  
+3. “其他文件”小节中必须列出本次 `README.md` 自身以及所有 `execute_round_*.txt`；描述需与目录数量一致。  
+4. 在正文中写出“共生成 X 个文件”的统计，X 需要与实际扫描数量一致。  
 
 ### 第 9 轮：输出最终答案
 **任务**：输出 `<Answer>` 标签，总结所有轮次成果  

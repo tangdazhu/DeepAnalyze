@@ -2557,6 +2557,31 @@ summary_lines = [
                         refund_iteration()
                         continue
 
+                    # Round 2-6 必须严格按 CSV 模板执行，不得触发 SQLite
+                    if 2 <= target_round <= 6:
+                        if not uses_csv:
+                            logger.warning(
+                                f"[bot_stream] Code rejected: round {target_round} missing CSV read"
+                            )
+                            csv_prompt = (
+                                f"第 {target_round} 轮必须使用 `pd.read_csv(第 1 轮提供的 CSV 绝对路径)` 完成分析，"
+                                "禁止跳过 CSV 读取或改用 SQLite。请参考提示词中的模板，先读取对应 CSV，再输出 summary CSV + PNG。"
+                            )
+                            messages.append({"role": "user", "content": csv_prompt})
+                            refund_iteration()
+                            continue
+                        if uses_sqlite:
+                            logger.warning(
+                                f"[bot_stream] Code rejected: round {target_round} should not connect SQLite"
+                            )
+                            sqlite_prompt = (
+                                f"第 {target_round} 轮属于 CSV 分析阶段，禁止使用 `sqlite3.connect` 或 SQL 查询。"
+                                "请删除 SQLite 相关代码，仅通过 pandas 读取 CSV 并输出统计结果。"
+                            )
+                            messages.append({"role": "user", "content": sqlite_prompt})
+                            refund_iteration()
+                            continue
+
                     if DDL_TABLE_PATTERN.search(normalized_code):
                         logger.warning(
                             f"[bot_stream] Code rejected: DDL operation detected"
@@ -2895,6 +2920,19 @@ summary_lines = [
                             refund_iteration()
                             continue
 
+                        if "pragma busy_timeout" not in normalized_code:
+                            logger.warning(
+                                "[bot_stream] Code rejected: round 7 missing PRAGMA busy_timeout"
+                            )
+                            busy_prompt = (
+                                "第 7 轮必须在连接 SQLite 后执行 "
+                                '`conn.execute("PRAGMA busy_timeout = 30000;")` 以保证查询稳定。'
+                                "请补充该语句后重新提交。"
+                            )
+                            messages.append({"role": "user", "content": busy_prompt})
+                            refund_iteration()
+                            continue
+
                     # 强制检查：第2轮起必须包含文件写入操作（README 轮除外）
                     if non_schema_exec_rounds > 0:  # 跳过首轮 schema 查询
                         if current_round == 8:
@@ -3066,6 +3104,29 @@ summary_lines = [
                         except Exception as e:
                             logger.error(f"Error copying modified file {p}: {e}")
 
+                    if current_round == 7:
+                        has_join_csv = any(
+                            Path(p).name == "multi_table_join_result.csv"
+                            for p in artifact_paths
+                        )
+                        has_join_png = any(
+                            Path(p).name == "multi_table_join_result.png"
+                            for p in artifact_paths
+                        )
+                        if not (has_join_csv and has_join_png):
+                            logger.warning(
+                                "[bot_stream] Round 7 outputs missing required filenames"
+                            )
+                            prompt = (
+                                "第 7 轮产物命名必须严格是 `multi_table_join_result.csv` 与 "
+                                "`multi_table_join_result.png`。请将 SQL 结果写入该 CSV，"
+                                "并使用相同命名前缀输出 PNG 后重新提交。"
+                            )
+                            messages.append({"role": "user", "content": prompt})
+                            refund_iteration()
+                            refund_round_progress(False)
+                            continue
+
                     if current_round == 8:
                         has_readme = any(
                             Path(p).name.lower() == "readme.md" for p in artifact_paths
@@ -3082,6 +3143,55 @@ summary_lines = [
                             refund_iteration()
                             refund_round_progress(False)
                             continue
+                        readme_path = next(
+                            (
+                                Path(p)
+                                for p in artifact_paths
+                                if Path(p).name.lower() == "readme.md"
+                            ),
+                            None,
+                        )
+                        if readme_path:
+                            try:
+                                readme_text = readme_path.read_text(encoding="utf-8")
+                            except Exception as err:
+                                logger.warning(
+                                    f"[bot_stream] Failed to read README.md for validation: {err}"
+                                )
+                                readme_text = ""
+                            sections_required = [
+                                "# 生成文件目录",
+                                "## HTML 报告",
+                                "## CSV 数据文件",
+                                "## 其他文件",
+                            ]
+                            missing_sections = [
+                                sec
+                                for sec in sections_required
+                                if sec not in readme_text
+                            ]
+                            has_execute_refs = "execute_round_" in readme_text
+                            has_self_ref = "README.md" in readme_text
+                            if (
+                                missing_sections
+                                or not has_execute_refs
+                                or not has_self_ref
+                            ):
+                                logger.warning(
+                                    "[bot_stream] README.md format validation failed in round 8"
+                                )
+                                detail_prompt = (
+                                    "生成的 README.md 未符合规范：\n"
+                                    "- 必须以 `# 生成文件目录` 开头，并包含 `## HTML 报告 / ## CSV 数据文件 / ## 其他文件` 三个小节；\n"
+                                    "- “其他文件”部分需列出 README.md 本身及所有 `execute_round_*.txt`。\n"
+                                    "请修正 README 内容后重新提交。"
+                                )
+                                messages.append(
+                                    {"role": "user", "content": detail_prompt}
+                                )
+                                refund_iteration()
+                                refund_round_progress(False)
+                                continue
 
                     exe_str = f"\n<Execute>\n```\n{exe_output}\n```\n</Execute>\n"
                     actual_files = {

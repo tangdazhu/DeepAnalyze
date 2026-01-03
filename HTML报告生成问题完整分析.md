@@ -75,6 +75,19 @@
 
 > 目前尚未重新跑全链路回归，后续需确认 round 7/8/9 均能顺利产出期望文件与 `<Answer>`。
 
+### 3. CSV 阶段被 SQLite 覆盖 & README 规范缺失
+- **问题**：
+  1. 最新会话中，第 2 轮仍重复执行 bootstrap 导出逻辑，提示“未找到 CSV”，并把整库导出到 `generated/*.csv`，说明提示词/后端没有强制 CSV 模板（参见 `execute_round_2.txt` 日志）。
+  2. 第 7 轮产物命名为 `multi_table_join_visualization.png`，且缺少 `PRAGMA busy_timeout`，违反硬性要求。
+  3. README.md 标题和章节与规范不一致，仅列 CSV/PNG/TXT，未统计 README 自身与 `execute_round_*.txt`。
+- **修复**：
+  1. 在 `prompt_complete.txt` 强化第 2-6 轮“只能读取 CSV，禁止 SQLite”，并明确写死产物命名；第 7 轮追加 `conn.execute("PRAGMA busy_timeout = 30000;")`、PNG 命名约束；第 8 轮规定 README 结构（三个二级标题、计入 execute_round 日志等）。@example/analysis_on_student_loan/prompt_complete.txt#566-654
+  2. 在 `backend.py` 内为代码校验新增三类规则：  
+     - Round 2-6 缺少 `pd.read_csv` 或混入 SQLite 直接退票；  
+     - Round 7 校验 `PRAGMA busy_timeout`、禁止复用旧 CSV，并在产物阶段确保输出严格命名的 CSV/PNG；  
+     - Round 8 读取 README 内容，若缺“# 生成文件目录”“## HTML 报告/## CSV 数据文件/## 其他文件”或未列出 README/execute_round，则退票。@demo/backend.py#2550-3182
+- **影响**：CSV 阶段不会再被 schema 导出脚本替代；多表关联产物统一命名，后续 README/最终总结能够引用固定文件；README.md 结构统一，可直接覆盖生成目录索引。
+
 ---
 ## 根本原因分析
 
