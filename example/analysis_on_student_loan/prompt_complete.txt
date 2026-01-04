@@ -596,11 +596,15 @@ print(f"📊 记录了 {len(csv_files)} 个CSV文件, {len(png_files)} 个PNG文
 
 ### 第 4 轮：分析 longest_absense_from_school 表
 **任务**：分析 `longest_absense_from_school` 表的缺勤时长分布（**严禁 SQLite**）
-**表名**：`longest_absense_from_school`
-**字段**：name, month
-**输出文件**：
-- `absense_summary.csv`
-- `absense_month_dist.png`
+**数据结构必读**：
+- CSV 仅有 `name` 与 `month` 两列，`month` 表示最长缺勤月数
+- 若需要 `absense`/`absense_month` 这样的语义字段，请显式派生：`df["absense_month"] = df["month"]` 或 `rename(columns={"month": "absense_month"})`
+- 禁止直接访问不存在的 `absense` 列；所有统计与绘图都应基于 `month` 或派生列
+
+**产出要求**：
+- `absense_summary.csv`：至少包含对 `month`（或映射列）的描述性统计
+- `absense_month_dist.png`：使用派生列绘制频数图，标题需说明 “Longest Absense Month Distribution”
+- 仍需 `plt.savefig(... 'absense_month_dist.png')` 与 `plt.close()`
 
 **完成标准**：
 - ✅ 生成 absense_summary.csv

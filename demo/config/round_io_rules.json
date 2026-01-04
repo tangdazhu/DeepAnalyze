@@ -24,6 +24,7 @@
       "round": 4,
       "mode": "csv_analysis",
       "input": {"type": "csv", "filename": "longest_absense_from_school.csv"},
+      "guidance": "longest_absense_from_school.csv 只有 name 与 month 两列。month 表示缺勤月份，若需要 absense/absense_month 字段，必须在 DataFrame 中由 month 派生或改名；禁止直接访问不存在的 absense 列。",
       "outputs": [
         {"type": "csv", "filename": "absense_summary.csv"},
         {"type": "png", "filename": "absense_month_dist.png"}
