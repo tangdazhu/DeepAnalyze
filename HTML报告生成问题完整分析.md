@@ -88,6 +88,11 @@
      - Round 8 读取 README 内容，若缺“# 生成文件目录”“## HTML 报告/## CSV 数据文件/## 其他文件”或未列出 README/execute_round，则退票。@demo/backend.py#2550-3182
 - **影响**：CSV 阶段不会再被 schema 导出脚本替代；多表关联产物统一命名，后续 README/最终总结能够引用固定文件；README.md 结构统一，可直接覆盖生成目录索引。
 
+### 4. Round 7 产物命名回退提示增强（2026-01-04）
+- **问题**：最新回归中模型依旧输出 `enlist_analysis.csv` / `enlist_distribution.png`，导致后端日志出现 `Round 7 outputs missing required filenames`，但模型看不到实际检测到的文件名，难以定位为何被退票。
+- **修复**：在 `backend.py` 的 Round 7 校验分支中添加 `produced_names` 记录，并将“本轮检测到的文件：xxx”拼接进提示语，帮助模型对照当前产物与规范名称的差异。@demo/backend.py#3112-3134
+- **影响**：当再次发生命名错误时，模型会立即收到“检测到 enlist_analysis.csv”等明确反馈，更容易改写 SQL/可视化脚本产出 `multi_table_join_result.*`，从而顺利推进到 README 轮。
+
 ---
 ## 根本原因分析
 

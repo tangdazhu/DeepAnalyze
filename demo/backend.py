@@ -3119,10 +3119,18 @@ summary_lines = [
                             logger.warning(
                                 "[bot_stream] Round 7 outputs missing required filenames"
                             )
+                            produced_names = sorted(
+                                {Path(p).name for p in artifact_paths} or []
+                            )
+                            produced_hint = "，本轮检测到的文件：" + (
+                                ", ".join(produced_names) if produced_names else "无"
+                            )
                             prompt = (
                                 "第 7 轮产物命名必须严格是 `multi_table_join_result.csv` 与 "
                                 "`multi_table_join_result.png`。请将 SQL 结果写入该 CSV，"
-                                "并使用相同命名前缀输出 PNG 后重新提交。"
+                                "并使用相同命名前缀输出 PNG 后重新提交"
+                                + produced_hint
+                                + "。"
                             )
                             messages.append({"role": "user", "content": prompt})
                             refund_iteration()
