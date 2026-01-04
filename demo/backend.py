@@ -2559,7 +2559,14 @@ summary_lines = [
 
                     target_round = execute_rounds + 1
 
-                    # Round 2-6 必须严格按 CSV 模板执行，不得触发 SQLite
+                    # Round 2-6 必须严格按 CSV 模板执行，不得触发 SQLite，且 CSV 文件名固定
+                    ROUND_REQUIRED_CSV = {
+                        2: "enrolled.csv",
+                        3: "no_payment_due.csv",
+                        4: "longest_absense_from_school.csv",
+                        5: "enlist.csv",
+                        6: "disabled.csv",
+                    }
                     if 2 <= target_round <= 6:
                         if not uses_csv:
                             logger.warning(
@@ -2583,6 +2590,26 @@ summary_lines = [
                             messages.append({"role": "user", "content": sqlite_prompt})
                             refund_iteration()
                             continue
+
+                        required_csv = ROUND_REQUIRED_CSV.get(target_round)
+                        if required_csv:
+                            normalized_code_for_path = effective_code.lower()
+                            if required_csv.lower() not in normalized_code_for_path:
+                                logger.warning(
+                                    "[bot_stream] Round %s CSV mismatch: expected %s",
+                                    target_round,
+                                    required_csv,
+                                )
+                                csv_name_prompt = (
+                                    f"第 {target_round} 轮必须使用第 1 轮列出的 `{required_csv}`，"
+                                    "请直接引用该 CSV 的绝对路径，例如 "
+                                    f"`/home/.../data/{required_csv}`，不要改用其它文件名或虚构的 student_loan_data.csv。"
+                                )
+                                messages.append(
+                                    {"role": "user", "content": csv_name_prompt}
+                                )
+                                refund_iteration()
+                                continue
 
                     if DDL_TABLE_PATTERN.search(normalized_code):
                         logger.warning(

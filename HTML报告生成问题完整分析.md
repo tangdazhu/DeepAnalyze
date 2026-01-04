@@ -93,6 +93,18 @@
 - **修复**：在 `backend.py` 的 Round 7 校验分支中添加 `produced_names` 记录，并将“本轮检测到的文件：xxx”拼接进提示语，帮助模型对照当前产物与规范名称的差异。@demo/backend.py#3112-3134
 - **影响**：当再次发生命名错误时，模型会立即收到“检测到 enlist_analysis.csv”等明确反馈，更容易改写 SQL/可视化脚本产出 `multi_table_join_result.*`，从而顺利推进到 README 轮。
 
+### 5. Round 6/7 再次停滞的直接原因（2026-01-04）
+- **现象**：复测仍卡在 Round 7，`generated/` 下缺少 README.md，`backend.log` 仅记录到 execute_round_7。执行日志显示：
+  1. Round 6 脚本尝试读取不存在的 `/home/.../student_loan_data.csv`，触发 `FileNotFoundError`。
+  2. Round 7 SQL 语句使用 `JOIN enlisted`，而真实表名为 `enlist`，导致 `sqlite3.OperationalError: no such table: enlisted`；若 SQL 成功也会因为生成 `multi_table_join_visualization.png` 与命名要求不符而被退票。
+- **根本原因**：
+  1. 提示词虽然列出了 Round 2-6 的目标 CSV，但后端此前只检查“是否调用了 `pd.read_csv`”，未校验文件名，模型复用旧模板就会改用 `student_loan_data.csv` 这类虚构路径。
+  2. Round 7 的 SQL 示例存在历史残留（`enlisted`），模型在 JOIN 时沿用了错误表名；且产物命名仍可自由发挥，导致即使 SQL 修正也难通过产物校验。
+- **修复**：
+  1. 在 `backend.py` 新增 `ROUND_REQUIRED_CSV` 校验，Round 2-6 若代码里未出现对应 CSV 文件名即退票，明确提示“不要改用 student_loan_data.csv”。@demo/backend.py#2562-2612
+  2. 计划在下一步针对 Round 7 的回退模板补充：强制引用 `enlist` 表名、限定 PNG 输出为 `multi_table_join_result.png`，并在 SQL 报错时把 sqlite_master 结果附在提示中（待完成）。
+- **影响**：Round 6 不再允许错误的 CSV 路径，Round 7 将在 SQL/命名两侧同时约束，只有顺利生成 `multi_table_join_result.*` 才能推进 README 轮，避免流程再次卡死。
+
 ---
 ## 根本原因分析
 
