@@ -618,11 +618,15 @@ print(f"📊 记录了 {len(csv_files)} 个CSV文件, {len(png_files)} 个PNG文
 
 ### 第 6 轮：分析 disabled 表
 **任务**：统计 `disabled` 表的残疾学生数量（**依旧只能读 CSV，不可引用 SQLite**）
-**表名**：`disabled`
-**字段**：name
-**输出文件**：
-- `disabled_count.csv`
-- `disabled_vs_total.png`
+**数据结构必读**：
+- `disabled.csv` 只有一列 `name`，列出所有被判定为残疾的学生；没有 `disabled` 或 `flag` 列
+- 进入代码后需自行构造布尔列，例如 `df["disabled_flag"] = 1`，或与 `enrolled` 合并计算总人数
+- 禁止访问不存在的列（如 `df["disabled"]`），否则会触发 `KeyError`
+
+**产出要求**：
+- `disabled_count.csv`：至少包含一行 `disabled_flag=1` 及其计数，可额外附带总人数/占比
+- `disabled_vs_total.png`：可采用常量列对比，或将 `disabled_flag` 与总人数拼成条形/饼图
+- 仍需在脚本末尾 `plt.savefig(... 'disabled_vs_total.png')` 并 `plt.close()`
 
 **完成标准**：
 - ✅ 生成 disabled_count.csv
