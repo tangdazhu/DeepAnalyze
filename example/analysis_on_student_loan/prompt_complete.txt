@@ -630,6 +630,7 @@ print(f"📊 记录了 {len(csv_files)} 个CSV文件, {len(png_files)} 个PNG文
 - `disabled.csv` 只有一列 `name`，列出所有被判定为残疾的学生；没有 `disabled` 或 `flag` 列
 - 进入代码后需自行构造布尔列，例如 `df["disabled_flag"] = 1`，或与 `enrolled` 合并计算总人数
 - 禁止访问不存在的列（如 `df["disabled"]`），否则会触发 `KeyError`
+- 绘制 `disabled_vs_total.png` 时务必保证 `plt.xticks` 的刻度数量与标签数量一致，可使用 `bars = plt.bar(...)` 后通过 `positions = [bar.get_x() + bar.get_width() / 2 for bar in bars]` 再调用 `plt.xticks(positions, labels)`
 
 **产出要求**：
 - `disabled_count.csv`：至少包含一行 `disabled_flag=1` 及其计数，可额外附带总人数/占比
