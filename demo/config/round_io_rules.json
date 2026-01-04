@@ -1,0 +1,85 @@
+{
+  "description": "Student Loan 任务各轮输入/输出校验规则。若切换数据集，可复制此模板并替换文件名或表名。",
+  "rounds": [
+    {
+      "round": 2,
+      "mode": "csv_analysis",
+      "input": {"type": "csv", "filename": "enrolled.csv"},
+      "outputs": [
+        {"type": "csv", "filename": "enrolled_summary.csv"},
+        {"type": "png", "filename": "enrolled_school_dist.png"}
+      ]
+    },
+    {
+      "round": 3,
+      "mode": "csv_analysis",
+      "input": {"type": "csv", "filename": "no_payment_due.csv"},
+      "outputs": [
+        {"type": "csv", "filename": "payment_status_summary.csv"},
+        {"type": "png", "filename": "payment_status_dist.png"}
+      ]
+    },
+    {
+      "round": 4,
+      "mode": "csv_analysis",
+      "input": {"type": "csv", "filename": "longest_absense_from_school.csv"},
+      "outputs": [
+        {"type": "csv", "filename": "absense_summary.csv"},
+        {"type": "png", "filename": "absense_month_dist.png"}
+      ]
+    },
+    {
+      "round": 5,
+      "mode": "csv_analysis",
+      "input": {"type": "csv", "filename": "enlist.csv"},
+      "outputs": [
+        {"type": "csv", "filename": "enlist_summary.csv"},
+        {"type": "png", "filename": "enlist_organ_dist.png"}
+      ]
+    },
+    {
+      "round": 6,
+      "mode": "csv_analysis",
+      "input": {"type": "csv", "filename": "disabled.csv"},
+      "outputs": [
+        {"type": "csv", "filename": "disabled_count.csv"},
+        {"type": "png", "filename": "disabled_vs_total.png"}
+      ]
+    },
+    {
+      "round": 7,
+      "mode": "sqlite_join",
+      "input": {
+        "type": "sqlite",
+        "db_key": "student_loan",
+        "tables": [
+          "enrolled",
+          "no_payment_due",
+          "longest_absense_from_school",
+          "enlist",
+          "disabled"
+        ]
+      },
+      "outputs": [
+        {"type": "csv", "filename": "multi_table_join_result.csv"},
+        {"type": "png", "filename": "multi_table_join_result.png"}
+      ],
+      "requirements": [
+        "必须在建立连接后调用 PRAGMA busy_timeout = 30000",
+        "禁止复用 multi_table_join_result.csv 作为输入"
+      ]
+    },
+    {
+      "round": 8,
+      "mode": "filesystem_summary",
+      "input": {"type": "directory", "path": "generated"},
+      "outputs": [
+        {"type": "markdown", "filename": "README.md"}
+      ],
+      "requirements": [
+        "README.md 必须包含 # 生成文件目录、### HTML 报告、### CSV 数据文件、### 其他文件 等章节",
+        "需列出所有 execute_round_*.txt 和 README.md 本身"
+      ]
+    }
+  ]
+}

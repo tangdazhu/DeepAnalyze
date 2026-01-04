@@ -11,12 +11,12 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
-import textwrap
 import threading
 from collections import defaultdict
 from functools import partial
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
+from urllib.parse import quote
 
 import httpx
 import openai
@@ -121,6 +121,215 @@ def load_common_words_config():
 
 # 全局加载 COMMON_WORDS
 COMMON_WORDS_GLOBAL = load_common_words_config()
+
+
+def load_round_io_rules_config() -> dict[int, dict[str, Any]]:
+    """加载多轮输入/输出校验规则."""
+    config_path = Path(__file__).resolve().parent / "config" / "round_io_rules.json"
+    if not config_path.exists():
+        error_msg = (
+            f"❌ 配置文件不存在: {config_path}\n"
+            "请创建 round_io_rules.json（参考 config/README.md）。"
+        )
+        logger.error(f"[配置] {error_msg}")
+        raise FileNotFoundError(error_msg)
+
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            config = json.load(f)
+    except json.JSONDecodeError as e:
+        error_msg = (
+            f"❌ round_io_rules.json JSON 格式错误: {config_path}\n" f"错误详情: {e}"
+        )
+        logger.error(f"[配置] {error_msg}")
+        raise ValueError(error_msg) from e
+    except Exception as e:
+        error_msg = f"❌ 读取 round_io_rules.json 失败: {config_path}\n错误: {e}"
+        logger.error(f"[配置] {error_msg}")
+        raise RuntimeError(error_msg) from e
+
+    rounds = config.get("rounds")
+    if not isinstance(rounds, list) or not rounds:
+        error_msg = (
+            f"❌ round_io_rules.json 中缺少有效的 rounds 列表: {config_path}\n"
+            "请参照文档提供每一轮的规则。"
+        )
+        logger.error(f"[配置] {error_msg}")
+        raise ValueError(error_msg)
+
+    rules: dict[int, dict[str, Any]] = {}
+    for entry in rounds:
+        round_no = entry.get("round")
+        if not isinstance(round_no, int):
+            raise ValueError(
+                f"round_io_rules.json 中存在无效轮次: {entry}. round 字段必须是整数。"
+            )
+        if round_no in rules:
+            raise ValueError(
+                f"round_io_rules.json 中检测到重复轮次: {round_no}. 每个 round 只能配置一次。"
+            )
+        rules[round_no] = entry
+
+    logger.info(f"[配置] ✅ 已加载 round_io_rules: 共 {len(rules)} 条规则")
+    return rules
+
+
+ROUND_IO_RULES = load_round_io_rules_config()
+
+
+def get_round_rule(round_no: int) -> Optional[dict[str, Any]]:
+    """返回指定轮次的规则（若未配置则返回 None）。"""
+    return ROUND_IO_RULES.get(round_no)
+
+
+def describe_round(rule: dict[str, Any]) -> str:
+    mode = (rule.get("mode") or "").lower()
+    input_cfg = rule.get("input") or {}
+    outputs = rule.get("outputs") or []
+    output_names = " + ".join(
+        out.get("filename", "目标文件") for out in outputs if out.get("filename")
+    )
+    output_names = output_names or "指定输出"
+
+    if mode == "csv_analysis":
+        csv_name = input_cfg.get("filename", "指定 CSV")
+        return f"分析 {csv_name} → 生成 {output_names}"
+    if mode == "sqlite_join":
+        tables = ", ".join(input_cfg.get("tables", [])) or "多张表"
+        return f"SQLite 多表关联（{tables}）→ 生成 {output_names}"
+    if mode == "filesystem_summary":
+        path = input_cfg.get("path", "generated/ 目录")
+        return f"遍历 {path} → 生成 {output_names}"
+    return f"{mode or '该'} 轮任务 → 生成 {output_names}"
+
+
+def guidance_for_rule(rule: dict[str, Any]) -> str:
+    custom = rule.get("guidance")
+    if custom:
+        return custom
+    mode = (rule.get("mode") or "").lower()
+    defaults = {
+        "csv_analysis": "直接输出 <Analyze> 和 <Code>，使用 pandas 读取配置指定的 CSV 绝对路径，"
+        "写出统计 CSV 与 PNG 至 generated/。",
+        "sqlite_join": "直接输出 <Analyze> 和 <Code>，使用 sqlite3.connect(DB_PATH, timeout=30) 执行多表 JOIN，"
+        "并将合并结果写入配置指定的 CSV/PNG。",
+        "filesystem_summary": "直接输出 <Analyze> 和 <Code>，仅遍历 generated/ 目录并生成 Markdown 索引，不得执行 SQL。",
+    }
+    return defaults.get(mode, "直接输出 <Analyze> 和 <Code> 完成本轮任务。")
+
+
+def round_expected_filenames(rule: dict[str, Any]) -> list[str]:
+    outputs = rule.get("outputs") or []
+    return [out.get("filename") for out in outputs if out.get("filename")]
+
+
+def round_expected_filenames_by_type(rule: dict[str, Any], type_name: str) -> list[str]:
+    type_name = type_name.lower()
+    return [
+        out.get("filename")
+        for out in (rule.get("outputs") or [])
+        if (out.get("type") or "").lower() == type_name and out.get("filename")
+    ]
+
+
+def round_expected_types(rule: dict[str, Any]) -> set[str]:
+    return {
+        (out.get("type") or "").lower()
+        for out in (rule.get("outputs") or [])
+        if out.get("type")
+    }
+
+
+def round_requires_output_type(rule: dict[str, Any], type_name: str) -> bool:
+    type_name = type_name.lower()
+    return type_name in round_expected_types(rule)
+
+
+def round_mode(rule: Optional[dict[str, Any]]) -> str:
+    if not rule:
+        return ""
+    return (rule.get("mode") or "").lower()
+
+
+def round_input_filename(rule: dict[str, Any]) -> Optional[str]:
+    input_cfg = rule.get("input") or {}
+    if (input_cfg.get("type") or "").lower() == "csv":
+        return input_cfg.get("filename")
+    return None
+
+
+def rule_requires_busy_timeout(rule: dict[str, Any]) -> bool:
+    requirements = rule.get("requirements") or []
+    return any("pragma busy_timeout" in req.lower() for req in requirements)
+
+
+def build_round_retry_prompt(round_no: int, retry_idx: int) -> str:
+    rule = get_round_rule(round_no)
+    base = f"⚠️ 检测到第 {round_no} 轮输出为空（已重试 {retry_idx}/3 次）。\n\n"
+    if round_no == 9:
+        prompt = (
+            base + "**第 9 轮任务**：仅输出 `<Answer>` 总结所有轮次的发现与建议。\n\n"
+            "**⚡ 立即输出以下格式（不要输出任何其他内容）**：\n\n"
+            "<Answer>\n"
+            "1. 数据概况……\n"
+            "2. 关键发现……\n"
+            "3. 后续建议……\n"
+            "</Answer>\n"
+        )
+        prompt += (
+            "\n\n**❌ 禁止行为**：\n"
+            "- 禁止返回空响应\n"
+            "- 禁止等待下一条指令\n"
+            "- 禁止输出 <Analyze>/<Code>\n\n"
+            "**✅ 必须行为**：立即输出上述 <Answer> 模板"
+        )
+        return prompt
+    if rule:
+        desc = describe_round(rule)
+        guidance = guidance_for_rule(rule)
+        prompt = (
+            base + f"**第 {round_no} 轮任务**：{desc}\n\n"
+            f"{guidance}\n\n"
+            "**⚡ 请立即输出：**\n\n"
+            "<Analyze>\n- 说明本轮目标、引用上一轮 <Execute> / 文件\n</Analyze>\n\n"
+            "<Code>\n# 根据上述目标编写完整脚本\n</Code>\n"
+        )
+    else:
+        prompt = (
+            base + "请参考提示词继续完成剩余分析或输出最终 <Answer>，禁止返回空响应。"
+        )
+
+    prompt += (
+        "\n\n**❌ 禁止行为**：\n"
+        "- 禁止返回空响应\n"
+        "- 禁止跳过本轮任务\n"
+        "- 禁止输出无关解释或等待指令\n"
+        "- 禁止提前输出 <Answer>\n\n"
+        "**✅ 必须行为**：立即按照上方格式输出完整内容"
+    )
+    return prompt
+
+
+def build_continue_prompt_text(completed_round: int, next_round: int) -> Optional[str]:
+    rule = get_round_rule(next_round)
+    if not rule:
+        if next_round == 9:
+            return (
+                f"✅ 已完成第 {completed_round} 轮。\n\n"
+                "⚡ 立即开始第 9 轮总结，不要等待指令。\n\n"
+                "**第 9 轮任务**：输出 <Answer> 总结所有分析结果与关键发现。\n\n"
+                "本轮只允许输出 <Answer>，总结 2+ 条定量结论、失败轮次说明、后续建议。⚠️ 禁止再输出 <Analyze>/<Code>。"
+            )
+        return None
+
+    desc = describe_round(rule)
+    guidance = guidance_for_rule(rule)
+    return (
+        f"✅ 已完成第 {completed_round} 轮。\n\n"
+        f"⚡ 立即开始第 {next_round} 轮分析（不要等待指令，不要输出任何解释）。\n\n"
+        f"**第 {next_round} 轮任务**：{desc}\n\n"
+        f"{guidance}"
+    )
 
 
 def execute_code(code_str):
@@ -1823,303 +2032,8 @@ def bot_stream(messages, workspace, session_id="default"):
                     f"[bot_stream] Empty response detected (retry {empty_retry}/3)"
                 )
                 if empty_retry < 3:
-                    # 根据当前轮次给出具体指导
                     next_round = execute_rounds + 1
-                    round_retry_configs: dict[int, dict[str, str]] = {
-                        2: {
-                            "title": "enrolled.csv（字段：name, school, month）→ enrolled_summary.csv + enrolled_school_dist.png",
-                            "guidance": "严格使用第 1 轮提供的 CSV 绝对路径，输出 1 个 CSV + 1 张 PNG。",
-                            "mode": "code",
-                            "analyze": "第 2 轮：分析 enrolled.csv 的学校分布",
-                            "code": textwrap.dedent(
-                                """\
-<Code>
-import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
-from pathlib import Path
-
-CSV_PATH = r"<第 1 轮提供的 enrolled.csv 绝对路径>"
-OUTPUT_DIR = Path("generated")
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-df = pd.read_csv(CSV_PATH)
-summary = df.describe(include="all").transpose().reset_index()
-summary.to_csv(OUTPUT_DIR / "enrolled_summary.csv", index=False, encoding="utf-8")
-
-plt.figure(figsize=(8, 4))
-sns.countplot(y="school", data=df, order=df["school"].value_counts().index[:15])
-plt.tight_layout()
-plt.savefig(OUTPUT_DIR / "enrolled_school_dist.png", dpi=120)
-plt.close()
-</Code>
-"""
-                            ),
-                        },
-                        3: {
-                            "title": "no_payment_due.csv（字段：name, bool）→ payment_status_summary.csv + payment_status_dist.png",
-                            "guidance": "bool 为 'pos'/'neg'，先做 value_counts 再绘图。",
-                            "mode": "code",
-                            "analyze": "第 3 轮：分析 no_payment_due.csv 的还款状态",
-                            "code": textwrap.dedent(
-                                """\
-<Code>
-import pandas as pd
-import matplotlib.pyplot as plt
-from pathlib import Path
-
-CSV_PATH = r"<第 1 轮提供的 no_payment_due.csv 绝对路径>"
-OUTPUT_DIR = Path("generated")
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-df = pd.read_csv(CSV_PATH)
-counts = df["bool"].value_counts().reset_index()
-counts.columns = ["status", "count"]
-counts.to_csv(OUTPUT_DIR / "payment_status_summary.csv", index=False, encoding="utf-8")
-
-plt.figure(figsize=(6, 4))
-plt.bar(counts["status"], counts["count"])
-plt.tight_layout()
-plt.savefig(OUTPUT_DIR / "payment_status_dist.png", dpi=120)
-plt.close()
-</Code>
-"""
-                            ),
-                        },
-                        4: {
-                            "title": "longest_absense_from_school.csv（字段：name, month）→ absense_summary.csv + absense_month_dist.png",
-                            "guidance": "month 转数值，输出描述统计 + 直方图。",
-                            "mode": "code",
-                            "analyze": "第 4 轮：分析缺勤月份分布",
-                            "code": textwrap.dedent(
-                                """\
-<Code>
-import pandas as pd
-import matplotlib.pyplot as plt
-from pathlib import Path
-
-CSV_PATH = r"<第 1 轮提供的 longest_absense_from_school.csv 绝对路径>"
-OUTPUT_DIR = Path("generated")
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-df = pd.read_csv(CSV_PATH)
-df["month"] = pd.to_numeric(df["month"], errors="coerce").fillna(0)
-df.describe(include="all").to_csv(OUTPUT_DIR / "absense_summary.csv", encoding="utf-8")
-
-plt.figure(figsize=(8, 4))
-plt.hist(df["month"], bins=12)
-plt.tight_layout()
-plt.savefig(OUTPUT_DIR / "absense_month_dist.png", dpi=120)
-plt.close()
-</Code>
-"""
-                            ),
-                        },
-                        5: {
-                            "title": "enlist.csv（字段：name, organ）→ enlist_summary.csv + enlist_organ_dist.png",
-                            "guidance": "依旧只允许 CSV，统计 organ 频次并绘图。",
-                            "mode": "code",
-                            "analyze": "第 5 轮：分析 enlist.csv 的 organ 分布",
-                            "code": textwrap.dedent(
-                                """\
-<Code>
-import pandas as pd
-import matplotlib.pyplot as plt
-from pathlib import Path
-
-CSV_PATH = r"<第 1 轮提供的 enlist.csv 绝对路径>"
-OUTPUT_DIR = Path("generated")
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-df = pd.read_csv(CSV_PATH)
-counts = df["organ"].value_counts().reset_index()
-counts.columns = ["organ", "count"]
-counts.to_csv(OUTPUT_DIR / "enlist_summary.csv", index=False, encoding="utf-8")
-
-plt.figure(figsize=(10, 5))
-plt.bar(counts["organ"], counts["count"])
-plt.xticks(rotation=45, ha="right")
-plt.tight_layout()
-plt.savefig(OUTPUT_DIR / "enlist_organ_dist.png", dpi=120)
-plt.close()
-</Code>
-"""
-                            ),
-                        },
-                        6: {
-                            "title": "disabled.csv（字段：name）→ disabled_count.csv + disabled_vs_total.png",
-                            "guidance": "统计 name 频次即可，输出 CSV+条形图。",
-                            "mode": "code",
-                            "analyze": "第 6 轮：统计 disabled.csv",
-                            "code": textwrap.dedent(
-                                """\
-<Code>
-import pandas as pd
-import matplotlib.pyplot as plt
-from pathlib import Path
-
-CSV_PATH = r"<第 1 轮提供的 disabled.csv 绝对路径>"
-OUTPUT_DIR = Path("generated")
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-df = pd.read_csv(CSV_PATH)
-counts = df["name"].value_counts().reset_index()
-counts.columns = ["name", "count"]
-counts.to_csv(OUTPUT_DIR / "disabled_count.csv", index=False, encoding="utf-8")
-
-plt.figure(figsize=(6, 4))
-plt.bar(counts["name"], counts["count"])
-plt.tight_layout()
-plt.savefig(OUTPUT_DIR / "disabled_vs_total.png", dpi=120)
-plt.close()
-</Code>
-"""
-                            ),
-                        },
-                        7: {
-                            "title": "SQLite 多表 JOIN → multi_table_join_result.csv + multi_table_join_result.png",
-                            "guidance": "必须使用 sqlite3 JOIN，'pos'/'neg' 需映射为 0/1，禁止复用旧 CSV。",
-                            "mode": "code",
-                            "analyze": "第 7 轮：多表关联分析",
-                            "code": textwrap.dedent(
-                                '''\
-<Code>
-import sqlite3
-import pandas as pd
-import matplotlib.pyplot as plt
-from pathlib import Path
-
-DB_PATH = r"<第 1 轮提供的 student_loan.sqlite 绝对路径>"
-OUTPUT_DIR = Path("generated")
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-query = """
-SELECT e.name,
-       e.school,
-       e.month AS enrolled_month,
-       n.bool AS payment_flag_raw,
-       l.month AS absence_month,
-       d.name AS disabled_flag
-FROM enrolled e
-LEFT JOIN no_payment_due n ON e.name = n.name
-LEFT JOIN longest_absense_from_school l ON e.name = l.name
-LEFT JOIN disabled d ON e.name = d.name
-"""
-
-with sqlite3.connect(DB_PATH, timeout=30) as conn:
-    conn.execute("PRAGMA busy_timeout = 30000;")
-    df = pd.read_sql_query(query, conn)
-
-df["payment_flag"] = df["payment_flag_raw"].eq("pos").astype(int)
-df.to_csv(OUTPUT_DIR / "multi_table_join_result.csv", index=False, encoding="utf-8")
-
-plt.figure(figsize=(8, 4))
-plt.scatter(df["absence_month"].fillna(0), df["payment_flag"])
-plt.tight_layout()
-plt.savefig(OUTPUT_DIR / "multi_table_join_result.png", dpi=150)
-plt.close()
-</Code>
-'''
-                            ),
-                        },
-                        8: {
-                            "title": "遍历 generated/ 目录生成 README.md 索引",
-                            "guidance": "禁止执行 SQL，统计需覆盖 README 自身和所有 execute_round_*.txt。",
-                            "mode": "code",
-                            "analyze": "第 8 轮：生成 README.md 索引",
-                            "code": textwrap.dedent(
-                                """\
-<Code>
-from pathlib import Path
-
-OUTPUT_DIR = Path("generated")
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-files = sorted(p for p in OUTPUT_DIR.iterdir() if p.is_file())
-html_files = [p.name for p in files if p.suffix.lower() == ".html"]
-csv_files = [p.name for p in files if p.suffix.lower() == ".csv"]
-other_files = [
-    p.name
-    for p in files
-    if p.suffix.lower() not in {".html", ".csv"}
-]
-
-execute_files = [name for name in other_files if name.startswith("execute_round_")]
-if "README.md" not in other_files:
-    other_files.append("README.md (本文件)")
-
-summary_lines = [
-    "# 生成文件目录",
-    "",
-    f"- 总文件数: {len(files) + (1 if 'README.md (本文件)' in other_files else 0)}",
-    f"- HTML 文件: {len(html_files)}",
-    f"- CSV 文件: {len(csv_files)}",
-    f"- 其他文件: {len(other_files)}",
-    "",
-    "### HTML 报告",
-    "; ".join(html_files) if html_files else "无",
-    "",
-    "### CSV 数据文件",
-    "; ".join(csv_files) if csv_files else "无",
-    "",
-    "### 其他文件",
-    "; ".join(sorted(other_files)) if other_files else "无",
-]
-
-(OUTPUT_DIR / "README.md").write_text("\n".join(summary_lines), encoding="utf-8")
-</Code>
-"""
-                            ),
-                        },
-                        9: {
-                            "title": "仅输出 `<Answer>` 总结所有轮次结果（禁止 <Analyze>/<Code>）",
-                            "guidance": "引用真实生成的 CSV/PNG/README 等文件，总结至少 2 条定量结论并给出建议。",
-                            "mode": "answer",
-                            "analyze": "",
-                            "code": "",
-                        },
-                    }
-
-                    retry_cfg = round_retry_configs.get(next_round)
-                    if retry_cfg:
-                        if retry_cfg["mode"] == "answer":
-                            retry_prompt = (
-                                f"⚠️ 检测到第 {next_round} 轮输出为空（已重试 {empty_retry}/3 次）。\n\n"
-                                f"**第 {next_round} 轮任务**：{retry_cfg['title']}\n\n"
-                                f"{retry_cfg['guidance']}\n\n"
-                                "**⚡ 立即输出以下格式（不要输出任何其他内容）**：\n\n"
-                                "<Answer>\n"
-                                "1. 数据概况……\n"
-                                "2. 关键发现……\n"
-                                "3. 后续建议……\n"
-                                "</Answer>"
-                            )
-                        else:
-                            retry_prompt = (
-                                f"⚠️ 检测到第 {next_round} 轮输出为空（已重试 {empty_retry}/3 次）。\n\n"
-                                f"**第 {next_round} 轮任务**：{retry_cfg['title']}\n\n"
-                                f"{retry_cfg['guidance']}\n\n"
-                                "**⚡ 立即输出以下格式（不要输出任何其他内容）**：\n\n"
-                                "<Analyze>\n"
-                                f"{retry_cfg['analyze']}\n"
-                                "</Analyze>\n\n"
-                                f"{retry_cfg['code']}\n\n"
-                            )
-                    else:
-                        retry_prompt = (
-                            f"⚠️ 检测到第 {next_round} 轮输出为空（已重试 {empty_retry}/3 次）。\n\n"
-                            "请继续完成剩余分析或输出最终 <Answer>。"
-                        )
-
-                    retry_prompt += (
-                        "\n\n**❌ 禁止行为**：\n"
-                        "- 禁止返回空响应\n"
-                        "- 禁止跳过本轮任务\n"
-                        "- 禁止输出无关解释或等待指令\n"
-                        "- 禁止提前输出 <Answer>\n\n"
-                        "**✅ 必须行为**：立即按照上方模板输出完整内容"
-                    )
-
+                    retry_prompt = build_round_retry_prompt(next_round, empty_retry)
                     messages.append({"role": "user", "content": retry_prompt})
                     refund_iteration()  # 关键：退还迭代计数
                     continue
@@ -2194,7 +2108,11 @@ summary_lines = [
 
             if not analyze_content:
                 messages.append({"role": "assistant", "content": cur_res})
-                if not schema_confirmed and not schema_bootstrap_used:
+                if (
+                    not schema_confirmed
+                    and not schema_bootstrap_used
+                    and round_mode(rule_for_next) != "filesystem_summary"
+                ):
                     auto_block = run_schema_bootstrap(workspace_path, session_id)
                     if auto_block:
                         schema_bootstrap_used = True
@@ -2558,23 +2476,17 @@ summary_lines = [
                         continue
 
                     target_round = execute_rounds + 1
+                    rule_for_next = get_round_rule(target_round)
+                    mode_for_next = round_mode(rule_for_next)
 
-                    # Round 2-6 必须严格按 CSV 模板执行，不得触发 SQLite，且 CSV 文件名固定
-                    ROUND_REQUIRED_CSV = {
-                        2: "enrolled.csv",
-                        3: "no_payment_due.csv",
-                        4: "longest_absense_from_school.csv",
-                        5: "enlist.csv",
-                        6: "disabled.csv",
-                    }
-                    if 2 <= target_round <= 6:
+                    if mode_for_next == "csv_analysis":
                         if not uses_csv:
                             logger.warning(
                                 f"[bot_stream] Code rejected: round {target_round} missing CSV read"
                             )
                             csv_prompt = (
-                                f"第 {target_round} 轮必须使用 `pd.read_csv(第 1 轮提供的 CSV 绝对路径)` 完成分析，"
-                                "禁止跳过 CSV 读取或改用 SQLite。请参考提示词中的模板，先读取对应 CSV，再输出 summary CSV + PNG。"
+                                f"第 {target_round} 轮属于 CSV 分析阶段，必须使用 `pd.read_csv` 读取配置中指定的 CSV 绝对路径，"
+                                "禁止跳过 CSV 读取或改用 SQLite。"
                             )
                             messages.append({"role": "user", "content": csv_prompt})
                             refund_iteration()
@@ -2584,14 +2496,18 @@ summary_lines = [
                                 f"[bot_stream] Code rejected: round {target_round} should not connect SQLite"
                             )
                             sqlite_prompt = (
-                                f"第 {target_round} 轮属于 CSV 分析阶段，禁止使用 `sqlite3.connect` 或 SQL 查询。"
+                                f"第 {target_round} 轮仅允许 CSV 分析，禁止使用 `sqlite3.connect` 或 SQL 查询。"
                                 "请删除 SQLite 相关代码，仅通过 pandas 读取 CSV 并输出统计结果。"
                             )
                             messages.append({"role": "user", "content": sqlite_prompt})
                             refund_iteration()
                             continue
 
-                        required_csv = ROUND_REQUIRED_CSV.get(target_round)
+                        required_csv = (
+                            round_input_filename(rule_for_next)
+                            if rule_for_next
+                            else None
+                        )
                         if required_csv:
                             normalized_code_for_path = effective_code.lower()
                             if required_csv.lower() not in normalized_code_for_path:
@@ -2602,11 +2518,77 @@ summary_lines = [
                                 )
                                 csv_name_prompt = (
                                     f"第 {target_round} 轮必须使用第 1 轮列出的 `{required_csv}`，"
-                                    "请直接引用该 CSV 的绝对路径，例如 "
-                                    f"`/home/.../data/{required_csv}`，不要改用其它文件名或虚构的 student_loan_data.csv。"
+                                    "请直接引用该 CSV 的绝对路径，不要改用其它文件名或虚构的 student_loan_data.csv。"
                                 )
                                 messages.append(
                                     {"role": "user", "content": csv_name_prompt}
+                                )
+                                refund_iteration()
+                                continue
+
+                    if mode_for_next == "sqlite_join":
+                        if not uses_sqlite:
+                            logger.warning(
+                                f"[bot_stream] Code rejected: round {target_round} must use SQLite JOIN"
+                            )
+                            join_prompt = (
+                                f"第 {target_round} 轮必须通过 `sqlite3.connect(DB_PATH, timeout=30)` 执行多表 JOIN，"
+                                "禁止改用 CSV。请基于配置列出的真实表完成 SQL 查询，再写出结果 CSV/PNG。"
+                            )
+                            messages.append({"role": "user", "content": join_prompt})
+                            refund_iteration()
+                            continue
+
+                        if rule_for_next and rule_requires_busy_timeout(rule_for_next):
+                            if "pragma busy_timeout" not in normalized_code:
+                                logger.warning(
+                                    "[bot_stream] Code rejected: round %s missing PRAGMA busy_timeout",
+                                    target_round,
+                                )
+                                busy_prompt = (
+                                    "第 7 轮必须在连接 SQLite 后执行 "
+                                    '`conn.execute("PRAGMA busy_timeout = 30000;")` 以保证查询稳定。'
+                                )
+                                messages.append(
+                                    {"role": "user", "content": busy_prompt}
+                                )
+                                refund_iteration()
+                                continue
+
+                        expected_join_csvs = (
+                            round_expected_filenames_by_type(rule_for_next, "csv")
+                            if rule_for_next
+                            else []
+                        )
+                        normalized_code_lower = effective_code.lower()
+                        for csv_name in expected_join_csvs:
+                            csv_lower = csv_name.lower()
+                            csv_path = generated_dir / csv_name
+                            references_join_csv = (
+                                csv_lower in normalized_code_lower
+                                and "pd.read_csv" in normalized_code_lower
+                            )
+                            writes_join_csv = (
+                                csv_lower in normalized_code_lower
+                                and ".to_csv" in normalized_code_lower
+                            )
+                            if (
+                                references_join_csv
+                                and not csv_path.exists()
+                                and not writes_join_csv
+                            ):
+                                logger.warning(
+                                    "[bot_stream] Code rejected: round %s reading missing %s",
+                                    target_round,
+                                    csv_name,
+                                )
+                                warn_join_file = (
+                                    f"检测到你尝试 `pd.read_csv('.../{csv_name}')`，但该文件尚未生成。"
+                                    f"第 {target_round} 轮必须先通过 SQLite JOIN 生成 `{csv_name}`，再基于结果做分析。"
+                                    "请在同一段代码中完成 SQL JOIN 并写入该 CSV。"
+                                )
+                                messages.append(
+                                    {"role": "user", "content": warn_join_file}
                                 )
                                 refund_iteration()
                                 continue
@@ -2962,31 +2944,57 @@ summary_lines = [
                             refund_iteration()
                             continue
 
-                    # 强制检查：第2轮起必须包含文件写入操作（README 轮除外）
-                    if non_schema_exec_rounds > 0:  # 跳过首轮 schema 查询
-                        if current_round == 8:
+                    # 强制检查：第2轮起必须包含文件写入操作（根据 round_io_rules 配置）
+                    if non_schema_exec_rounds > 0:
+                        if mode_for_next == "filesystem_summary":
                             logger.info(
-                                "[bot_stream] File output check skipped for README round"
+                                "[bot_stream] File output check skipped for filesystem summary round"
                             )
                         else:
+                            expected_types = (
+                                round_expected_types(rule_for_next)
+                                if rule_for_next
+                                else set()
+                            )
+                            needs_csv = "csv" in expected_types
+                            needs_png = "png" in expected_types
                             has_csv_output = ".to_csv(" in normalized_code
                             has_png_output = (
                                 "plt.savefig(" in normalized_code
                                 or ".savefig(" in normalized_code
                             )
-                            logger.info(
-                                f"[bot_stream] File output check: non_schema_exec_rounds={non_schema_exec_rounds}, has_csv={has_csv_output}, has_png={has_png_output}"
-                            )
-                            if not has_csv_output and not has_png_output:
+                            missing_requirements: list[str] = []
+                            if needs_csv and not has_csv_output:
+                                missing_requirements.append("CSV 文件输出（.to_csv）")
+                            if needs_png and not has_png_output:
+                                missing_requirements.append(
+                                    "PNG 图像输出（plt.savefig）"
+                                )
+                            if missing_requirements:
+                                logger.warning(
+                                    "[bot_stream] Code rejected: round %s missing outputs %s",
+                                    target_round,
+                                    ", ".join(missing_requirements),
+                                )
+                                file_output_prompt = (
+                                    f"根据 round_io_rules 配置，第 {target_round} 轮需要生成："
+                                    + "、".join(missing_requirements)
+                                    + "。请在 <Code> 中补充相应的写盘语句后重新提交。"
+                                )
+                                messages.append(
+                                    {"role": "user", "content": file_output_prompt}
+                                )
+                                refund_iteration()
+                                continue
+                            if not expected_types and not (
+                                has_csv_output or has_png_output
+                            ):
                                 logger.warning(
                                     f"[bot_stream] Code rejected: missing file output (CSV/PNG)"
                                 )
                                 file_output_prompt = (
-                                    "根据提示词要求，第 2 轮起每个 <Code> 必须同时生成 CSV 和 PNG 文件。"
-                                    " 请在代码中添加：\n"
-                                    "1. `summary.to_csv(OUTPUT_DIR / '<表名>_summary.csv', index=False, encoding='utf-8')`\n"
-                                    "2. `plt.savefig(OUTPUT_DIR / '<表名>_<字段名>_dist.png', dpi=120)` 和 `plt.close()`\n"
-                                    "确保每轮都有真实产物写入 `generated/` 目录。"
+                                    "第 2 轮起每个 <Code> 必须生成至少一个 CSV 或 PNG 文件。"
+                                    " 请添加 `DataFrame.to_csv(...)` 或 `plt.savefig(...)` 并写入 generated/。"
                                 )
                                 messages.append(
                                     {"role": "user", "content": file_output_prompt}
@@ -3133,53 +3141,46 @@ summary_lines = [
                         except Exception as e:
                             logger.error(f"Error copying modified file {p}: {e}")
 
-                    if current_round == 7:
-                        has_join_csv = any(
-                            Path(p).name == "multi_table_join_result.csv"
-                            for p in artifact_paths
-                        )
-                        has_join_png = any(
-                            Path(p).name == "multi_table_join_result.png"
-                            for p in artifact_paths
-                        )
-                        if not (has_join_csv and has_join_png):
+                    rule_for_current = get_round_rule(current_round)
+                    mode_for_current = round_mode(rule_for_current)
+                    if rule_for_current:
+                        produced_names = {Path(p).name for p in artifact_paths}
+                        expected_files = round_expected_filenames(rule_for_current)
+                        missing_files = [
+                            name
+                            for name in expected_files
+                            if name not in produced_names
+                        ]
+                        if missing_files:
                             logger.warning(
-                                "[bot_stream] Round 7 outputs missing required filenames"
-                            )
-                            produced_names = sorted(
-                                {Path(p).name for p in artifact_paths} or []
+                                "[bot_stream] Round %s outputs missing required filenames: %s",
+                                current_round,
+                                ", ".join(missing_files),
                             )
                             produced_hint = "，本轮检测到的文件：" + (
-                                ", ".join(produced_names) if produced_names else "无"
+                                ", ".join(sorted(produced_names))
+                                if produced_names
+                                else "无"
                             )
                             prompt = (
-                                "第 7 轮产物命名必须严格是 `multi_table_join_result.csv` 与 "
-                                "`multi_table_join_result.png`。请将 SQL 结果写入该 CSV，"
-                                "并使用相同命名前缀输出 PNG 后重新提交"
+                                f"根据 round_io_rules 配置，第 {current_round} 轮必须生成："
+                                + ", ".join(missing_files)
                                 + produced_hint
-                                + "。"
+                                + "。请修正产物命名后重新提交。"
                             )
                             messages.append({"role": "user", "content": prompt})
                             refund_iteration()
                             refund_round_progress(False)
                             continue
 
-                    if current_round == 8:
-                        has_readme = any(
-                            Path(p).name.lower() == "readme.md" for p in artifact_paths
+                    if (
+                        mode_for_current == "filesystem_summary"
+                        and rule_for_current
+                        and "README.md"
+                        in round_expected_filenames_by_type(
+                            rule_for_current, "markdown"
                         )
-                        if not has_readme:
-                            logger.warning(
-                                "[bot_stream] Round 8 missing README.md output, rejecting code"
-                            )
-                            readme_prompt = (
-                                "第 8 轮必须遍历 generated/ 目录并写入 generated/README.md，"
-                                "请在 Python 代码中创建/更新该文件后重新提交。"
-                            )
-                            messages.append({"role": "user", "content": readme_prompt})
-                            refund_iteration()
-                            refund_round_progress(False)
-                            continue
+                    ):
                         readme_path = next(
                             (
                                 Path(p)
@@ -3215,7 +3216,8 @@ summary_lines = [
                                 or not has_self_ref
                             ):
                                 logger.warning(
-                                    "[bot_stream] README.md format validation failed in round 8"
+                                    "[bot_stream] README.md format validation failed in round %s",
+                                    current_round,
                                 )
                                 detail_prompt = (
                                     "生成的 README.md 未符合规范：\n"
@@ -3372,61 +3374,10 @@ summary_lines = [
                     # 修复22增强: 仅在代码完全通过校验后再注入下一轮任务提示
                     if not is_schema_code:
                         next_round = execute_rounds + 1
-                        round_tasks = {
-                            2: {
-                                "desc": "分析 enrolled.csv (字段: name, school, month) → 生成 enrolled_summary.csv + enrolled_school_dist.png",
-                                "guidance": "直接输出 <Analyze> 和 <Code>，按照 CSV 模板读取 enrolled.csv，生成 1 个 CSV + 1 个 PNG。",
-                            },
-                            3: {
-                                "desc": "分析 no_payment_due.csv (字段: name, bool) → 生成 payment_status_summary.csv + payment_status_dist.png",
-                                "guidance": "直接输出 <Analyze> 和 <Code>，仅使用 CSV 路径 no_payment_due.csv。",
-                            },
-                            4: {
-                                "desc": "分析 longest_absense_from_school.csv (字段: name, month) → 生成 absense_summary.csv + absense_month_dist.png",
-                                "guidance": "直接输出 <Analyze> 和 <Code>，按 CSV 模板完成统计+可视化。",
-                            },
-                            5: {
-                                "desc": "分析 enlist.csv (字段: name, organ) → 生成 enlist_summary.csv + enlist_organ_dist.png",
-                                "guidance": "直接输出 <Analyze> 和 <Code>，确保写入 generated/。",
-                            },
-                            6: {
-                                "desc": "分析 disabled.csv (字段: name) → 生成 disabled_count.csv + disabled_vs_total.png",
-                                "guidance": "直接输出 <Analyze> 和 <Code>，统计 disabled.csv。",
-                            },
-                            7: {
-                                "desc": "使用 SQLite 进行多表关联分析 → 生成 multi_table_join_result.csv + 可视化结果",
-                                "guidance": "直接输出 <Analyze> 和 <Code>，使用 sqlite3.connect(DB_PATH) 完成关联分析。",
-                            },
-                            8: {
-                                "desc": "生成 README.md 索引文件 → 扫描 generated/ 下的 CSV/PNG/execute_round_X.txt 并写入说明",
-                                "guidance": (
-                                    "直接输出 <Analyze> 和 <Code>，脚本需遍历 generated/ 目录，统计所有文件并写入 generated/README.md。"
-                                ),
-                            },
-                            9: {
-                                "desc": "输出 <Answer> 总结所有分析结果与关键发现",
-                                "guidance": (
-                                    "本轮只允许输出 <Answer>，总结 2+ 条定量结论、失败轮次说明、后续建议。⚠️ 禁止再输出 <Analyze>/<Code>。"
-                                ),
-                            },
-                        }
-
-                        if 2 <= next_round <= 9 and next_round in round_tasks:
-                            task = round_tasks[next_round]
-                            if next_round == 9:
-                                continue_prompt = (
-                                    f"✅ 已完成第 {execute_rounds} 轮。\n\n"
-                                    f"⚡ 立即开始第 9 轮总结，不要等待指令。\n\n"
-                                    f"**第 9 轮任务**：{task['desc']}\n\n"
-                                    f"{task['guidance']}"
-                                )
-                            else:
-                                continue_prompt = (
-                                    f"✅ 已完成第 {execute_rounds} 轮。\n\n"
-                                    f"⚡ 立即开始第 {next_round} 轮分析（不要等待指令，不要输出任何解释）。\n\n"
-                                    f"**第 {next_round} 轮任务**：{task['desc']}\n\n"
-                                    f"{task['guidance']}"
-                                )
+                        continue_prompt = build_continue_prompt_text(
+                            execute_rounds, next_round
+                        )
+                        if continue_prompt:
                             logger.info(
                                 "[bot_stream] Injecting continue prompt for round %s: %.120s",
                                 next_round,

@@ -102,7 +102,8 @@
   2. Round 7 的 SQL 示例存在历史残留（`enlisted`），模型在 JOIN 时沿用了错误表名；且产物命名仍可自由发挥，导致即使 SQL 修正也难通过产物校验。
 - **修复**：
   1. 在 `backend.py` 新增 `ROUND_REQUIRED_CSV` 校验，Round 2-6 若代码里未出现对应 CSV 文件名即退票，明确提示“不要改用 student_loan_data.csv”。@demo/backend.py#2562-2612
-  2. 计划在下一步针对 Round 7 的回退模板补充：强制引用 `enlist` 表名、限定 PNG 输出为 `multi_table_join_result.png`，并在 SQL 报错时把 sqlite_master 结果附在提示中（待完成）。
+  2. 以 `config/round_io_rules.json` 统一描述每轮输入/输出：`backend.py` 启动时加载此配置，`build_round_retry_prompt/get_round_rule/round_expected_filenames*` 等辅助函数据此生成提示、校验产物，不再在代码里写死 `enrolled.csv`/`multi_table_join_result.png`。@demo/config/round_io_rules.json、@demo/backend.py#126-3388
+  3. CSV 阶段校验使用 `round_mode`/`round_input_filename`，限定只能读取配置指定 CSV；Round 7 强制 SQLite JOIN、自动比对配置中声明的 CSV/PNG 名称并检查 `PRAGMA busy_timeout`；README 轮校验配置中要求的 Markdown 结构。@demo/backend.py#2473-3222
 - **影响**：Round 6 不再允许错误的 CSV 路径，Round 7 将在 SQL/命名两侧同时约束，只有顺利生成 `multi_table_join_result.*` 才能推进 README 轮，避免流程再次卡死。
 
 ---

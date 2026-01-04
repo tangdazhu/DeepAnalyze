@@ -143,7 +143,53 @@ python backend.py
 ```json
 "output_filenames": [
   "enrolled_summary",
-  "my_custom_report",
-  "daily_analysis"
+  "my_custom_report"
 ]
 ```
+
+## round_io_rules.json
+
+此配置文件用于描述“多轮分析任务的输入/输出规则”,后端据此校验每一轮允许的 CSV/SQLite 表以及必须写出的 CSV/PNG/README 等文件,从而避免在代码中写死文件名。当切换到其他数据集时,只需复制并修改该 JSON,即可无缝复用后端校验逻辑。
+
+### 文件位置
+```
+demo/config/round_io_rules.json
+```
+
+### 文件格式
+```json
+{
+  "description": "配置说明",
+  "rounds": [
+    {
+      "round": 2,
+      "mode": "csv_analysis",
+      "input": {"type": "csv", "filename": "enrolled.csv"},
+      "outputs": [
+        {"type": "csv", "filename": "enrolled_summary.csv"},
+        {"type": "png", "filename": "enrolled_school_dist.png"}
+      ],
+      "requirements": ["可选的额外约束"]
+    }
+  ]
+}
+```
+
+字段说明:
+- `round`: 轮次编号(整数)。
+- `mode`: 后端针对该轮使用的校验模式,如 `csv_analysis`、`sqlite_join`、`filesystem_summary`。
+- `input`: 描述本轮必须引用的输入,支持 `csv`(文件名)、`sqlite`(数据库 key 与表列表)、`directory` 等类型。
+- `outputs`: 要求生成的文件清单,包含 `type`(csv/png/markdown 等) 与 `filename`。
+- `requirements`(可选): 额外的文本约束,例如“必须执行 PRAGMA busy_timeout”或“README 必须列出 execute_round_*”。
+
+### 使用方法
+1. **新增数据集**: 复制该文件为新的 JSON,修改 `input.filename`、`outputs.filename` 或 `tables` 等字段以匹配新的任务。
+2. **切换配置**: 在 `backend.py` 中加载对应的 JSON(后续会添加 CLI/环境变量参数),即可自动套用新规则。
+3. **重启后端**: 配置变更后需重启 `backend.py`,以确保最新规则被读取并生效。
+
+### 验证配置
+后端启动时会在 `logs/backend.log` 中输出类似日志:
+```
+[配置] 已加载 round_io_rules: 共 X 条轮次规则
+```
+若文件缺失或 JSON 语法错误,后端将拒绝启动,从源头杜绝硬编码与不一致配置。
