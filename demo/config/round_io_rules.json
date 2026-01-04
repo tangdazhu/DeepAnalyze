@@ -14,6 +14,7 @@
       "round": 3,
       "mode": "csv_analysis",
       "input": {"type": "csv", "filename": "no_payment_due.csv"},
+      "guidance": "no_payment_due.csv 仅包含 name 与 bool 两列，其中 bool 取值为 'pos'/'neg' 表示是否暂时无需还款。读取后请将 bool 列映射为更有意义的列名（如 payment_status 或 payment_flag），并在生成图表时引用该新列，禁止直接使用不存在的 payment_status 列名。",
       "outputs": [
         {"type": "csv", "filename": "payment_status_summary.csv"},
         {"type": "png", "filename": "payment_status_dist.png"}

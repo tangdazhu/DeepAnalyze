@@ -579,11 +579,15 @@ print(f"📊 记录了 {len(csv_files)} 个CSV文件, {len(png_files)} 个PNG文
 
 ### 第 3 轮：分析 no_payment_due 表
 **任务**：分析 `no_payment_due` 表的还款状态分布（**只允许 CSV 读取，不得连 SQLite**）
-**表名**：`no_payment_due`
-**字段**：name, bool
-**输出文件**：
-- `payment_status_summary.csv`
-- `payment_status_dist.png`
+**数据结构必读**：
+- `no_payment_due.csv` 只有 `name` 与 `bool` 两列，`bool` 取值 `pos/neg` 表示是否暂缓还款
+- 进入代码后必须将 `bool` 映射为更语义化的列，如 `df["payment_status"] = df["bool"].map({"pos": "no_payment_due", "neg": "payment_due"})`
+- 生成图表时务必引用该新列（如 `payment_status`），禁止直接使用不存在的 `payment_status` 原始列名
+
+**产出要求**：
+- `payment_status_summary.csv`：输出各状态计数/占比，可保留原 `bool` 列同时加上映射列
+- `payment_status_dist.png`：使用映射后的类别列绘制计数图，图标题需说明 “No Payment Due 状态分布”
+- 记得 `plt.savefig(... 'payment_status_dist.png')` 并 `plt.close()`
 
 **完成标准**：
 - ✅ 生成 payment_status_summary.csv
