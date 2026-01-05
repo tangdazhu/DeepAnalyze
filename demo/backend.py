@@ -2588,10 +2588,8 @@ def bot_stream(messages, workspace, session_id="default"):
                         expected_sqlite = find_primary_sqlite(Path(workspace_path))
                         if expected_sqlite:
                             expected_sqlite_path = str(expected_sqlite.resolve())
-                            expected_sqlite_name = expected_sqlite.name.lower()
                             references_expected_sqlite = (
                                 expected_sqlite_path.lower() in normalized_code_lower
-                                or expected_sqlite_name in normalized_code_lower
                             )
                             if not references_expected_sqlite:
                                 logger.warning(
@@ -2601,7 +2599,7 @@ def bot_stream(messages, workspace, session_id="default"):
                                 sqlite_path_prompt = (
                                     "第 {round} 轮必须使用首轮提示中提供的数据库绝对路径：\n"
                                     '```python\nDB_PATH = r"{path}"\n```\n'
-                                    "请删除 `education.db` 等无关路径，改为以上路径，并重新执行 SQLite JOIN。"
+                                    "请删除 `education.db` / `data/student_loan.sqlite` 等无关路径，改为以上路径，并重新执行 SQLite JOIN。"
                                 ).format(round=target_round, path=expected_sqlite_path)
                                 messages.append(
                                     {"role": "user", "content": sqlite_path_prompt}
