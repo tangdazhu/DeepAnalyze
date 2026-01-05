@@ -53,6 +53,22 @@ logger = logging.getLogger(__name__)
 logger.info(f"[启动] 日志文件: {LOG_DIR / 'backend.log'}")
 
 
+class WorkspaceFilesAccessFilter(logging.Filter):
+    """屏蔽 uvicorn access log 中针对 /workspace/files 的噪声日志。"""
+
+    TARGET = "GET /workspace/files"
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            message = record.getMessage()
+        except Exception:
+            message = record.msg if isinstance(record.msg, str) else ""
+        return self.TARGET not in (message or "")
+
+
+logging.getLogger("uvicorn.access").addFilter(WorkspaceFilesAccessFilter())
+
+
 # 加载 COMMON_WORDS 配置
 def load_common_words_config():
     """从配置文件加载 COMMON_WORDS 集合
