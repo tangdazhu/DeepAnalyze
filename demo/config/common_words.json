@@ -56,6 +56,9 @@
       "sqlite3", "pathlib", "path", "os", "sys", "re", "json", "csv", "datetime",
       "collections", "itertools", "functools"
     ],
+    "python_identifiers": [
+      "dataframe", "df", "bars", "positions", "disabled_flag", "len"
+    ],
     "pandas_methods": [
       "read_sql", "read_sql_query", "read_csv", "read_excel", "to_csv", "to_excel",
       "describe", "head", "tail", "info", "shape", "columns", "dtypes", "isnull",
