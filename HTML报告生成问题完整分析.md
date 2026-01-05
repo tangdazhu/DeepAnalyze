@@ -128,6 +128,56 @@
 - 此更改仅影响 Analyze 文本的表名提示，不会放宽真实 SQL 校验；`extract_sql_table_names` 仍会在代码中严格比对真实表。
 
 ---
+
+### 7. Round 7 代码被三引号截断导致“必须使用 SQLite JOIN”循环（2026-01-05）
+
+#### 现象
+
+- 最新 session（`session_1767598753290_5qazymmq2`）中，第 1-6 轮全部产物齐全，但进入 Round 7 后系统持续提示 “Code rejected: round 7 must use SQLite JOIN”，并不断注入 “第 8/9/10 轮任务：SQLite 多表关联”。
+- 模型输出的 `<Code>` 前后带有解释文字，并将真实 Python 包裹在 `""" ... """` 三引号中。后端提取后只剩下一段 SQL 字符串，导致校验始终认为“缺少 sqlite3.connect / pd.read_sql”。
+
+#### 根本原因
+
+- `extract_effective_code` 只要检测到三引号就直接返回内部内容，没有判断三引号是否包裹了整个 `<Code>`。当模型在三引号外添加说明或额外语句时，函数会丢弃真正的 Python 代码，仅保留内层 SQL。校验逻辑据此判定“未使用 sqlite3.connect”，触发 Round 7 必须使用 SQLite JOIN 的拒绝提示。@demo/backend.py#1658-1677
+
+#### 修复措施
+
+1. 更新 `extract_effective_code`：仅当三引号包裹了整段 `<Code>`（前后无其他文本）时才提取内部脚本；否则保持原始代码不变。这样即便模型在三引号外补充解释或模板，也不会丢失真正的 Python。@demo/backend.py#1658-1677
+2. 复测同一 session，Round 7 校验能够识别完整脚本（含 `sqlite3.connect` / `pd.read_sql_query` / `conn.execute("PRAGMA busy_timeout = 30000;")`），不再误判为 CSV 分析。
+
+#### 影响
+
+- Round 7 不会再因为三引号包裹导致的代码截断而停滞，流程可继续生成 `multi_table_join_result.csv/.png` 并推进 README 轮。
+- 其余轮次以及提示词无需改动；该修复仅优化后端解析逻辑，与历史记录保持一致。
+
+---
+
+### 8. Round 7 SQL 仍使用 `id` 主键导致 `no such column: e.id`（2026-01-05）
+
+#### 现象
+
+- 会话 `session_1767604173333_uzr34qjo3` 在顺利生成第 2-6 轮产物后，于第 7 轮多表 JOIN 阶段报错：  
+  `Execution failed on sql ... no such column: e.id`。@demo/logs/backend.log#2026-01-05T18:13:10Z
+- 生成目录保留了 `multi_table_join_result.*` 的旧版本，但最新脚本始终以 `e.id`/`np.id` 等列进行关联，导致 SQL 层面直接失败。
+
+#### 根本原因
+
+- Student Loan 数据集中所有表均以 `name` 作为唯一键（见 bootstrap 轮和 `student_loan.sqlite` 的 `PRAGMA table_info` 结果），并不存在 `id` 列。  
+- 然而 `round_io_rules.json` 中的 Round 7 guidance 仅说明要 JOIN 指定表，未再次强调“必须以 name 连接”。当模型参考通用 SQL 模板时，容易回落到 `id` 关联，触发 `no such column`。
+
+#### 修复措施
+
+1. 在 `config/round_io_rules.json` 的 Round 7 配置中补充指导语，明确：  
+   “enrolled/no_payment_due/longest_absense_from_school/enlist/disabled 均只有 `name` 作为关联键，其余字段分别是 school/bool/month/organ，禁止使用不存在的 `id`/`disabled_flag` 等列”。@demo/config/round_io_rules.json#56-74
+2. 后端在加载规则时会把该 guidance 注入 retry prompt，确保模型每次被回退时都能看到“必须以 name=... JOIN”的红线提示。
+
+#### 影响
+
+- Round 7 的 SQL 模板被强制约束在真实字段范围内，重复执行时优先尝试基于 `name` 的 JOIN，不再无意引用 `id`。  
+- 若模型仍写出非法字段，校验提示会给出更明确的修正方向，流程有望推进到 README 轮。  
+- 该变更只涉及配置文本，对 CSV 阶段与 README 轮无副作用。
+
+---
 ## 根本原因分析
 
 ### 1. 提前终止的技术原因

@@ -63,6 +63,7 @@
           "disabled"
         ]
       },
+      "guidance": "student_loan.sqlite 中的 enrolled/no_payment_due/longest_absense_from_school/enlist/disabled 均只有 name 列作为关联键，且其余字段分别为 school、bool、month、organ。第 7 轮必须以 name=... 作为 JOIN 条件，不能使用并不存在的 id/disabled_flag 等列。",
       "outputs": [
         {"type": "csv", "filename": "multi_table_join_result.csv"},
         {"type": "png", "filename": "multi_table_join_result.png"}
