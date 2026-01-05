@@ -1665,11 +1665,17 @@ def extract_effective_code(code_str: str) -> str:
         if start != -1:
             end = code.find(quote, start + 3)
             if end != -1:
+                before = code[:start].strip()
+                after = code[end + 3 :].strip()
                 inner = code[start + 3 : end].strip()
-                # 如果内层脚本仍包含 import / SELECT 等关键字，则认为是有效脚本
-                if any(
-                    token in inner
-                    for token in ["import", "select", "plt.", "sns.", "pd."]
+                # 仅当整段代码完全被三引号包裹时，才返回内部脚本
+                if (
+                    not before
+                    and not after
+                    and any(
+                        token in inner
+                        for token in ["import", "select", "plt.", "sns.", "pd."]
+                    )
                 ):
                     return inner
     return code
