@@ -1678,6 +1678,14 @@ def extract_effective_code(code_str: str) -> str:
                     )
                 ):
                     return inner
+
+    # 若 <Code> 开头仍残留自然语言描述，则截取到首个 Python 语句
+    python_start = re.search(
+        r"(?m)^\s*(?:import\s+\w|from\s+\w+\s+import|#!/usr/bin/env\s+python)",
+        code,
+    )
+    if python_start and python_start.start() > 0:
+        code = code[python_start.start() :].lstrip()
     return code
 
 
