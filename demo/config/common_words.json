@@ -30,6 +30,11 @@
       "student_id", "school_name", "organ_name", "gender_code", "payment_due",
       "absense_month", "enrolled_month", "enlisted"
     ],
+    "schema_terms": [
+      "field", "fields", "column", "columns",
+      "structure", "structures", "view", "views",
+      "alias", "aliases"
+    ],
     "file_extensions": [
       "csv", "png", "jpg", "jpeg", "pdf", "html", "json", "xml", "txt"
     ],
