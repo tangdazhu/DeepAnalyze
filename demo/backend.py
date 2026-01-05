@@ -2561,6 +2561,31 @@ def bot_stream(messages, workspace, session_id="default"):
                             else []
                         )
                         normalized_code_lower = effective_code.lower()
+
+                        expected_sqlite = find_primary_sqlite(Path(workspace_path))
+                        if expected_sqlite:
+                            expected_sqlite_path = str(expected_sqlite.resolve())
+                            expected_sqlite_name = expected_sqlite.name.lower()
+                            references_expected_sqlite = (
+                                expected_sqlite_path.lower() in normalized_code_lower
+                                or expected_sqlite_name in normalized_code_lower
+                            )
+                            if not references_expected_sqlite:
+                                logger.warning(
+                                    "[bot_stream] Code rejected: round %s missing expected SQLite path",
+                                    target_round,
+                                )
+                                sqlite_path_prompt = (
+                                    "第 {round} 轮必须使用首轮提示中提供的数据库绝对路径：\n"
+                                    '```python\nDB_PATH = r"{path}"\n```\n'
+                                    "请删除 `education.db` 等无关路径，改为以上路径，并重新执行 SQLite JOIN。"
+                                ).format(round=target_round, path=expected_sqlite_path)
+                                messages.append(
+                                    {"role": "user", "content": sqlite_path_prompt}
+                                )
+                                refund_iteration()
+                                continue
+
                         for csv_name in expected_join_csvs:
                             csv_lower = csv_name.lower()
                             csv_path = generated_dir / csv_name

@@ -107,6 +107,27 @@
 - **影响**：Round 6 不再允许错误的 CSV 路径，Round 7 将在 SQL/命名两侧同时约束，只有顺利生成 `multi_table_join_result.*` 才能推进 README 轮，避免流程再次卡死。
 
 ---
+
+### 6. Round 6 Analyze 阶段重复提示（2026-01-05）
+
+#### 现象
+- Round 6 进入 Analyze 阶段后，系统不断注入“请确保表名存在于 sqlite_master”的提醒，模型被迫重复输出 `<Analyze>/<Code>`，无法进入实际 CSV 分析。
+- 日志显示所谓的“未知表名”包括 `bars`、`disabled_flag`、`DataFrame` 等纯粹的 Python 变量或临时列，与真实表结构无关。
+
+#### 根本原因
+- `backend.py` 在检测 `<Analyze>` 内容时，会将所有单词与 `sqlite_master` 已知表名对比。@demo/backend.py#2109-2183
+- `config/common_words.json` 虽已收录常见字段/文件名，但缺少 Python 变量名，导致 `bars`、`disabled_flag` 等被误判为“未知表”。@demo/config/common_words.json#49-72
+- Round 6 提示明确要求“使用 `bars = plt.bar(...)` / `disabled_flag` / `positions` 等变量”，因此 Analyze 段必然包含这些词，继而被连续退票。
+
+#### 修复措施
+1. 在 `config/common_words.json` 新增 `python_identifiers` 分类，将 `dataframe`, `df`, `bars`, `positions`, `disabled_flag`, `len` 等典型变量写入白名单，避免被 `COMMON_WORDS_GLOBAL` 误判。@demo/config/common_words.json#49-72
+2. 由于 `backend.py` 启动时全局加载 `COMMON_WORDS_GLOBAL`，重新启动服务即可生效，无需额外代码修改。
+
+#### 验证与影响
+- Round 6 Analyze 可以自由描述绘图变量，不再触发“未知表名”拦截，整体流程可继续推进至 `<Code>` 执行。
+- 此更改仅影响 Analyze 文本的表名提示，不会放宽真实 SQL 校验；`extract_sql_table_names` 仍会在代码中严格比对真实表。
+
+---
 ## 根本原因分析
 
 ### 1. 提前终止的技术原因
