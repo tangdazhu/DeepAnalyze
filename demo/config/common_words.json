@@ -63,7 +63,7 @@
     ],
     "python_identifiers": [
       "dataframe", "df", "bars", "positions", "disabled_flag", "len",
-      "conn", "table_name", "result_df"
+      "conn", "table_name", "result_df", "labels"
     ],
     "pandas_methods": [
       "read_sql", "read_sql_query", "read_csv", "read_excel", "to_csv", "to_excel",

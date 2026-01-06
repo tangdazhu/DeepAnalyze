@@ -218,6 +218,14 @@ if "</Answer>" in current_stream:
         finished = True  # ❌ 直接标记完成并退出
         break
 ```
+- 生成描述性统计时，可使用 `summary = df[["absense_month"]].describe().rename_axis("metric").reset_index()`；不要手动硬编码八个列名，保留 `describe` 默认输出顺序即可避免列数不匹配。
+- `enlist` 表只有 `name/organ` 两列，缺少数值字段。`enlist_summary.csv` 必须至少写入 `organ` 的计数/占比（例如 `value_counts().reset_index()`），即便无法 `describe()`。绘图前应检查 `organ` 列是否存在，缺失时输出调试信息但仍需生成 CSV。
+- Round 5 Analyze 会提到 `unit/region/department` 等组织维度，Round 3 Analyze 也会出现 `pos/neg/payment_flag`。这些属于字段/取值而非表名，已通过 `common_words.json` 白名单过滤，避免误判为“未知表”。
+
+#### 影响
+- Round 4 不再因 `describe()` 列数不符而崩溃，能稳定输出 `absense_summary.csv` + `absense_month_dist.png`。
+- Round 5 能在没有数值列时依然生成合法 `enlist_summary.csv`，并根据真实 `organ` 字段绘制 `enlist_organ_dist.png`，流程可继续推进到 Round 6。
+- Analyze 阶段不再就 `pos/neg/unit/region` 报警，日志噪音减少，模型可专注于真实错误提示。
 
 **问题分析**：
 - 条件 `non_schema_exec_rounds == 0` 只检查是否执行过非 schema 代码
