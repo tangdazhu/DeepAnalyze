@@ -47,7 +47,7 @@
       "analysis", "distribution", "statistics", "correlation", "correlation_analysis",
       "multi_table", "single_table", "multi_table_join", "multi_table_analysis",
       "single_table_analysis", "trend", "pattern", "insight", "finding",
-      "conclusion", "recommendation"
+      "conclusion", "recommendation", "crosstab", "tabulation", "cross_tabulation"
     ],
     "python_keywords": [
       "import", "def", "class", "return", "if", "else", "for", "while",
@@ -62,7 +62,8 @@
       "collections", "itertools", "functools"
     ],
     "python_identifiers": [
-      "dataframe", "df", "bars", "positions", "disabled_flag", "len"
+      "dataframe", "df", "bars", "positions", "disabled_flag", "len",
+      "conn", "table_name"
     ],
     "pandas_methods": [
       "read_sql", "read_sql_query", "read_csv", "read_excel", "to_csv", "to_excel",
@@ -113,7 +114,7 @@
       "the", "a", "an", "this", "that", "these", "those", "is", "are", "was",
       "were", "be", "been", "being", "have", "has", "had", "do", "does", "did",
       "will", "would", "should", "could", "may", "might", "can", "must", "shall",
-      "to", "of", "at", "by", "for", "with"
+      "to", "of", "at", "by", "for", "with", "how"
     ],
     "path_components": [
       "home", "user", "users", "root", "tmp", "var", "opt", "usr", "bin", "lib",
@@ -129,7 +130,8 @@
       "enlist_organ_dist", "disabled_summary", "disabled_dist",
       "correlation_analysis", "multi_table_join", "single_table_analysis",
       "multi_table_analysis", "school_month_heatmap", "bool_dist", "organ_dist",
-      "month_dist", "school_dist", "school_count", "person_summary", "person_dist"
+      "month_dist", "school_dist", "school_count", "person_summary", "person_dist",
+      "enrolled_"
     ]
   }
 }

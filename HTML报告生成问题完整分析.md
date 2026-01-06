@@ -58,6 +58,30 @@
 > 结论：随着上游缺陷被修复，提示词与 backend 的历史差异被放大成新的回归，需要统一来源并在日志中校验提示内容。
 
 ---
+
+### 11. README 轮修复回退致使 Round 2 即崩溃（2026-01-06）
+
+#### 现象
+
+- 为了修复“README 轮误判 SQL”问题，我们在 `bot_stream` 中新增了针对 `filesystem_summary` 的分支。然而部署后刚启动第 2 轮即崩溃，`backend.py` 抛出 `UnboundLocalError: cannot access local variable 'mode_for_current'`，所有轮次完全没有执行、`generated/` 目录为空。
+- `backend.log` 显示异常栈定位在 `bot_stream` 的 SQL 校验段（约第 2714 行），说明当前轮的模式变量尚未定义就被使用。
+
+#### 根本原因
+
+- 之前的 README 修复直接在“仅查询 sqlite_master”判断之后引用 `mode_for_current`，但该变量原本只在写盘校验阶段（约第 3203 行）才通过 `rule_for_current = get_round_rule(current_round)` 赋值。
+- 当代码执行到新的 README 分支时，`mode_for_current` 仍未初始化，Python 直接抛出 `UnboundLocalError`，导致流程在 Round 2 前终止。
+
+#### 修复措施
+
+1. 将 “获取当前轮规则 + mode” 的逻辑前移，在进入 README/SQL 校验之前就调用 `get_round_rule(current_round)` 和 `round_mode(rule_for_current)`。@demo/backend.py#2703-2741  
+2. 产物校验阶段继续复用同一个 `mode_for_current`，避免重复解析，也防止后续再出现未定义变量。
+
+#### 影响
+
+- 流程恢复可执行，Round 2 起可以再次运行 CSV 分析；README 分支仍然能在检测到 SQL 语句时即时拦截。
+- 该修复只改变变量初始化顺序，对 Round 2-7 的 CSV/SQLite 校验和 README 内容检查无副作用。
+
+---
 ## 新增修复（2026-01-03）
 
 ### 1. 后端回退提示同步 9 轮任务
