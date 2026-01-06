@@ -41,7 +41,7 @@
     "file_keywords": [
       "file", "result", "chart", "summary", "report", "output", "generated", "dist",
       "enrolled_month_dist", "enrolled_school_count", "person_summary", "person_dist",
-      "longest_absense", "absense"
+      "longest_absense", "absense", "readme", "markdown", "md", "index"
     ],
     "analysis_keywords": [
       "analysis", "distribution", "statistics", "correlation", "correlation_analysis",
@@ -63,7 +63,7 @@
     ],
     "python_identifiers": [
       "dataframe", "df", "bars", "positions", "disabled_flag", "len",
-      "conn", "table_name"
+      "conn", "table_name", "result_df"
     ],
     "pandas_methods": [
       "read_sql", "read_sql_query", "read_csv", "read_excel", "to_csv", "to_excel",
