@@ -202,6 +202,25 @@
 - 该变更只涉及配置文本，对 CSV 阶段与 README 轮无副作用.
 
 ---
+### 近期问题（2026-01-06）：Round 7 因“缺少 sqlite3 导入”停滞
+
+#### 现象
+- 最新会话 `session_1767690998858_clv4864kn` 成功产出第 2-6 轮 CSV/PNG，但一进入 Round 7 就被后端反复退票，提示“SQLite code missing sqlite3 import”，轮次卡在 Analyze/Code 循环无法前进。
+- Analyze 日志还夹杂“Unknown table hints: con / DB_PATH / df_enrolled / get_width / get_x”等噪音，模型误以为需要调整 JOIN 对象，再次陷入无效解释。
+
+#### 根本原因
+1. **后端导入校验严格**：`backend.py` 会在检测到 `pd.read_sql()`/`sqlite3.connect()` 时验证是否显式 `import sqlite3`，缺少导入就直接拒绝执行并注入提醒（@demo/backend.py#2446-2507）。模型只写了 `pd.read_sql(..., con=DB_PATH)`，因此每次都被判定为违规。
+2. **常见变量未入白名单**：Analyze 中描述绘图或连接对象时大量使用 `con/DB_PATH/df_enrolled/get_width/get_x/total_enrolled` 等变量，它们既不是表名也不是字段，却因为不在 `common_words.json`→`python_identifiers` 中而被误判为“未知表”，进一步干扰模型。
+
+#### 修复措施
+1. **扩充白名单**：在 `demo/config/common_words.json` 的 `python_identifiers` 中加入 `con/db_path/df_enrolled/total_enrolled/get_width/get_x` 等常用变量，避免 Analyze 再被误判为表名（@demo/config/common_words.json#64-68）。
+2. **提示词硬性提醒**：在 Round 7 指南中补充“即便只使用 `pd.read_sql` 也必须写 `import sqlite3`，否则后端会拒绝执行”，让模型在撰写代码前就能意识到导入要求（@example/analysis_on_student_loan/prompt_complete.txt#641-642）。
+
+#### 影响
+- Round 7 代码的导入结构会与后端校验保持一致，不再因“隐式 SQLite 连接”被无限退票。
+- Analyze 日志噪音显著下降，系统只针对真实“未知表/字段”报警，模型更容易聚焦 SQL 逻辑本身。
+- 预计重启 backend 并复测后，可顺利进入 Round 7 及后续 README/Answer 轮次。
+
 ## 根本原因分析
 
 ### 1. 提前终止的技术原因

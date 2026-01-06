@@ -1333,6 +1333,58 @@ SQLITE_CONNECT_PATTERN = re.compile(
     r"sqlite3\.connect\(\s*(?:r)?['\"]([^'\"]+)['\"]\s*\)", re.IGNORECASE
 )
 PROHIBITED_TABLES = {"information_schema", "pg_catalog", "mysql", "sys"}
+MARKDOWN_PREFIXES = (
+    "# ",
+    "##",
+    "###",
+    "####",
+    "#####",
+    "######",
+    "* ",
+    "- ",
+    "> ",
+    "|",
+    "```",
+    "<!--",
+)
+
+
+def code_looks_like_markdown(code: str) -> bool:
+    """Heuristic check: detect when the model直接粘贴 Markdown 内容而非 Python 代码。"""
+    if not code:
+        return False
+
+    normalized = code.strip()
+    if not normalized:
+        return False
+
+    # 若包含典型 Python 语法，则认为不是 Markdown
+    python_tokens = (
+        "import ",
+        "from ",
+        "with ",
+        "open(",
+        ".write(",
+        ".write_text(",
+        ".writelines(",
+        "Path(",
+        "os.",
+        "json.",
+    )
+    lower_code = normalized.lower()
+    if any(token in lower_code for token in python_tokens):
+        return False
+
+    significant_lines = [
+        line.lstrip() for line in normalized.splitlines() if line.strip()
+    ]
+    if not significant_lines:
+        return False
+
+    markdown_like = sum(
+        1 for line in significant_lines[:5] if line.startswith(MARKDOWN_PREFIXES)
+    )
+    return markdown_like >= max(1, min(3, len(significant_lines[:5])))
 
 
 def normalize_filename(name: str) -> str:
@@ -2556,6 +2608,21 @@ def bot_stream(messages, workspace, session_id="default"):
                                 )
                                 refund_iteration()
                                 continue
+
+                    elif mode_for_next == "filesystem_summary":
+                        if code_looks_like_markdown(effective_code):
+                            logger.warning(
+                                "[bot_stream] Code rejected: filesystem summary must write README via Python"
+                            )
+                            markdown_prompt = (
+                                f"第 {target_round} 轮需要输出 Python 脚本，使用 pathlib/os 等遍历 generated/ 并写入 README.md。"
+                                " 请不要直接在 <Code> 中粘贴 Markdown，务必通过 `Path('generated/README.md').write_text(...)` 等方式生成文件。"
+                            )
+                            messages.append(
+                                {"role": "user", "content": markdown_prompt}
+                            )
+                            refund_iteration()
+                            continue
 
                     if mode_for_next == "sqlite_join":
                         if not uses_sqlite:
