@@ -600,27 +600,16 @@ print(f"📊 记录了 {len(csv_files)} 个CSV文件, {len(png_files)} 个PNG文
 - CSV 仅有 `name` 与 `month` 两列，`month` 表示最长缺勤月数
 - 若需要 `absense`/`absense_month` 这样的语义字段，请显式派生：`df["absense_month"] = df["month"]` 或 `rename(columns={"month": "absense_month"})`
 - 禁止直接访问不存在的 `absense` 列；所有统计与绘图都应基于 `month` 或派生列
+- 生成描述性统计时，可使用 `summary = df[["absense_month"]].describe().rename_axis("metric").reset_index()` 并 `summary.to_csv(...)`；不要手动硬编码 8 个列名，保留 describe 默认的 `count/mean/std/...` 顺序以避免列数不匹配
 
 **产出要求**：
-- `absense_summary.csv`：至少包含对 `month`（或映射列）的描述性统计
+- `absense_summary.csv`：至少包含对 `month`（或映射列）的描述性统计，并写入 CSV
 - `absense_month_dist.png`：使用派生列绘制频数图，标题需说明 “Longest Absense Month Distribution”
 - 仍需 `plt.savefig(... 'absense_month_dist.png')` 与 `plt.close()`
 
 **完成标准**：
 - ✅ 生成 absense_summary.csv
 - ✅ 生成 absense_month_dist.png
-- ✅ **完成后立即进入第 5 轮,分析 enlist 表**
-
-### 第 5 轮：分析 enlist 表
-**任务**：分析 `enlist` 表的服役单位分布（**只准 CSV → pandas → PNG**）
-**表名**：`enlist`
-**字段**：name, organ
-**输出文件**：
-- `enlist_summary.csv`
-- `enlist_organ_dist.png`
-
-**完成标准**：
-- ✅ 生成 enlist_summary.csv
 - ✅ 生成 enlist_organ_dist.png
 - ✅ **完成后立即进入第 6 轮,分析 disabled 表**
 

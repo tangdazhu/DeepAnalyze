@@ -114,7 +114,8 @@
       "the", "a", "an", "this", "that", "these", "those", "is", "are", "was",
       "were", "be", "been", "being", "have", "has", "had", "do", "does", "did",
       "will", "would", "should", "could", "may", "might", "can", "must", "shall",
-      "to", "of", "at", "by", "for", "with", "how"
+      "to", "of", "at", "by", "for", "with", "how", "neg", "pos", "unit",
+      "region", "department"
     ],
     "path_components": [
       "home", "user", "users", "root", "tmp", "var", "opt", "usr", "bin", "lib",
