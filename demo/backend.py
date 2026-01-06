@@ -2710,20 +2710,25 @@ def bot_stream(messages, workspace, session_id="default"):
                         continue
                     else:
                         schema_only_repeat = 0
-                    sql_tables_used = extract_sql_table_names(effective_code)
-                    if sql_tables_used:
-                        recent_tables_used = sql_tables_used
-                    if current_round == 8 and sql_tables_used:
-                        logger.warning(
-                            "[bot_stream] Code rejected: round 8 README should not execute SQL"
-                        )
-                        readme_sql_prompt = (
-                            "第 8 轮任务仅需遍历 generated/ 目录生成 README.md，禁止连接 SQLite 或执行 SQL。"
-                            " 请删除 SQL 片段，仅保留使用 pathlib/os/json 等遍历文件系统并写入 Markdown 的 Python 代码。"
-                        )
-                        messages.append({"role": "user", "content": readme_sql_prompt})
-                        refund_iteration()
-                        continue
+                    sql_tables_used: set[str] = set()
+                    if mode_for_current == "filesystem_summary":
+                        if uses_sqlite:
+                            logger.warning(
+                                "[bot_stream] Code rejected: filesystem summary round should not execute SQL"
+                            )
+                            readme_sql_prompt = (
+                                "第 8 轮任务仅需遍历 generated/ 目录生成 README.md，禁止连接 SQLite 或执行 SQL。"
+                                " 请删除 SQL 片段，仅使用 pathlib/os/json 等遍历文件系统并写入 Markdown。"
+                            )
+                            messages.append(
+                                {"role": "user", "content": readme_sql_prompt}
+                            )
+                            refund_iteration()
+                            continue
+                    else:
+                        sql_tables_used = extract_sql_table_names(effective_code)
+                        if sql_tables_used:
+                            recent_tables_used = sql_tables_used
                     invalid_tables = set()
                     if known_tables and sql_tables_used:
                         invalid_tables = {

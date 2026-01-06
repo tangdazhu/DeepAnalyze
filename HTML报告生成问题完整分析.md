@@ -104,28 +104,28 @@
   1. 在 `backend.py` 新增 `ROUND_REQUIRED_CSV` 校验，Round 2-6 若代码里未出现对应 CSV 文件名即退票，明确提示“不要改用 student_loan_data.csv”。@demo/backend.py#2562-2612
   2. 以 `config/round_io_rules.json` 统一描述每轮输入/输出：`backend.py` 启动时加载此配置，`build_round_retry_prompt/get_round_rule/round_expected_filenames*` 等辅助函数据此生成提示、校验产物，不再在代码里写死 `enrolled.csv`/`multi_table_join_result.png`。@demo/config/round_io_rules.json、@demo/backend.py#126-3388
   3. CSV 阶段校验使用 `round_mode`/`round_input_filename`，限定只能读取配置指定 CSV；Round 7 强制 SQLite JOIN、自动比对配置中声明的 CSV/PNG 名称并检查 `PRAGMA busy_timeout`；README 轮校验配置中要求的 Markdown 结构。@demo/backend.py#2473-3222
-- **影响**：Round 6 不再允许错误的 CSV 路径，Round 7 将在 SQL/命名两侧同时约束，只有顺利生成 `multi_table_join_result.*` 才能推进 README 轮，避免流程再次卡死。
+- **影响**：Round 6 不再允许错误的 CSV 路径，Round 7 将在 SQL/命名两侧同时约束，只有顺利生成 `multi_table_join_result.*` 才能推进 README 轮，避免流程再次卡死.
 
 ---
 
 ### 6. Round 6 Analyze 阶段重复提示（2026-01-05）
 
 #### 现象
-- Round 6 进入 Analyze 阶段后，系统不断注入“请确保表名存在于 sqlite_master”的提醒，模型被迫重复输出 `<Analyze>/<Code>`，无法进入实际 CSV 分析。
-- 日志显示所谓的“未知表名”包括 `bars`、`disabled_flag`、`DataFrame` 等纯粹的 Python 变量或临时列，与真实表结构无关。
+- Round 6 进入 Analyze 阶段后，系统不断注入“请确保表名存在于 sqlite_master”的提醒，模型被迫重复输出 `<Analyze>/<Code>`，无法进入实际 CSV 分析.
+- 日志显示所谓的“未知表名”包括 `bars`、`disabled_flag`、`DataFrame` 等纯粹的 Python 变量或临时列，与真实表结构无关.
 
 #### 根本原因
 - `backend.py` 在检测 `<Analyze>` 内容时，会将所有单词与 `sqlite_master` 已知表名对比。@demo/backend.py#2109-2183
 - `config/common_words.json` 虽已收录常见字段/文件名，但缺少 Python 变量名，导致 `bars`、`disabled_flag` 等被误判为“未知表”。@demo/config/common_words.json#49-72
-- Round 6 提示明确要求“使用 `bars = plt.bar(...)` / `disabled_flag` / `positions` 等变量”，因此 Analyze 段必然包含这些词，继而被连续退票。
+- Round 6 提示明确要求“使用 `bars = plt.bar(...)` / `disabled_flag` / `positions` 等变量”，因此 Analyze 段必然包含这些词，继而被连续退票.
 
 #### 修复措施
 1. 在 `config/common_words.json` 新增 `python_identifiers` 分类，将 `dataframe`, `df`, `bars`, `positions`, `disabled_flag`, `len` 等典型变量写入白名单，避免被 `COMMON_WORDS_GLOBAL` 误判。@demo/config/common_words.json#49-72
-2. 由于 `backend.py` 启动时全局加载 `COMMON_WORDS_GLOBAL`，重新启动服务即可生效，无需额外代码修改。
+2. 由于 `backend.py` 启动时全局加载 `COMMON_WORDS_GLOBAL`，重新启动服务即可生效，无需额外代码修改.
 
 #### 验证与影响
-- Round 6 Analyze 可以自由描述绘图变量，不再触发“未知表名”拦截，整体流程可继续推进至 `<Code>` 执行。
-- 此更改仅影响 Analyze 文本的表名提示，不会放宽真实 SQL 校验；`extract_sql_table_names` 仍会在代码中严格比对真实表。
+- Round 6 Analyze 可以自由描述绘图变量，不再触发“未知表名”拦截，整体流程可继续推进至 `<Code>` 执行.
+- 此更改仅影响 Analyze 文本的表名提示，不会放宽真实 SQL 校验；`extract_sql_table_names` 仍会在代码中严格比对真实表.
 
 ---
 
@@ -143,12 +143,12 @@
 #### 修复措施
 
 1. 更新 `extract_effective_code`：仅当三引号包裹了整段 `<Code>`（前后无其他文本）时才提取内部脚本；否则保持原始代码不变。这样即便模型在三引号外补充解释或模板，也不会丢失真正的 Python。@demo/backend.py#1658-1677
-2. 复测同一 session，Round 7 校验能够识别完整脚本（含 `sqlite3.connect` / `pd.read_sql_query` / `conn.execute("PRAGMA busy_timeout = 30000;")`），不再误判为 CSV 分析。
+2. 复测同一 session，Round 7 校验能够识别完整脚本（含 `sqlite3.connect` / `pd.read_sql_query` / `conn.execute("PRAGMA busy_timeout = 30000;")`），不再误判为 CSV 分析.
 
 #### 影响
 
-- Round 7 不会再因为三引号包裹导致的代码截断而停滞，流程可继续生成 `multi_table_join_result.csv/.png` 并推进 README 轮。
-- 其余轮次以及提示词无需改动；该修复仅优化后端解析逻辑，与历史记录保持一致。
+- Round 7 不会再因为三引号包裹导致的代码截断而停滞，流程可继续生成 `multi_table_join_result.csv/.png` 并推进 README 轮.
+- 其余轮次以及提示词无需改动；该修复仅优化后端解析逻辑，与历史记录保持一致.
 
 ---
 
@@ -158,24 +158,24 @@
 
 - 会话 `session_1767604173333_uzr34qjo3` 在顺利生成第 2-6 轮产物后，于第 7 轮多表 JOIN 阶段报错：  
   `Execution failed on sql ... no such column: e.id`。@demo/logs/backend.log#2026-01-05T18:13:10Z
-- 生成目录保留了 `multi_table_join_result.*` 的旧版本，但最新脚本始终以 `e.id`/`np.id` 等列进行关联，导致 SQL 层面直接失败。
+- 生成目录保留了 `multi_table_join_result.*` 的旧版本，但最新脚本始终以 `e.id`/`np.id` 等列进行关联，导致 SQL 层面直接失败.
 
 #### 根本原因
 
 - Student Loan 数据集中所有表均以 `name` 作为唯一键（见 bootstrap 轮和 `student_loan.sqlite` 的 `PRAGMA table_info` 结果），并不存在 `id` 列。  
-- 然而 `round_io_rules.json` 中的 Round 7 guidance 仅说明要 JOIN 指定表，未再次强调“必须以 name 连接”。当模型参考通用 SQL 模板时，容易回落到 `id` 关联，触发 `no such column`。
+- 然而 `round_io_rules.json` 中的 Round 7 guidance 仅说明要 JOIN 指定表，未再次强调“必须以 name 连接”。当模型参考通用 SQL 模板时，容易回落到 `id` 关联，触发 `no such column`.
 
 #### 修复措施
 
 1. 在 `config/round_io_rules.json` 的 Round 7 配置中补充指导语，明确：  
    “enrolled/no_payment_due/longest_absense_from_school/enlist/disabled 均只有 `name` 作为关联键，其余字段分别是 school/bool/month/organ，禁止使用不存在的 `id`/`disabled_flag` 等列”。@demo/config/round_io_rules.json#56-74
-2. 后端在加载规则时会把该 guidance 注入 retry prompt，确保模型每次被回退时都能看到“必须以 name=... JOIN”的红线提示。
+2. 后端在加载规则时会把该 guidance 注入 retry prompt，确保模型每次被回退时都能看到“必须以 name=... JOIN”的红线提示.
 
 #### 影响
 
 - Round 7 的 SQL 模板被强制约束在真实字段范围内，重复执行时优先尝试基于 `name` 的 JOIN，不再无意引用 `id`。  
 - 若模型仍写出非法字段，校验提示会给出更明确的修正方向，流程有望推进到 README 轮。  
-- 该变更只涉及配置文本，对 CSV 阶段与 README 轮无副作用。
+- 该变更只涉及配置文本，对 CSV 阶段与 README 轮无副作用.
 
 ---
 ## 根本原因分析
