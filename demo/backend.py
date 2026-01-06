@@ -2710,6 +2710,11 @@ def bot_stream(messages, workspace, session_id="default"):
                         continue
                     else:
                         schema_only_repeat = 0
+
+                    # 在使用 mode_for_current 之前提前解析当前轮配置，避免未定义访问
+                    rule_for_current = get_round_rule(current_round)
+                    mode_for_current = round_mode(rule_for_current)
+
                     sql_tables_used: set[str] = set()
                     if mode_for_current == "filesystem_summary":
                         if uses_sqlite:
