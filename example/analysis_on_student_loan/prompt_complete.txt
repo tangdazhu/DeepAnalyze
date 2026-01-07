@@ -619,21 +619,67 @@ print(f"📊 记录了 {len(csv_files)} 个CSV文件, {len(png_files)} 个PNG文
 - `disabled.csv` 只有一列 `name`，列出所有被判定为残疾的学生；没有 `disabled` 或 `flag` 列
 - 进入代码后需自行构造布尔列，例如 `df["disabled_flag"] = 1`，或与 `enrolled` 合并计算总人数
 - 禁止访问不存在的列（如 `df["disabled"]`），否则会触发 `KeyError`
-- 绘制 `disabled_vs_total.png` 时务必保证 `plt.xticks` 的刻度数量与标签数量一致，可使用 `bars = plt.bar(...)` 后通过 `positions = [bar.get_x() + bar.get_width() / 2 for bar in bars]` 再调用 `plt.xticks(positions, labels)`
+- 绘制 `disabled_vs_total.png` 时务必保证 `plt.xticks` 的刻度数量与标签数量一致，可使用 `bars = plt.bar(... )` 后通过 `positions = [bar.get_x() + bar.get_width() / 2 for bar in bars]` 再调用 `plt.xticks(positions, labels)`
 
 **产出要求**：
 - `disabled_count.csv`：至少包含一行 `disabled_flag=1` 及其计数，可额外附带总人数/占比
 - `disabled_vs_total.png`：可采用常量列对比，或将 `disabled_flag` 与总人数拼成条形/饼图
 - 仍需在脚本末尾 `plt.savefig(... 'disabled_vs_total.png')` 并 `plt.close()`
 
-**输出文件**：  
-- `README.md`  
+---
 
-**写作要求（务必遵守）**：  
-1. 仅使用文件系统操作（`pathlib/os`），禁止执行 SQL 或绘图。允许只写 README.md，该轮豁免 CSV/PNG 输出检查。  
-2. README 必须以 `# 生成文件目录` 开头，并至少包含 `## HTML 报告 / ## CSV 数据文件 / ## 其他文件` 三个小节。  
-3. “其他文件”小节中必须列出本次 `README.md` 自身以及所有 `execute_round_*.txt`；描述需与目录数量一致。  
-4. 在正文中写出“共生成 X 个文件”的统计，X 需要与实际扫描数量一致。  
+### 第 8 轮：遍历 generated 目录并生成 README.md
+**任务**：扫描 `generated/` 目录，按要求输出索引文档，禁止执行 SQL / matplotlib / seaborn 等与文件列表无关的操作。
+
+**输出文件**：  
+- `README.md`
+
+**硬性要求**：  
+1. 只能使用 `pathlib` / `os` 做文件遍历与写盘；该轮不允许再创建 CSV/PNG，也不需要导入 pandas/matplotlib。  
+2. Markdown 必须以 `# 生成文件目录` 开头，并严格包含以下顺序的小节：`## HTML 报告`、`## CSV 数据文件`、`## 其他文件`。  
+3. “其他文件”中必须列出 **README.md 自身 + 所有 `execute_round_*.txt` 日志**，缺一不可。  
+4. 必须写出真实的“共生成 X 个文件”统计，`X == len(list(generated_dir.glob('*'))) - 子目录`。  
+5. 不允许在 README 中出现虚构文件或虚构表名；所有内容需来自真实扫描结果。  
+
+**推荐实现模板**（直接复用能显著降低退票概率）：
+```python
+from pathlib import Path
+
+generated_dir = Path("generated")
+files = sorted([p for p in generated_dir.iterdir() if p.is_file()])
+total_files = len(files)
+
+html_files = [f for f in files if f.suffix.lower() in {".html", ".htm"}]
+csv_files = [f for f in files if f.suffix.lower() == ".csv"]
+other_files = [f for f in files if f not in html_files and f not in csv_files]
+
+lines = [
+    "# 生成文件目录",
+    f"共生成 {total_files} 个文件，全部存放于 `generated/` 目录。",
+    "",
+    "## HTML 报告",
+]
+lines += [f"- {f.name}" for f in html_files] or ["- （无 HTML 报告）"]
+
+lines.append("")
+lines.append("## CSV 数据文件")
+lines += [f"- {f.name}" for f in csv_files] or ["- （无 CSV 文件）"]
+
+lines.append("")
+lines.append("## 其他文件")
+for f in other_files:
+    note = "（README 索引文件）" if f.name.lower() == "readme.md" else ""
+    if f.name.startswith("execute_round_"):
+        note = "（执行日志）"
+    lines.append(f"- {f.name}{note}")
+
+readme_path = generated_dir / "README.md"
+readme_path.write_text("\n".join(lines), encoding="utf-8")
+print(f"✅ README.md 已写入，列出了 {total_files} 个文件。")
+```
+> 若某类文件为空，需输出“（无 XXX 文件）”占位，避免章节内容缺失。严禁直接把 Markdown 粘贴到 `<Code>`；必须运行上述脚本或等效逻辑写盘。
+
+---
 
 ### 第 9 轮：输出最终答案
 **任务**：输出 `<Answer>` 标签，总结所有轮次成果  

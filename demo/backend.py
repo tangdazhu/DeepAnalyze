@@ -3301,7 +3301,6 @@ def bot_stream(messages, workspace, session_id="default"):
                             )
                             messages.append({"role": "user", "content": prompt})
                             refund_iteration()
-                            refund_round_progress(False)
                             continue
 
                     if (
@@ -3360,7 +3359,6 @@ def bot_stream(messages, workspace, session_id="default"):
                                     {"role": "user", "content": detail_prompt}
                                 )
                                 refund_iteration()
-                                refund_round_progress(False)
                                 continue
 
                     exe_str = f"\n<Execute>\n```\n{exe_output}\n```\n</Execute>\n"
