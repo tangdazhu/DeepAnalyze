@@ -84,6 +84,18 @@
         "README.md 必须包含 # 生成文件目录、### HTML 报告、### CSV 数据文件、### 其他文件 等章节",
         "需列出所有 execute_round_*.txt 和 README.md 本身"
       ]
+    },
+    {
+      "round": 9,
+      "mode": "html_report",
+      "input": {"type": "directory", "path": "generated"},
+      "outputs": [
+        {"type": "html", "filename": "multi_table_analysis.html"}
+      ],
+      "requirements": [
+        "HTML 必须包含 <html>、<head>、<body>、#summary/#visual/#data/#readme 等段落",
+        "需遍历 generated/ 下的 CSV/PNG/README 并生成对应列表"
+      ]
     }
   ]
 }

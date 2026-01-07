@@ -11,11 +11,11 @@
 2. **第 7 轮：使用 SQLite 数据库进行多表关联**
    - ✅ 此时才允许使用 `sqlite3.connect()`
 
-3. **第 9 轮：输出 `<Answer>`**
-   - ❌ **第 9 轮之前禁止输出 `<Answer>`**
-   - ✅ **只有第 9 轮才能输出 `<Answer>`**
+3. **第 10 轮：输出 `<Answer>`**
+   - ❌ **第 10 轮之前禁止输出 `<Answer>`**
+   - ✅ **只有第 10 轮才能输出 `<Answer>`**
 
-**如果你在第 9 轮之前输出 `<Answer>`，系统会强制终止任务并报错。**
+**如果你在第 10 轮之前输出 `<Answer>`，系统会强制终止任务并报错。**
 
 ## ⚡ 强制执行规则
 
@@ -119,7 +119,8 @@
 - **第 6 轮**：分析 disabled.csv 文件 📄
 - **第 7 轮**：使用 SQLite 数据库进行多表关联分析 📊
 - **第 8 轮**：生成 README.md 索引文件（记录所有生成的文件及其说明）
-- **第 9 轮**：输出 `<Answer>`（唯一允许输出 Answer 的轮次）
+- **第 9 轮**：生成 multi_table_analysis.html 汇总报告
+- **第 10 轮**：输出 `<Answer>`（唯一允许输出 Answer 的轮次）
 
 ### 4. 第 2-6 轮：CSV 文件单表分析（必须完成）
 
@@ -511,7 +512,7 @@ readme_content += """\n## 📝 分析轮次说明
 
 ## 📌 下一步（人工操作提示）
 
-阶段 1 在第 9 轮 `<Answer>` 输出后即告结束，不会在同一会话内继续生成 HTML 报告。若需要阶段 2（HTML 汇总）成果，请在阶段 1 全部完成后**另启一次运行**，手动加载 `prompt_stage2_html_report.md` 并按照其中的说明生成 `generated/analyze/` 下的 HTML 文件；不要在阶段 1 的任何轮次中尝试执行阶段 2 的任务。
+阶段 1 在第 10 轮 `<Answer>` 输出后即告结束，本阶段任务已经包含 README 与 HTML 报告；若需要额外的定制 Stage 2（例如对接前端模板），可在阶段 1 完整结束后再另启一轮运行加载 `prompt_stage2_html_report.md`，绝不可在阶段 1 的任何轮次内擅自执行 Stage 2 的脚本。
 """
 
 # 保存README文件
@@ -531,9 +532,13 @@ print(f"📊 记录了 {len(csv_files)} 个CSV文件, {len(png_files)} 个PNG文
 - 为阶段2提供清晰的文件索引
 - ❌ 禁止引用 DB_PATH、sqlite3、SQL 查询；本轮只允许使用 pathlib/os/json 等文件操作
 
-### 8. 第 9 轮：输出最终答案
+### 8. 第 9 轮：生成 multi_table_analysis.html 汇总报告
+- **任务**：遍历 `generated/` 目录下的 CSV/PNG/README 等产物，生成 HTML 报告 `multi_table_analysis.html`。
+- **约束**：只能使用 `pathlib/os/datetime` 等标准库操作文件；禁止引用 pandas、matplotlib、sqlite3；必须真正写入 HTML 文件而不是直接粘贴。
 
-**前置条件**：已完成第 2-8 轮的所有分析任务。
+### 9. 第 10 轮：输出最终答案
+
+**前置条件**：已完成第 2-9 轮的所有分析任务（包含 README 与 HTML 报告）。
 
 **格式**：
 
@@ -550,7 +555,7 @@ print(f"📊 记录了 {len(csv_files)} 个CSV文件, {len(png_files)} 个PNG文
 
 **如果你违反以下规则，系统会强制终止任务：**
 
-1. ⛔ **禁止在第 2-8 轮输出 `<Answer>` 标签**
+1. ⛔ **禁止在第 2-9 轮输出 `<Answer>` 标签**
 2. ⛔ **禁止跳过任何轮次**
 3. ⛔ **禁止在 `</Code>` 后继续输出任何内容**
 4. ⛔ **禁止臆测字段名** - 必须先用 `PRAGMA table_info(表名)` 查询真实字段
@@ -620,8 +625,9 @@ print(f"📊 记录了 {len(csv_files)} 个CSV文件, {len(png_files)} 个PNG文
 - 绘制 `disabled_vs_total.png` 时务必保证 `plt.xticks` 的刻度数量与标签数量一致，可使用 `bars = plt.bar(... )` 后通过 `positions = [bar.get_x() + bar.get_width() / 2 for bar in bars]` 再调用 `plt.xticks(positions, labels)`
 
 **产出要求**：
-- `disabled_count.csv`：至少包含一行 `disabled_flag=1` 及其计数，可额外附带总人数/占比
-- `disabled_vs_total.png`：可采用常量列对比，或将 `disabled_flag` 与总人数拼成条形/饼图
+- `disabled_count.csv`：必须至少包含 “Disabled” 与 “Total” 两行（或中文对应描述），写明残疾学生数量与总人数，可额外附带占比或布尔列。
+- `disabled_vs_total.png`：条形图需同时展示 “Disabled” 与 “Total” 两根柱，标题/图例清晰对比两者，保存前务必调用 `plt.tight_layout()`、`plt.savefig(... 'disabled_vs_total.png')`、`plt.close()`。
+- **严格禁止**在本轮生成任何 `*_field_types.txt` 等临时文件，`generated/` 只能出现要求的 CSV 与 PNG。
 - 仍需在脚本末尾 `plt.savefig(... 'disabled_vs_total.png')` 并 `plt.close()`
 
 ---
@@ -690,17 +696,103 @@ print(f"✅ README.md 已写入，列出了 {total_files} 个文件。")
 
 ---
 
-### 第 9 轮：输出总结报告
-**任务**：仅输出一个 `<Answer>`，形成对本次 8 轮分析的总结报告。  
+### 第 9 轮：生成 multi_table_analysis.html 汇总报告
+**任务**：使用 Python 脚本遍历 `generated/` 目录中的 CSV、PNG、README 等文件，汇总关键可视化/统计，并将结果写入 `multi_table_analysis.html`。禁止在 `<Code>` 中直接输出 HTML 字符串；必须运行脚本写盘。
+
+**输出文件**：  
+- `multi_table_analysis.html`
+
+**硬性要求**：  
+1. 必须 `from pathlib import Path`，并只使用 Python 文件操作（可以搭配 `datetime`、`json` 等标准库）；禁止使用 pandas/matplotlib/sqlite3。  
+2. HTML 需包含 `<html>`、`<head>`、`<body>`、`<section id="summary">` 等基础结构，且至少含有以下内容：  
+   - 标题 `<h1>多表关联分析报告</h1>`  
+   - “本次产出概览”段：列出本轮所用到的 CSV/PNG/README 文件数量与示例。  
+   - “可视化文件”段：为 `generated/` 下的 `.png` 文件生成 `<img>` 或 `<li>` 列表，并在同一行展示说明文字。  
+   - “数据明细”段：列出 `.csv` 文件，附上“统计文件”“JOIN 结果”等简短注释。  
+   - “索引文档”段：必须引用 `README.md` 并说明其用途。  
+3. 必须打印“✅ multi_table_analysis.html 已写入……”的提示，用于日志确认。  
+4. 若某类文件不存在，需输出 `<li>（无 XXX 文件）</li>` 占位，避免段落为空。  
+5. HTML 文件写入需使用 `Path("generated/multi_table_analysis.html").write_text(html, encoding="utf-8")` 或等效写盘操作，禁止只 `print`。  
+6. 不得引入外部 CSS/JS，可在 `<style>` 内内联少量基础样式，但避免过度装饰；禁止嵌入 iframe。
+
+**推荐实现模板（可直接复用并按需微调变量名/样式）**：  
+```python
+from pathlib import Path
+from datetime import datetime
+
+generated_dir = Path("generated")
+if not generated_dir.exists():
+    raise FileNotFoundError(f"目录不存在：{generated_dir.resolve()}")
+
+files = sorted([p for p in generated_dir.iterdir() if p.is_file()])
+png_files = [f for f in files if f.suffix.lower() == ".png"]
+csv_files = [f for f in files if f.suffix.lower() == ".csv"]
+readme_file = generated_dir / "README.md"
+
+def build_list(items, empty_label):
+    if not items:
+        return f"<li>{empty_label}</li>"
+    return "\n".join(f"<li><strong>{item.name}</strong></li>" for item in items)
+
+html_lines = [
+    "<!DOCTYPE html>",
+    "<html lang='zh-CN'>",
+    "<head>",
+    "  <meta charset='utf-8' />",
+    "  <title>multi_table_analysis 报告</title>",
+    "  <style>",
+    "    body { font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; margin: 2rem; }",
+    "    h1 { color: #1d3557; }",
+    "    section { margin-bottom: 1.5rem; }",
+    "    ul { line-height: 1.6; }",
+    "  </style>",
+    "</head>",
+    "<body>",
+    "  <h1>多表关联分析报告</h1>",
+    f"  <p>生成时间：{datetime.now():%Y-%m-%d %H:%M:%S}</p>",
+    "  <section id='summary'>",
+    f"    <p>当前共检测到 {len(csv_files)} 个 CSV、{len(png_files)} 个 PNG、"
+    f"{'1' if readme_file.exists() else '0'} 个 README。</p>",
+    "  </section>",
+    "  <section id='visuals'>",
+    "    <h2>可视化文件</h2>",
+    "    <ul>",
+    build_list(png_files, "（无 PNG 文件）"),
+    "    </ul>",
+    "  </section>",
+    "  <section id='data-files'>",
+    "    <h2>数据明细</h2>",
+    "    <ul>",
+    build_list(csv_files, "（无 CSV 文件）"),
+    "    </ul>",
+    "  </section>",
+    "  <section id='readme'>",
+    "    <h2>索引文档</h2>",
+    f"    <p>{'已生成 README.md，可作为 Stage 1 文件目录索引。' if readme_file.exists() else '（未找到 README.md）'}</p>",
+    "  </section>",
+    "</body>",
+    "</html>",
+]
+
+html_path = generated_dir / "multi_table_analysis.html"
+html_path.write_text("\n".join(html_lines), encoding="utf-8")
+print(f\"✅ multi_table_analysis.html 已写入，合计 {len(files)} 个文件被汇总。\")
+```
+> 如需更丰富的信息，可在 HTML 中追加“关键发现”段，引用具体 PNG/CSV；但依旧要遵守文件遍历 + 写盘的硬性要求。
+
+---
+
+### 第 10 轮：输出总结报告
+**任务**：仅输出一个 `<Answer>`，形成对本次 9 轮（2-9 轮）分析与产出的总结报告。
 
 **写作要求（务必遵守）**：  
 1. 仅允许输出 `<Answer>`，禁止再写 `<Analyze>` / `<Code>`。  
 2. 报告需回答三件事：  
-   - **做了哪些分析**：逐轮概述第 2-8 轮的任务与方法。  
-   - **生成了哪些结果**：列出关键文件（CSV/PNG/README 等）并点明它们代表的含义或可视化内容。  
+   - **做了哪些分析**：逐轮概述第 2-9 轮的任务与方法。  
+   - **生成了哪些结果**：列出关键文件（CSV/PNG/README/HTML 等）并点明它们代表的含义或可视化内容。  
    - **整体结论/下一步**：基于已生成的文件给出至少 2 条定量或定性结论（务必引用具体文件作为依据），如出现被回滚的轮次也需说明原因及修复。  
 3. `<Answer>` 内正文可以是 Markdown 段落，也可以嵌入内联 HTML（如 `<section>`、`<ul>`），但不得引用外部脚本或 CSS。  
-4. 引用文件时务必使用真实存在的文件名（如 `enrolled_summary.csv`、`multi_table_join_result.png`、`README.md`）；禁止杜撰未生成的文件。  
+4. 引用文件时务必使用真实存在的文件名（如 `enrolled_summary.csv`、`multi_table_join_result.png`、`README.md`、`multi_table_analysis.html`）；禁止杜撰未生成的文件。  
 
 ---
 
@@ -740,12 +832,12 @@ plt.close()
 
 ## 🔒 轮次进度追踪
 
-**当前进度**：第 2 轮 / 共 9 轮
+**当前进度**：第 2 轮 / 共 10 轮
 **已完成**：第 1 轮（Bootstrap）
-**待完成**：第 2, 3, 4, 5, 6, 7, 8, 9 轮
+**待完成**：第 2, 3, 4, 5, 6, 7, 8, 9, 10 轮
 
 **⚠️ 重要提醒**：
 - 每轮输出 `</Code>` 后立即停止
 - 等待代码执行完成后，立即开始下一轮
 - 不要等待用户指令，不要询问用户需求
-- **只有第 9 轮才能输出 `<Answer>`**
+- **只有第 10 轮才能输出 `<Answer>`**

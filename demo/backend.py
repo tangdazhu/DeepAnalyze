@@ -217,6 +217,9 @@ def describe_round(rule: dict[str, Any]) -> str:
     if mode == "filesystem_summary":
         path = input_cfg.get("path", "generated/ 目录")
         return f"遍历 {path} → 生成 {output_names}"
+    if mode == "html_report":
+        path = input_cfg.get("path", "generated/ 目录")
+        return f"遍历 {path} → 生成 HTML 报告（{output_names}）"
     return f"{mode or '该'} 轮任务 → 生成 {output_names}"
 
 
@@ -231,6 +234,7 @@ def guidance_for_rule(rule: dict[str, Any]) -> str:
         "sqlite_join": "直接输出 <Analyze> 和 <Code>，使用 sqlite3.connect(DB_PATH, timeout=30) 执行多表 JOIN，"
         "并将合并结果写入配置指定的 CSV/PNG。",
         "filesystem_summary": "直接输出 <Analyze> 和 <Code>，仅遍历 generated/ 目录并生成 Markdown 索引，不得执行 SQL。",
+        "html_report": "直接输出 <Analyze> 和 <Code>，遍历 generated/ 目录并使用 pathlib 写入 HTML 报告，禁止直接粘贴 HTML。",
     }
     return defaults.get(mode, "直接输出 <Analyze> 和 <Code> 完成本轮任务。")
 
@@ -283,9 +287,9 @@ def rule_requires_busy_timeout(rule: dict[str, Any]) -> bool:
 def build_round_retry_prompt(round_no: int, retry_idx: int) -> str:
     rule = get_round_rule(round_no)
     base = f"⚠️ 检测到第 {round_no} 轮输出为空（已重试 {retry_idx}/3 次）。\n\n"
-    if round_no == 9:
+    if round_no == 10:
         prompt = (
-            base + "**第 9 轮任务**：仅输出 `<Answer>` 总结所有轮次的发现与建议。\n\n"
+            base + "**第 10 轮任务**：仅输出 `<Answer>` 总结所有轮次的发现与建议。\n\n"
             "**⚡ 立即输出以下格式（不要输出任何其他内容）**：\n\n"
             "<Answer>\n"
             "1. 数据概况……\n"
@@ -333,8 +337,8 @@ def build_continue_prompt_text(completed_round: int, next_round: int) -> Optiona
         if next_round == 9:
             return (
                 f"✅ 已完成第 {completed_round} 轮。\n\n"
-                "⚡ 立即开始第 9 轮总结，不要等待指令。\n\n"
-                "**第 9 轮任务**：输出 <Answer> 总结所有分析结果与关键发现。\n\n"
+                "⚡ 立即开始第 10 轮总结，不要等待指令。\n\n"
+                "**第 10 轮任务**：输出 <Answer> 总结所有分析结果与关键发现。\n\n"
                 "本轮只允许输出 <Answer>，总结 2+ 条定量结论、失败轮次说明、后续建议。⚠️ 禁止再输出 <Analyze>/<Code>。"
             )
         return None
@@ -1384,7 +1388,32 @@ def code_looks_like_markdown(code: str) -> bool:
     markdown_like = sum(
         1 for line in significant_lines[:5] if line.startswith(MARKDOWN_PREFIXES)
     )
-    return markdown_like >= max(1, min(3, len(significant_lines[:5])))
+    return any(token in lower_code for token in python_tokens)
+
+
+def code_looks_like_html(code: str) -> bool:
+    """Detect cases where模型直接粘贴 HTML，而未提供 Python 代码。"""
+    if not code:
+        return False
+    normalized = code.strip()
+    if not normalized:
+        return False
+    python_tokens = (
+        "import ",
+        "from ",
+        "with ",
+        "open(",
+        ".write(",
+        ".write_text(",
+        ".writelines(",
+        "Path(",
+        "os.",
+    )
+    lower_code = normalized.lower()
+    if any(token in lower_code for token in python_tokens):
+        return False
+    # 如果包含典型 HTML 根元素且缺少 Python 结构，则判定为 HTML
+    return "<html" in lower_code and "</html>" in lower_code
 
 
 def has_filesystem_write_operations(code: str) -> bool:
@@ -1406,6 +1435,29 @@ def has_filesystem_write_operations(code: str) -> bool:
         "open(",
     )
     return any(token in lower_code for token in path_tokens)
+
+
+HTML_SECTION_IDS = ("summary", "visual", "data", "readme")
+
+
+def html_report_has_required_structure(text: str) -> tuple[bool, list[str]]:
+    """检测 multi_table_analysis.html 是否包含基础结构与必备 section。"""
+    if not text:
+        return False, ["HTML 内容为空"]
+    lower = text.lower()
+    missing: list[str] = []
+    if "<html" not in lower:
+        missing.append("缺少 <html> 标签")
+    if "<head" not in lower:
+        missing.append("缺少 <head> 段")
+    if "<body" not in lower:
+        missing.append("缺少 <body> 段")
+    for section_id in HTML_SECTION_IDS:
+        if f'id="{section_id}"' not in lower and f"id='{section_id}'" not in lower:
+            missing.append(f"缺少 id='{section_id}' 段落")
+    if "readme" not in lower:
+        missing.append("正文未提及 README")
+    return (not missing), missing
 
 
 def normalize_filename(name: str) -> str:
@@ -2037,8 +2089,8 @@ def bot_stream(messages, workspace, session_id="default"):
                             "**必须继续执行以下轮次**：\n"
                             "- 第 2-6 轮：单表分析（enrolled, no_payment_due, longest_absense_from_school, enlist, disabled）\n"
                             "- 第 7 轮：多表关联分析\n"
-                            "- 第 8 轮：生成单表分析 HTML 报告（single_table_analysis.html）\n"
-                            "- 第 9 轮：生成多表关联 HTML 报告（multi_table_analysis.html）\n"
+                            "- 第 8 轮：生成 README.md 索引文件\n"
+                            "- 第 9 轮：生成 multi_table_analysis.html 汇总报告\n"
                             "- 第 10 轮：输出最终 <Answer>\n\n"
                             f"**请立即继续第 {execute_rounds + 1} 轮分析，禁止输出 <Answer>。**"
                         )
@@ -2300,8 +2352,8 @@ def bot_stream(messages, workspace, session_id="default"):
                         "**必须继续执行以下轮次**：\n"
                         "- 第 2-6 轮：单表分析（enrolled, no_payment_due, longest_absense_from_school, enlist, disabled）\n"
                         "- 第 7 轮：多表关联分析\n"
-                        "- 第 8 轮：生成单表分析 HTML 报告（single_table_analysis.html）\n"
-                        "- 第 9 轮：生成多表关联 HTML 报告（multi_table_analysis.html）\n"
+                        "- 第 8 轮：生成 README.md 索引文件\n"
+                        "- 第 9 轮：生成 multi_table_analysis.html 汇总报告\n"
                         "- 第 10 轮：输出最终 <Answer>\n\n"
                         f"**请立即继续第 {execute_rounds + 1} 轮分析，禁止输出 <Answer>。**"
                     )
@@ -3335,6 +3387,25 @@ def bot_stream(messages, workspace, session_id="default"):
                             refund_iteration()
                             continue
 
+                    disallowed_field_type_files = [
+                        Path(p)
+                        for p in artifact_paths
+                        if Path(p).name.lower().endswith("_field_types.txt")
+                    ]
+                    if disallowed_field_type_files:
+                        logger.warning(
+                            "[bot_stream] Detected disallowed *_field_types.txt files: %s",
+                            ", ".join(str(p.name) for p in disallowed_field_type_files),
+                        )
+                        prompt = (
+                            "请不要在任何轮次额外生成 `*_field_types.txt` 这类辅助文件。"
+                            "本轮仅允许输出 round_io_rules 中指定的 CSV/PNG/README/HTML 产物。"
+                            "请删除这些多余文件后重新提交。"
+                        )
+                        messages.append({"role": "user", "content": prompt})
+                        refund_iteration()
+                        continue
+
                     if (
                         mode_for_current == "filesystem_summary"
                         and rule_for_current
@@ -3390,6 +3461,134 @@ def bot_stream(messages, workspace, session_id="default"):
                                 messages.append(
                                     {"role": "user", "content": detail_prompt}
                                 )
+                                refund_iteration()
+                                continue
+
+                    if (
+                        mode_for_current == "html_report"
+                        and rule_for_current
+                        and round_expected_filenames_by_type(rule_for_current, "html")
+                    ):
+                        html_filename = round_expected_filenames_by_type(
+                            rule_for_current, "html"
+                        )[0]
+                        html_path = next(
+                            (
+                                Path(p)
+                                for p in artifact_paths
+                                if Path(p).name == html_filename
+                            ),
+                            None,
+                        )
+                        if html_path:
+                            try:
+                                html_text = html_path.read_text(encoding="utf-8")
+                            except Exception as err:
+                                logger.warning(
+                                    "[bot_stream] Failed to read %s: %s",
+                                    html_filename,
+                                    err,
+                                )
+                                html_text = ""
+                            valid_html, html_missing = (
+                                html_report_has_required_structure(html_text)
+                            )
+                            if not valid_html:
+                                logger.warning(
+                                    "[bot_stream] HTML report validation failed: %s",
+                                    ", ".join(html_missing),
+                                )
+                                prompt = (
+                                    "multi_table_analysis.html 结构不符合要求："
+                                    + "；".join(html_missing)
+                                    + "。请按照提示模板补全 <html>/<head>/<body> 以及 summary/visual/data/readme 四个 section，"
+                                    "并重新生成 HTML。"
+                                )
+                                messages.append({"role": "user", "content": prompt})
+                                refund_iteration()
+                                continue
+
+                            generated_files = [
+                                f
+                                for f in generated_dir.iterdir()
+                                if f.is_file()
+                                and f.name.lower()
+                                not in {"multi_table_analysis.html", "readme.md"}
+                            ]
+                            csv_missing_refs = [
+                                f.name
+                                for f in generated_files
+                                if f.suffix.lower() == ".csv"
+                                and f.name not in html_text
+                            ]
+                            png_missing_refs = [
+                                f.name
+                                for f in generated_files
+                                if f.suffix.lower() == ".png"
+                                and f.name not in html_text
+                            ]
+                            readme_missing = (
+                                generated_dir / "README.md"
+                            ).exists() and "README.md" not in html_text
+                            if csv_missing_refs or png_missing_refs or readme_missing:
+                                logger.warning(
+                                    "[bot_stream] HTML report missing file references: csv=%s, png=%s, readme_missing=%s",
+                                    csv_missing_refs,
+                                    png_missing_refs,
+                                    readme_missing,
+                                )
+                                missing_msgs = []
+                                if csv_missing_refs:
+                                    missing_msgs.append(
+                                        "CSV：" + ", ".join(sorted(csv_missing_refs))
+                                    )
+                                if png_missing_refs:
+                                    missing_msgs.append(
+                                        "PNG：" + ", ".join(sorted(png_missing_refs))
+                                    )
+                                if readme_missing:
+                                    missing_msgs.append("README.md")
+                                prompt = (
+                                    "multi_table_analysis.html 需完整列出 generated/ 下的 CSV/PNG/README，"
+                                    "但当前缺少："
+                                    + "；".join(missing_msgs)
+                                    + "。请遍历目录并将文件名写入 HTML 列表后重新生成。"
+                                )
+                                messages.append({"role": "user", "content": prompt})
+                                refund_iteration()
+                                continue
+
+                    if current_round == 6:
+                        disabled_csv_path = next(
+                            (
+                                Path(p)
+                                for p in artifact_paths
+                                if Path(p).name == "disabled_count.csv"
+                            ),
+                            None,
+                        )
+                        if disabled_csv_path:
+                            try:
+                                csv_text = disabled_csv_path.read_text(encoding="utf-8")
+                            except Exception as err:
+                                logger.warning(
+                                    "[bot_stream] Failed to read disabled_count.csv: %s",
+                                    err,
+                                )
+                                csv_text = ""
+                            lower_csv_text = csv_text.lower()
+                            if (
+                                "disabled" not in lower_csv_text
+                                or "total" not in lower_csv_text
+                            ):
+                                logger.warning(
+                                    "[bot_stream] disabled_count.csv missing Disabled/Total rows"
+                                )
+                                prompt = (
+                                    "disabled_count.csv 必须同时记录残疾学生数量与总人数，并在 CSV 中出现"
+                                    " 'Disabled' 与 'Total'（或相应中文描述）。请重新计算总人数并更新 CSV/PNG。"
+                                )
+                                messages.append({"role": "user", "content": prompt})
                                 refund_iteration()
                                 continue
 
