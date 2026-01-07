@@ -228,24 +228,21 @@
 - Python 解释器直接把 Markdown 当成源码执行，日志报 `SyntaxError: invalid character '，' (U+FF0C)`，同时后端警告 `Round 8 outputs missing required filenames: README.md`。
 - 模型多次重试依然粘贴 Markdown，导致回滚循环，Round 8 永远写不出 README.md。
 
-#### 根本原因
 1. **缺少 Markdown 输入检测**：`filesystem_summary` 模式仅校验输出文件名与章节结构，未判断 `<Code>` 是否包含真正的 Python 逻辑。一旦模型直接粘贴 Markdown，执行阶段就必然抛出 SyntaxError。
 2. **前轮 SQL 模板迁移**：模型习惯在 `<Code>` 中输出可执行脚本；第 8 轮突然允许“只写 Markdown 内容”容易被误解为可以直接输出文本。
 
 #### 修复措施
-1. **新增 `code_looks_like_markdown` 过滤器**（@demo/backend.py#1331-1372）：利用 Markdown 常见前缀（`# / ## / - / * / ``` / <!--` 等）以及缺少 `import/with/open` 等 Python 关键字的特征，判断 `<Code>` 是否是 Markdown。
-2. **在轮次校验中拦截 Markdown**（@demo/backend.py#2602-2623）：若 `mode_for_next == "filesystem_summary"` 且检测到 Markdown，立即退票并提示“第 8 轮必须用 Python 脚本遍历 generated 并写入 README.md，不要直接粘贴 Markdown”。
+1. **新增 `code_looks_like_markdown` 过滤器**（@demo/backend.py#1330-1408）：利用 Markdown 常见前缀（`# / ## / - / * / ``` / <!--` 等）以及缺少 `import/with/open` 等 Python 关键字的特征，判断 `<Code>` 是否是 Markdown。
+2. **在轮次校验中拦截 Markdown**（@demo/backend.py#2612-2644）：若 `mode_for_next == "filesystem_summary"` 且检测到 Markdown，立即退票并提示“第 8 轮必须用 Python 脚本遍历 generated 并写入 README.md，不要直接粘贴 Markdown”。
 
 #### 影响
+
 - Round 8 代码必须通过 `Path('generated/README.md').write_text(...)` 等方式写入 README.md 才能通过校验.
 - SyntaxError 在执行前被拦截，避免生成无效日志；回滚提示更聚焦于“请写 Python 脚本”.
-- 预计重启 backend 并回归测试后，`generated/README.md` 能按规范生成并列出所有 CSV/PNG/TXT 产物.
+- 预计重启 backend 并回归测试后，`generated/README.md` 能按规范生成并列出所有 CSV/PNG/TXT 产物。
 
-## 根本原因分析
 
-### 1. 提前终止的技术原因
-
-**问题代码位置**：`demo/backend.py:1942-1971`
+### 最新问题（2026-01-07）：Round 8 只生成 execute 日志，依旧缺少 README.md
 
 **原始逻辑缺陷**：
 ```python

@@ -1387,6 +1387,27 @@ def code_looks_like_markdown(code: str) -> bool:
     return markdown_like >= max(1, min(3, len(significant_lines[:5])))
 
 
+def has_filesystem_write_operations(code: str) -> bool:
+    """Round 8 代码必须包含真实写盘操作（write_text / write / writelines）。"""
+    if not code:
+        return False
+    lower_code = code.lower()
+    write_tokens = (
+        ".write_text(",
+        ".write(",
+        ".writelines(",
+    )
+    has_write_call = any(token in lower_code for token in write_tokens)
+    if not has_write_call:
+        return False
+    path_tokens = (
+        "path(",
+        "from pathlib import",
+        "open(",
+    )
+    return any(token in lower_code for token in path_tokens)
+
+
 def normalize_filename(name: str) -> str:
     """统一文件名对比：去除 (n)/_modified 等后缀并转小写。"""
     if not name:
@@ -2621,6 +2642,17 @@ def bot_stream(messages, workspace, session_id="default"):
                             messages.append(
                                 {"role": "user", "content": markdown_prompt}
                             )
+                            refund_iteration()
+                            continue
+                        if not has_filesystem_write_operations(effective_code):
+                            logger.warning(
+                                "[bot_stream] Code rejected: filesystem summary missing filesystem write"
+                            )
+                            write_prompt = (
+                                f"第 {target_round} 轮必须使用 pathlib/os 写入 README.md（如 Path('generated/README.md').write_text(...)）。"
+                                " 当前检测不到任何写盘操作，请参考提示词提供的模板，确保脚本真正生成 README.md 文件。"
+                            )
+                            messages.append({"role": "user", "content": write_prompt})
                             refund_iteration()
                             continue
 

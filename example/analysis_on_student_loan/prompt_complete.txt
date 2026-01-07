@@ -640,12 +640,17 @@ print(f"📊 记录了 {len(csv_files)} 个CSV文件, {len(png_files)} 个PNG文
 3. “其他文件”中必须列出 **README.md 自身 + 所有 `execute_round_*.txt` 日志**，缺一不可。  
 4. 必须写出真实的“共生成 X 个文件”统计，`X == len(list(generated_dir.glob('*'))) - 子目录`。  
 5. 不允许在 README 中出现虚构文件或虚构表名；所有内容需来自真实扫描结果。  
+6. **严禁在 `<Code>` 中粘贴纯 Markdown 文本或多行 f-string**，必须运行 Python 代码，通过 `Path("generated/README.md").write_text(...)` 或 `open(..., "w")` 真正写入文件，否则后端会直接退票。  
 
-**推荐实现模板**（直接复用能显著降低退票概率）：
+**标准脚本（必须直接复用，可按需调整注释）**：  
 ```python
 from pathlib import Path
+from datetime import datetime
 
 generated_dir = Path("generated")
+if not generated_dir.exists():
+    raise FileNotFoundError(f"目录不存在：{generated_dir.resolve()}")
+
 files = sorted([p for p in generated_dir.iterdir() if p.is_file()])
 total_files = len(files)
 
@@ -656,6 +661,7 @@ other_files = [f for f in files if f not in html_files and f not in csv_files]
 lines = [
     "# 生成文件目录",
     f"共生成 {total_files} 个文件，全部存放于 `generated/` 目录。",
+    f"生成时间：{datetime.now():%Y-%m-%d %H:%M:%S}",
     "",
     "## HTML 报告",
 ]
@@ -667,17 +673,22 @@ lines += [f"- {f.name}" for f in csv_files] or ["- （无 CSV 文件）"]
 
 lines.append("")
 lines.append("## 其他文件")
-for f in other_files:
-    note = "（README 索引文件）" if f.name.lower() == "readme.md" else ""
-    if f.name.startswith("execute_round_"):
-        note = "（执行日志）"
-    lines.append(f"- {f.name}{note}")
+if other_files:
+    for f in other_files:
+        note = ""
+        if f.name.lower() == "readme.md":
+            note = "（README 索引文件）"
+        elif f.name.startswith("execute_round_"):
+            note = "（执行日志）"
+        lines.append(f"- {f.name}{note}")
+else:
+    lines.append("- （无 其他文件）")
 
 readme_path = generated_dir / "README.md"
 readme_path.write_text("\n".join(lines), encoding="utf-8")
 print(f"✅ README.md 已写入，列出了 {total_files} 个文件。")
 ```
-> 若某类文件为空，需输出“（无 XXX 文件）”占位，避免章节内容缺失。严禁直接把 Markdown 粘贴到 `<Code>`；必须运行上述脚本或等效逻辑写盘。
+> 若某类文件为空，需输出“（无 XXX 文件）”占位，避免章节内容缺失；严禁使用多行 f-string 拼接 Markdown，更不能在 `<Code>` 中直接粘贴 README 内容。
 
 ---
 
