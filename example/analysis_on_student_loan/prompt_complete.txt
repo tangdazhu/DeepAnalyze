@@ -645,6 +645,7 @@ print(f"📊 记录了 {len(csv_files)} 个CSV文件, {len(png_files)} 个PNG文
 4. 必须写出真实的“共生成 X 个文件”统计，`X == len(list(generated_dir.glob('*'))) - 子目录`。  
 5. 不允许在 README 中出现虚构文件或虚构表名；所有内容需来自真实扫描结果。  
 6. **严禁在 `<Code>` 中粘贴纯 Markdown 文本或多行 f-string**，必须运行 Python 代码，通过 `Path("generated/README.md").write_text(...)` 或 `open(..., "w")` 真正写入文件，否则后端会直接退票。  
+7. **必须直接复用下方“标准脚本”，只允许微调变量名/说明文字；若私自改写为固定字符串或漏掉遍历逻辑，系统会再次报“filesystem summary missing filesystem write”并退票。**  
 
 **标准脚本（必须直接复用，可按需调整注释）**：  
 ```python
@@ -713,7 +714,8 @@ print(f"✅ README.md 已写入，列出了 {total_files} 个文件。")
 3. 必须打印“✅ multi_table_analysis.html 已写入……”的提示，用于日志确认。  
 4. 若某类文件不存在，需输出 `<li>（无 XXX 文件）</li>` 占位，避免段落为空。  
 5. HTML 文件写入需使用 `Path("generated/multi_table_analysis.html").write_text(html, encoding="utf-8")` 或等效写盘操作，禁止只 `print`。  
-6. 不得引入外部 CSS/JS，可在 `<style>` 内内联少量基础样式，但避免过度装饰；禁止嵌入 iframe。
+6. 不得引入外部 CSS/JS，可在 `<style>` 内内联少量基础样式，但避免过度装饰；禁止嵌入 iframe。  
+7. **禁止在 `<Code>` 中直接粘贴完整 HTML；若被检测到（`Code rejected: detected HTML content instead of Python script`），整轮会被退票。务必沿用下方模板，通过 Python 拼接 `html_lines` 再 `write_text`。**
 
 **推荐实现模板（可直接复用并按需微调变量名/样式）**：  
 ```python
