@@ -284,6 +284,19 @@ def rule_requires_busy_timeout(rule: dict[str, Any]) -> bool:
     return any("pragma busy_timeout" in req.lower() for req in requirements)
 
 
+def log_prompt_payload(tag: str, prompt_text: str) -> None:
+    """将注入给模型的提示词记录到日志，便于排查 prompt 版本。"""
+    if not prompt_text:
+        return
+    max_len = 8000  # 避免日志体积过大
+    display_text = (
+        prompt_text
+        if len(prompt_text) <= max_len
+        else prompt_text[:max_len] + "\n...[truncated]..."
+    )
+    logger.info("[prompt] %s\n%s", tag, display_text)
+
+
 def build_round_retry_prompt(round_no: int, retry_idx: int) -> str:
     rule = get_round_rule(round_no)
     base = f"⚠️ 检测到第 {round_no} 轮输出为空（已重试 {retry_idx}/3 次）。\n\n"
@@ -328,6 +341,7 @@ def build_round_retry_prompt(round_no: int, retry_idx: int) -> str:
         "- 禁止提前输出 <Answer>\n\n"
         "**✅ 必须行为**：立即按照上方格式输出完整内容"
     )
+    log_prompt_payload(f"round_{round_no}_retry_{retry_idx}", prompt)
     return prompt
 
 
@@ -335,22 +349,26 @@ def build_continue_prompt_text(completed_round: int, next_round: int) -> Optiona
     rule = get_round_rule(next_round)
     if not rule:
         if next_round == 9:
-            return (
+            prompt = (
                 f"✅ 已完成第 {completed_round} 轮。\n\n"
                 "⚡ 立即开始第 10 轮总结，不要等待指令。\n\n"
                 "**第 10 轮任务**：输出 <Answer> 总结所有分析结果与关键发现。\n\n"
                 "本轮只允许输出 <Answer>，总结 2+ 条定量结论、失败轮次说明、后续建议。⚠️ 禁止再输出 <Analyze>/<Code>。"
             )
+            log_prompt_payload(f"round_{next_round}_continue", prompt)
+            return prompt
         return None
 
     desc = describe_round(rule)
     guidance = guidance_for_rule(rule)
-    return (
+    prompt = (
         f"✅ 已完成第 {completed_round} 轮。\n\n"
         f"⚡ 立即开始第 {next_round} 轮分析（不要等待指令，不要输出任何解释）。\n\n"
         f"**第 {next_round} 轮任务**：{desc}\n\n"
         f"{guidance}"
     )
+    log_prompt_payload(f"round_{next_round}_continue", prompt)
+    return prompt
 
 
 def execute_code(code_str):

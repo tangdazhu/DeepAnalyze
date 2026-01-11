@@ -633,21 +633,22 @@ print(f"📊 记录了 {len(csv_files)} 个CSV文件, {len(png_files)} 个PNG文
 ---
 
 ### 第 8 轮：遍历 generated 目录并生成 README.md
-**任务**：扫描 `generated/` 目录，按要求输出索引文档，禁止执行 SQL / matplotlib / seaborn 等与文件列表无关的操作。
+**任务**：扫描 `generated/` 目录，按要求输出索引文档，禁止执行 SQL / pandas / matplotlib / seaborn 等与文件遍历无关的操作。
 
-**输出文件**：  
-- `README.md`
+**输出文件**：`README.md`
 
-**硬性要求**：  
-1. 只能使用 `pathlib` / `os` 做文件遍历与写盘；该轮不允许再创建 CSV/PNG，也不需要导入 pandas/matplotlib。  
-2. Markdown 必须以 `# 生成文件目录` 开头，并严格包含以下顺序的小节：`## HTML 报告`、`## CSV 数据文件`、`## 其他文件`。  
-3. “其他文件”中必须列出 **README.md 自身 + 所有 `execute_round_*.txt` 日志**，缺一不可。  
-4. 必须写出真实的“共生成 X 个文件”统计，`X == len(list(generated_dir.glob('*'))) - 子目录`。  
-5. 不允许在 README 中出现虚构文件或虚构表名；所有内容需来自真实扫描结果。  
-6. **严禁在 `<Code>` 中粘贴纯 Markdown 文本或多行 f-string**，必须运行 Python 代码，通过 `Path("generated/README.md").write_text(...)` 或 `open(..., "w")` 真正写入文件，否则后端会直接退票。  
-7. **必须直接复用下方“标准脚本”，只允许微调变量名/说明文字；若私自改写为固定字符串或漏掉遍历逻辑，系统会再次报“filesystem summary missing filesystem write”并退票。**  
+**硬性要求**：
+1. 只能导入 `pathlib`（可选 `datetime`、`textwrap`），严禁导入 pandas/matplotlib。  
+2. Markdown 必须以 `# 生成文件目录` 开头，并依次包含 `## HTML 报告`、`## CSV 数据文件`、`## PNG 可视化`、`## 执行日志`、`## 其他文件` 五个小节。  
+3. “执行日志”小节必须列出 **全部 `execute_round_*.txt`**，含 bootstrap。缺失任何一个都会被判定为格式错误。  
+4. 必须动态统计 `generated/` 下所有文件（不含子目录），写出 “共生成 X 个文件” 行，并确保 X 与实际文件数一致。  
+5. 列表项需完整展示文件名与大小（bytes），示例：``- `enrolled_summary.csv` (194 bytes)``。禁止只列举单个 CSV。  
+6. 不允许在 `<Code>` 中粘贴完整 Markdown 字符串或使用三引号固定内容，必须遍历目录构造 `lines` 列表，再 `write_text`。  
+7. 如某类别没有文件，使用“- （无 XXX 文件）”占位。  
+8. README 内禁止出现与实际文件不符的描述（例如写成“所有文件来自第7轮”）。  
+9. 写盘后需 `print(f"✅ README.md 已写入...")` 方便日志确认。
 
-**标准脚本（必须直接复用，可按需调整注释）**：  
+**标准脚本（必须复用，可微调变量名/描述）**：
 ```python
 from pathlib import Path
 from datetime import datetime
@@ -661,7 +662,16 @@ total_files = len(files)
 
 html_files = [f for f in files if f.suffix.lower() in {".html", ".htm"}]
 csv_files = [f for f in files if f.suffix.lower() == ".csv"]
-other_files = [f for f in files if f not in html_files and f not in csv_files]
+png_files = [f for f in files if f.suffix.lower() == ".png"]
+log_files = [f for f in files if f.name.startswith("execute_round_")]
+other_files = [
+    f
+    for f in files
+    if f not in html_files + csv_files + png_files and f not in log_files
+]
+
+def format_files(items):
+    return [f"- `{f.name}` ({f.stat().st_size} bytes)" for f in items]
 
 lines = [
     "# 生成文件目录",
@@ -670,54 +680,49 @@ lines = [
     "",
     "## HTML 报告",
 ]
-lines += [f"- {f.name}" for f in html_files] or ["- （无 HTML 报告）"]
+lines += format_files(html_files) or ["- （无 HTML 报告）"]
 
 lines.append("")
 lines.append("## CSV 数据文件")
-lines += [f"- {f.name}" for f in csv_files] or ["- （无 CSV 文件）"]
+lines += format_files(csv_files) or ["- （无 CSV 数据文件）"]
+
+lines.append("")
+lines.append("## PNG 可视化")
+lines += format_files(png_files) or ["- （无 PNG 可视化）"]
+
+lines.append("")
+lines.append("## 执行日志")
+lines += format_files(log_files) or ["- （无 execute_round_*.txt）"]
 
 lines.append("")
 lines.append("## 其他文件")
-if other_files:
-    for f in other_files:
-        note = ""
-        if f.name.lower() == "readme.md":
-            note = "（README 索引文件）"
-        elif f.name.startswith("execute_round_"):
-            note = "（执行日志）"
-        lines.append(f"- {f.name}{note}")
-else:
-    lines.append("- （无 其他文件）")
+lines += format_files(other_files) or ["- （无 其他文件）"]
 
 readme_path = generated_dir / "README.md"
 readme_path.write_text("\n".join(lines), encoding="utf-8")
 print(f"✅ README.md 已写入，列出了 {total_files} 个文件。")
 ```
-> 若某类文件为空，需输出“（无 XXX 文件）”占位，避免章节内容缺失；严禁使用多行 f-string 拼接 Markdown，更不能在 `<Code>` 中直接粘贴 README 内容。
+> **严禁**用三引号定义 `markdown_content = """..."""`；如检测到将被立即退票。
 
 ---
 
 ### 第 9 轮：生成 multi_table_analysis.html 汇总报告
-**任务**：使用 Python 脚本遍历 `generated/` 目录中的 CSV、PNG、README 等文件，汇总关键可视化/统计，并将结果写入 `multi_table_analysis.html`。禁止在 `<Code>` 中直接输出 HTML 字符串；必须运行脚本写盘。
+**任务**：使用 Python 遍历 `generated/` 目录中的 CSV、PNG、README 等文件，生成结构化 HTML 报告 `multi_table_analysis.html`。禁止在 `<Code>` 中直接贴 HTML，必须通过 Python 构造 `html_lines` 并写盘。
 
-**输出文件**：  
-- `multi_table_analysis.html`
+**输出文件**：`multi_table_analysis.html`
 
-**硬性要求**：  
-1. 必须 `from pathlib import Path`，并只使用 Python 文件操作（可以搭配 `datetime`、`json` 等标准库）；禁止使用 pandas/matplotlib/sqlite3。  
-2. HTML 需包含 `<html>`、`<head>`、`<body>`、`<section id="summary">` 等基础结构，且至少含有以下内容：  
-   - 标题 `<h1>多表关联分析报告</h1>`  
-   - “本次产出概览”段：列出本轮所用到的 CSV/PNG/README 文件数量与示例。  
-   - “可视化文件”段：为 `generated/` 下的 `.png` 文件生成 `<img>` 或 `<li>` 列表，并在同一行展示说明文字。  
-   - “数据明细”段：列出 `.csv` 文件，附上“统计文件”“JOIN 结果”等简短注释。  
-   - “索引文档”段：必须引用 `README.md` 并说明其用途。  
-3. 必须打印“✅ multi_table_analysis.html 已写入……”的提示，用于日志确认。  
-4. 若某类文件不存在，需输出 `<li>（无 XXX 文件）</li>` 占位，避免段落为空。  
-5. HTML 文件写入需使用 `Path("generated/multi_table_analysis.html").write_text(html, encoding="utf-8")` 或等效写盘操作，禁止只 `print`。  
-6. 不得引入外部 CSS/JS，可在 `<style>` 内内联少量基础样式，但避免过度装饰；禁止嵌入 iframe。  
-7. **禁止在 `<Code>` 中直接粘贴完整 HTML；若被检测到（`Code rejected: detected HTML content instead of Python script`），整轮会被退票。务必沿用下方模板，通过 Python 拼接 `html_lines` 再 `write_text`。**
+**硬性要求**：
+1. 仅允许导入 `pathlib`、`datetime`、`json` 等轻量标准库，不得使用 pandas/matplotlib/sqlite3。  
+2. HTML 至少包含 `<html>`、`<head>`、`<body>`、`<section id="summary">`、`<section id="visuals">`、`<section id="data-files">`、`<section id="readme">`。  
+3. “可视化文件”需列出所有 `.png` 并用 `<li>` 或 `<figure>` 搭配 `<img src>`。若无 PNG，写 `<li>（无 PNG 文件）</li>`。  
+4. “数据明细”需列出全部 `.csv`，可加类型说明；必须至少引用 `multi_table_join_result.csv`。  
+5. “索引文档”需检测 `README.md` 是否存在并给出说明。  
+6. 写入方式必须是 `Path(...).write_text("\n".join(html_lines), encoding="utf-8")` 或等价操作，禁止 `print` HTML 或粘贴三引号字符串。  
+7. 结束时打印“✅ multi_table_analysis.html 已写入 …”日志。  
+8. 若后端检测到 HTML 字面量直接出现在 `<Code>` 中（例如整段 `<html>` 开始的字符串），将被判定为 “detected HTML content instead of Python script”。务必以 Python 列表构建。  
+9. 可适度加入内联 `<style>`，但必须放在 `html_lines` 中逐行写入。
 
-**推荐实现模板（可直接复用并按需微调变量名/样式）**：  
+**推荐模板**：
 ```python
 from pathlib import Path
 from datetime import datetime
@@ -733,8 +738,8 @@ readme_file = generated_dir / "README.md"
 
 def build_list(items, empty_label):
     if not items:
-        return f"<li>{empty_label}</li>"
-    return "\n".join(f"<li><strong>{item.name}</strong></li>" for item in items)
+        return [f"    <li>{empty_label}</li>"]
+    return [f"    <li><strong>{item.name}</strong></li>" for item in items]
 
 html_lines = [
     "<!DOCTYPE html>",
@@ -743,8 +748,7 @@ html_lines = [
     "  <meta charset='utf-8' />",
     "  <title>multi_table_analysis 报告</title>",
     "  <style>",
-    "    body { font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; margin: 2rem; }",
-    "    h1 { color: #1d3557; }",
+    "    body { font-family: 'Segoe UI','Microsoft YaHei',sans-serif; margin: 2rem; }",
     "    section { margin-bottom: 1.5rem; }",
     "    ul { line-height: 1.6; }",
     "  </style>",
@@ -753,24 +757,24 @@ html_lines = [
     "  <h1>多表关联分析报告</h1>",
     f"  <p>生成时间：{datetime.now():%Y-%m-%d %H:%M:%S}</p>",
     "  <section id='summary'>",
-    f"    <p>当前共检测到 {len(csv_files)} 个 CSV、{len(png_files)} 个 PNG、"
+    f"    <p>当前共扫描 {len(csv_files)} 个 CSV、{len(png_files)} 个 PNG、"
     f"{'1' if readme_file.exists() else '0'} 个 README。</p>",
     "  </section>",
     "  <section id='visuals'>",
     "    <h2>可视化文件</h2>",
     "    <ul>",
-    build_list(png_files, "（无 PNG 文件）"),
+    *build_list(png_files, "（无 PNG 文件）"),
     "    </ul>",
     "  </section>",
     "  <section id='data-files'>",
     "    <h2>数据明细</h2>",
     "    <ul>",
-    build_list(csv_files, "（无 CSV 文件）"),
+    *build_list(csv_files, "（无 CSV 文件）"),
     "    </ul>",
     "  </section>",
     "  <section id='readme'>",
     "    <h2>索引文档</h2>",
-    f"    <p>{'已生成 README.md，可作为 Stage 1 文件目录索引。' if readme_file.exists() else '（未找到 README.md）'}</p>",
+    f"    <p>{'已生成 README.md，可作为 Stage 1 文件索引。' if readme_file.exists() else '（未找到 README.md）'}</p>",
     "  </section>",
     "</body>",
     "</html>",
@@ -778,9 +782,9 @@ html_lines = [
 
 html_path = generated_dir / "multi_table_analysis.html"
 html_path.write_text("\n".join(html_lines), encoding="utf-8")
-print(f\"✅ multi_table_analysis.html 已写入，合计 {len(files)} 个文件被汇总。\")
+print(f\"✅ multi_table_analysis.html 已写入，统计 {len(files)} 个文件。\")
 ```
-> 如需更丰富的信息，可在 HTML 中追加“关键发现”段，引用具体 PNG/CSV；但依旧要遵守文件遍历 + 写盘的硬性要求。
+> 如需增加“关键发现”“下一步”段落，请继续在 `html_lines` 列表中 append，而不是粘贴整段 HTML。
 
 ---
 
