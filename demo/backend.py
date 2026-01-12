@@ -2594,9 +2594,15 @@ def bot_stream(messages, workspace, session_id="default"):
                         empty_code_rounds = 0  # 重置计数
 
                     # 拦截 HTML/前端模板被误当作 Python 代码的情况
-                    if re.search(
-                        r"<!doctype html|</?(html|head|body|section|div)\b",
-                        effective_code,
+                    # 只拒绝以 HTML 标签开头的代码（直接输出 HTML），允许包含 HTML 字符串的 Python 代码
+                    first_line = (
+                        effective_code.strip().split("\n")[0]
+                        if effective_code.strip()
+                        else ""
+                    )
+                    if re.match(
+                        r"^\s*<!doctype html|^\s*<(html|head|body|section|div)\b",
+                        first_line,
                         re.IGNORECASE,
                     ):
                         logger.warning(
