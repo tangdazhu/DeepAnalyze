@@ -656,6 +656,197 @@ if re.match(
 
 ---
 
+### 新问题（2026-01-12 晚）：Round 8 README.md 校验失败导致流程停止
+
+#### 现象
+
+- 会话 `session_1768215422711_ou4xk4rje` 成功完成第 2-7 轮，Round 8 生成了 README.md 文件。
+- README.md 内容正确，包含了所有 CSV、PNG、执行日志的列表。
+- 但后端校验失败，提示：
+  ```
+  2026-01-12 20:06:54,313 [WARNING] README.md format validation failed in round 8: 
+  文件总数不匹配（README=20，实际=22）; 
+  未列出执行日志：execute_round_8.txt; 
+  README.md 本身需在其他文件段列出
+  ```
+- 校验失败后，流程停止，未继续执行 Round 9 生成 HTML 报告。
+- `generated/` 目录下缺少 `multi_table_analysis.html` 文件。
+
+#### 根本原因
+
+**文件生成时序问题**：README.md 生成代码执行时，`README.md` 和 `execute_round_8.txt` 还未写入磁盘，导致：
+
+1. **文件总数不匹配**：
+   - 代码执行时统计到 20 个文件（不包括正在生成的 README.md 和 execute_round_8.txt）
+   - 代码执行完成后，这两个文件被写入，实际文件数变成 22 个
+   - 校验时发现 `README=20，实际=22`，判定为不匹配
+
+2. **无法列出当前轮次的执行日志**：
+   - `execute_round_8.txt` 是在代码执行完成后才写入的
+   - 生成 README.md 时，这个文件还不存在，无法被列出
+
+3. **无法列出 README.md 自身**：
+   - README.md 是在代码执行过程中生成的
+   - 生成时它本身还不存在于文件系统中，无法被列出
+
+**流程停止的原因**：
+
+校验失败后，后端虽然注入了重试提示并调用了 `refund_iteration()`，但此时 `raw_iterations=23` 已接近上限 `max_raw_iterations=24`（`MAX_ITERATIONS * 2 = 12 * 2`）。下一次循环 `raw_iterations` 会变成 24，触发退出条件 `raw_iterations >= max_raw_iterations`，导致主循环退出，流程终止。
+
+#### 修复措施
+
+修改 `backend_helpers.py` 中的 `validate_readme_document` 函数，放宽校验规则以适应文件生成时序问题（@demo/backend_helpers.py#162-205）：
+
+**1. 允许文件总数有 ±2 的误差**：
+
+```python
+# 修改前
+if reported != actual_total:
+    issues.append(f"文件总数不匹配（README={reported}，实际={actual_total}）")
+
+# 修改后
+# 允许 ±2 的误差范围（因为 README.md 和 execute_round_N.txt 在生成时还不存在）
+if abs(reported - actual_total) > 2:
+    issues.append(f"文件总数不匹配（README={reported}，实际={actual_total}）")
+```
+
+**2. 排除最新的执行日志**：
+
+```python
+# 修改前
+missing_logs = [name for name in log_files if name not in text]
+
+# 修改后
+# 排除最新的日志文件（通常是当前轮次的），只检查前 N-1 个日志
+latest_log = log_files[-1] if log_files else None
+missing_logs = [name for name in log_files[:-1] if name not in text]
+```
+
+**3. 不强制要求列出 README.md 自身**：
+
+```python
+# 移除了以下强制校验
+# if "README.md" not in text:
+#     issues.append("README.md 本身需在其他文件段列出")
+
+# 添加注释说明
+# 不强制要求列出 README.md 自身（因为生成时它还不存在）
+# 这是一个可选的最佳实践，但不应该作为校验失败的理由
+```
+
+#### 修改原理
+
+**时序容忍**：承认文件生成过程中存在时序差异，允许 README.md 统计的文件数与最终实际文件数有小幅偏差。
+
+**合理范围**：
+- ±2 的误差范围可以覆盖 README.md 和 execute_round_N.txt 这两个文件
+- 如果误差超过 2，说明确实存在其他问题，仍然会触发校验失败
+
+**渐进式校验**：
+- 只校验已经存在的执行日志（前 N-1 个）
+- 不校验当前轮次的日志和 README.md 自身
+- 确保校验规则符合实际执行流程
+
+#### 影响
+
+- Round 8 README.md 校验将通过，即使文件总数有 ±2 的偏差
+- 流程能够继续推进到 Round 9 生成 HTML 报告
+- 不影响对真正错误的检测（如缺少必需章节、文件条目格式错误等）
+- 提高了系统的容错性和鲁棒性
+
+#### 验证步骤
+
+重新运行测试后，观察：
+1. Round 8 README.md 校验应该通过（即使文件总数显示 20，实际是 22）
+2. 流程应该自动继续到 Round 9
+3. `generated/multi_table_analysis.html` 应该成功生成
+4. 整个 10 轮分析流程能够顺利完成
+
+---
+
+### 新问题（2026-01-13 早）：Round 7 模型持续生成无效表名导致循环
+
+#### 现象
+
+- 会话 `session_1768225049541_5802tpml2` 成功完成 Round 2-6（CSV 分析）
+- Round 7 开始后陷入循环，从 `raw=11` 到 `raw=24`，共 14 次尝试
+- 每次都因为 `Code rejected: invalid tables {'Integrity'}` 被拒绝
+- 模型持续在 SQL 代码中引用不存在的 `Integrity` 表
+- 最终因 `raw_iterations >= max_raw_iterations` (24 >= 24) 而退出
+- 流程在 Round 7 终止，只生成了 6 轮的结果文件
+
+#### 根本原因
+
+**模型理解障碍**：在 Round 7 多表 JOIN 任务中，模型无法理解"不要使用不存在的表名"的提示，持续生成包含虚构表名（如 `Integrity`、`Validity`、`Frequency` 等）的代码。
+
+**后端检测正常但提示不够明确**：
+- 后端正确检测到了无效表名：`invalid_tables = {'Integrity'}`
+- 但错误提示过于简单：`"脚本中引用了当前 sqlite_master 中不存在的表：Integrity。请重新查看首轮表结构，只能对真实表执行 SQL/EDA。"`
+- 模型无法从提示中明确知道**应该使用哪些表**，只知道不能使用 `Integrity`
+
+**与上次修改无关**：
+- 上次修改（放宽 README.md 校验规则）只影响 Round 8
+- 本次问题发生在 Round 7，上次修改的代码路径根本没有被执行到
+- 这是一个独立的新问题，不是 regression
+
+#### 修复措施
+
+修改 `backend.py` 中的无效表名错误提示（@demo/backend.py#2965-2978），增强提示信息的明确性：
+
+**修改前**：
+```python
+invalid_msg = (
+    "脚本中引用了当前 sqlite_master 中不存在的表："
+    + ", ".join(sorted(invalid_tables))
+    + "。请重新查看首轮表结构，只能对真实表执行 SQL/EDA。"
+)
+```
+
+**修改后**：
+```python
+valid_tables_list = ", ".join(sorted(known_tables)) if known_tables else "无"
+invalid_msg = (
+    f"❌ 脚本中引用了不存在的表：{', '.join(sorted(invalid_tables))}\n\n"
+    f"✅ 数据库中真实存在的表（来自首轮 sqlite_master 查询）：\n{valid_tables_list}\n\n"
+    "⚠️ 请严格使用上述真实表名，不要使用任何虚构的表名（如 Integrity、Validity、Frequency 等）。\n"
+    "所有表均只有 name 列作为关联键，其余字段请参考首轮输出的表结构。"
+)
+```
+
+#### 修改原理
+
+**明确列出有效表名**：
+- 不再只告诉模型"不能用什么"，而是明确告诉"应该用什么"
+- 直接展示 `known_tables` 中的所有真实表名
+- 避免模型猜测或臆造表名
+
+**结构化提示**：
+- 使用 ❌ 和 ✅ 符号区分错误和正确的做法
+- 使用 ⚠️ 符号强调关键注意事项
+- 分段展示信息，提高可读性
+
+**举例说明**：
+- 明确列举常见的虚构表名（Integrity、Validity、Frequency）
+- 提醒所有表的共同特征（name 列作为关联键）
+- 引导模型回顾首轮输出的表结构
+
+#### 影响
+
+- 模型能够明确知道应该使用哪些表名
+- 减少因表名错误导致的重试次数
+- 提高 Round 7 多表 JOIN 任务的成功率
+- 避免因 `raw_iterations` 达到上限而提前终止
+
+#### 验证步骤
+
+重新运行测试后，观察：
+1. Round 7 应该能够正确使用真实表名（enrolled, no_payment_due, longest_absense_from_school, enlist, disabled）
+2. 不再出现 `invalid tables {'Integrity'}` 的错误
+3. Round 7 能够在合理的重试次数内完成（不超过 3-5 次）
+4. 流程能够继续推进到 Round 8、Round 9，最终完成 10 轮分析
+
+---
+
 **潜在问题**：修复 7 只解决了 `@backend.py:2988-2999` 处的主动请求机制,但忽略了 `answer_requested` 标志在代码中有**多个触发点**:
 
 1. **`@backend.py:2340-2350`**: 当模型输出 `</Code>` 且 `answer_requested = True` 时,系统会注入提示要求模型输出 Answer

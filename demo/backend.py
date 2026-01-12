@@ -2966,10 +2966,14 @@ def bot_stream(messages, workspace, session_id="default"):
                         logger.warning(
                             f"[bot_stream] Code rejected: invalid tables {invalid_tables}"
                         )
+                        valid_tables_list = (
+                            ", ".join(sorted(known_tables)) if known_tables else "无"
+                        )
                         invalid_msg = (
-                            "脚本中引用了当前 sqlite_master 中不存在的表："
-                            + ", ".join(sorted(invalid_tables))
-                            + "。请重新查看首轮表结构，只能对真实表执行 SQL/EDA。"
+                            f"❌ 脚本中引用了不存在的表：{', '.join(sorted(invalid_tables))}\n\n"
+                            f"✅ 数据库中真实存在的表（来自首轮 sqlite_master 查询）：\n{valid_tables_list}\n\n"
+                            "⚠️ 请严格使用上述真实表名，不要使用任何虚构的表名（如 Integrity、Validity、Frequency 等）。\n"
+                            "所有表均只有 name 列作为关联键，其余字段请参考首轮输出的表结构。"
                         )
                         messages.append({"role": "user", "content": invalid_msg})
                         refund_iteration()
