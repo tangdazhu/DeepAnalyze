@@ -3495,6 +3495,8 @@ def bot_stream(messages, workspace, session_id="default"):
                                 messages.append(
                                     {"role": "user", "content": detail_prompt}
                                 )
+                                # 允许下一轮重复 Analyze（因为是同一任务的纠错重试）
+                                allow_duplicate_analyze_retry()
                                 refund_iteration()
                                 continue
 

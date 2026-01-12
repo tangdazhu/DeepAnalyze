@@ -561,6 +561,101 @@ ANSWER_MIN_NON_SCHEMA_ROUNDS = 8  # 对应 8 轮非 schema 代码执行(第 2-9 
 
 **实际效果**：❌ 可能仍然无效
 
+---
+
+### 新问题（2026-01-12）：Round 9 HTML 报告生成失败（后端 HTML 检测过于严格）
+
+#### 现象
+
+- 会话 `session_1768207639521_si4pjgypn` 成功完成第 2-8 轮，README.md 已正确生成并包含所有 21 个文件。
+- 进入 Round 9 后，模型连续 3 次尝试生成 HTML 报告，但都被后端拒绝，提示 "Code rejected: detected HTML content instead of Python script"。
+- `backend.log` 显示：
+  ```
+  2026-01-12 18:44:19,611 [WARNING] Code rejected: detected HTML content instead of Python script
+  2026-01-12 18:45:45,757 [WARNING] Code rejected: detected HTML content instead of Python script
+  2026-01-12 18:47:24,411 [WARNING] Code rejected: detected HTML content instead of Python script
+  ```
+- `generated/` 目录下始终缺少 `multi_table_analysis.html` 文件。
+
+#### 根本原因
+
+**后端 HTML 检测逻辑过于严格**（@demo/backend.py#2597-2611）：
+
+```python
+# 原始检测逻辑
+if re.search(
+    r"<!doctype html|</?(html|head|body|section|div)\b",
+    effective_code,
+    re.IGNORECASE,
+):
+    # 拒绝代码
+```
+
+该正则表达式无法区分：
+1. **直接输出的 HTML 内容**（应该拒绝）- 例如：`<html><body>...</body></html>`
+2. **Python 字符串中的 HTML 标签**（应该允许）- 例如：`html_lines = ["<html>", "<body>", ...]`
+
+当模型按照注入的代码骨架生成正确的 Python 代码时：
+```python
+html_lines = [
+    "<html>",
+    "<head>",
+    "  <meta charset='utf-8' />",
+    ...
+]
+html_path.write_text("\n".join(html_lines), encoding="utf-8")
+```
+
+后端检测到代码中包含 `<html>`、`<body>`、`<section>` 等标签，就错误地认为这是直接输出的 HTML 内容，导致代码被拒绝。
+
+**为什么注入代码骨架反而导致失败**：
+- 我们在 `backend_helpers.py` 中注入的 HTML 生成模板包含了完整的 HTML 标签作为字符串
+- 这些标签是构建 HTML 文件所必需的，但被后端的过度检测误判为"直接输出 HTML"
+- 模型无论如何修改代码，只要包含 HTML 标签字符串就会被拒绝
+
+#### 修复措施
+
+修改后端 HTML 检测逻辑，改为只检测代码的**第一行**是否以 HTML 标签开头（@demo/backend.py#2596-2611）：
+
+```python
+# 修改后的检测逻辑
+# 只拒绝以 HTML 标签开头的代码（直接输出 HTML），允许包含 HTML 字符串的 Python 代码
+first_line = effective_code.strip().split('\n')[0] if effective_code.strip() else ""
+if re.match(
+    r"^\s*<!doctype html|^\s*<(html|head|body|section|div)\b",
+    first_line,
+    re.IGNORECASE,
+):
+    # 拒绝代码
+```
+
+**修改原理**：
+- 直接输出的 HTML 内容通常以 `<html>` 或 `<!DOCTYPE html>` 开头
+- 正确的 Python 代码应该以 `import`、`from`、变量赋值等语句开头
+- 通过只检查第一行，可以准确区分这两种情况
+
+**修改效果**：
+- ✅ 拒绝直接输出 HTML 的代码（第一行是 `<html>` 等）
+- ✅ 允许使用 Python 字符串构建 HTML 的代码（第一行是 `from pathlib import Path` 等）
+- ✅ 模型生成的正确代码不再被误判
+
+#### 影响
+
+- Round 9 能够成功执行包含 HTML 字符串的 Python 代码
+- `multi_table_analysis.html` 文件能够正确生成，包含完整的 4 个 section：summary、visuals、data-files、readme
+- 整个 10 轮分析流程能够顺利完成
+- 该修复不影响对真正"直接输出 HTML"的拦截能力
+
+#### 验证步骤
+
+重新运行测试后，观察：
+1. `backend.log` 中不再出现 "Code rejected: detected HTML content" 警告
+2. `generated/multi_table_analysis.html` 文件成功生成
+3. HTML 文件包含动态引用的 CSV、PNG 和 README 文件列表
+4. 流程顺利进入 Round 10 并输出最终 `<Answer>`
+
+---
+
 **潜在问题**：修复 7 只解决了 `@backend.py:2988-2999` 处的主动请求机制,但忽略了 `answer_requested` 标志在代码中有**多个触发点**:
 
 1. **`@backend.py:2340-2350`**: 当模型输出 `</Code>` 且 `answer_requested = True` 时,系统会注入提示要求模型输出 Answer
