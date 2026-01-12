@@ -11,6 +11,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import textwrap
 import threading
 from collections import defaultdict
 from functools import partial
@@ -34,6 +35,13 @@ for path_candidate in (str(PROJECT_ROOT), str(API_DIR)):
         sys.path.insert(0, path_candidate)
 
 import config as api_config
+from backend_helpers import (
+    README_SECTION_HEADERS,
+    README_BULLET_PATTERN,
+    build_filesystem_summary_template,
+    build_html_report_template,
+    validate_readme_document,
+)
 
 os.environ.setdefault("MPLBACKEND", "Agg")
 
@@ -228,15 +236,31 @@ def guidance_for_rule(rule: dict[str, Any]) -> str:
     if custom:
         return custom
     mode = (rule.get("mode") or "").lower()
-    defaults = {
-        "csv_analysis": "直接输出 <Analyze> 和 <Code>，使用 pandas 读取配置指定的 CSV 绝对路径，"
-        "写出统计 CSV 与 PNG 至 generated/。",
-        "sqlite_join": "直接输出 <Analyze> 和 <Code>，使用 sqlite3.connect(DB_PATH, timeout=30) 执行多表 JOIN，"
-        "并将合并结果写入配置指定的 CSV/PNG。",
-        "filesystem_summary": "直接输出 <Analyze> 和 <Code>，仅遍历 generated/ 目录并生成 Markdown 索引，不得执行 SQL。",
-        "html_report": "直接输出 <Analyze> 和 <Code>，遍历 generated/ 目录并使用 pathlib 写入 HTML 报告，禁止直接粘贴 HTML。",
-    }
-    return defaults.get(mode, "直接输出 <Analyze> 和 <Code> 完成本轮任务。")
+    if mode == "csv_analysis":
+        return (
+            "直接输出 <Analyze> 和 <Code>，使用 pandas 读取配置指定的 CSV 绝对路径，"
+            "写出统计 CSV 与 PNG 至 generated/。"
+        )
+    if mode == "sqlite_join":
+        return (
+            "直接输出 <Analyze> 和 <Code>，使用 sqlite3.connect(DB_PATH, timeout=30) 执行多表 JOIN，"
+            "并将合并结果写入配置指定的 CSV/PNG。"
+        )
+    if mode == "filesystem_summary":
+        return (
+            "直接输出 <Analyze> 和 <Code>，仅遍历 generated/ 目录并生成 Markdown 索引，不得执行 SQL。\n\n"
+            + build_filesystem_summary_template()
+        )
+    if mode == "html_report":
+        html_name = "multi_table_analysis.html"
+        html_files = round_expected_filenames_by_type(rule, "html")
+        if html_files:
+            html_name = html_files[0]
+        return (
+            "直接输出 <Analyze> 和 <Code>，遍历 generated/ 目录并使用 pathlib 写入 HTML 报告，禁止直接粘贴 HTML。\n\n"
+            + build_html_report_template(html_name)
+        )
+    return "直接输出 <Analyze> 和 <Code> 完成本轮任务。"
 
 
 def round_expected_filenames(rule: dict[str, Any]) -> list[str]:
@@ -3448,33 +3472,19 @@ def bot_stream(messages, workspace, session_id="default"):
                                     f"[bot_stream] Failed to read README.md for validation: {err}"
                                 )
                                 readme_text = ""
-                            sections_required = [
-                                "# 生成文件目录",
-                                "## HTML 报告",
-                                "## CSV 数据文件",
-                                "## 其他文件",
-                            ]
-                            missing_sections = [
-                                sec
-                                for sec in sections_required
-                                if sec not in readme_text
-                            ]
-                            has_execute_refs = "execute_round_" in readme_text
-                            has_self_ref = "README.md" in readme_text
-                            if (
-                                missing_sections
-                                or not has_execute_refs
-                                or not has_self_ref
-                            ):
+                            is_valid_readme, readme_issues = validate_readme_document(
+                                readme_text, generated_dir
+                            )
+                            if not is_valid_readme:
                                 logger.warning(
-                                    "[bot_stream] README.md format validation failed in round %s",
+                                    "[bot_stream] README.md format validation failed in round %s: %s",
                                     current_round,
+                                    "; ".join(readme_issues),
                                 )
                                 detail_prompt = (
-                                    "生成的 README.md 未符合规范：\n"
-                                    "- 必须以 `# 生成文件目录` 开头，并包含 `## HTML 报告 / ## CSV 数据文件 / ## 其他文件` 三个小节；\n"
-                                    "- “其他文件”部分需列出 README.md 本身及所有 `execute_round_*.txt`。\n"
-                                    "请修正 README 内容后重新提交。"
+                                    "生成的 README.md 未符合规范：\n- "
+                                    + "\n- ".join(readme_issues)
+                                    + "\n请按照模板遍历 generated/ 目录并重新写入 README.md。"
                                 )
                                 messages.append(
                                     {"role": "user", "content": detail_prompt}
