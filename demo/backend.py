@@ -784,6 +784,21 @@ def extract_table_mentions_from_text(
         # 过滤 Python 内置函数和常见变量名
         if lowered in PYTHON_BUILTINS:
             return False
+        # 过滤常见的 Python 变量命名后缀（DataFrame、路径等）
+        if lowered.endswith(
+            (
+                "_df",
+                "_path",
+                "_dir",
+                "_file",
+                "_files",
+                "_data",
+                "_summary",
+                "_count",
+                "_flag",
+            )
+        ):
+            return False
         if "_" in lowered:
             parts = lowered.split("_")
             if len(parts) >= 2 and parts[-1] in FILE_SUFFIXES:
