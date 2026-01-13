@@ -738,11 +738,51 @@ def extract_table_mentions_from_text(
         "analysis",
     }
 
+    # Python 内置函数和常见变量名白名单（用于 Round 8/9 文件系统操作）
+    PYTHON_BUILTINS = {
+        "build_list",
+        "format_items",
+        "html_lines",
+        "time_stats",
+        "analysis_summary",
+        "key_findings",
+        "readme_path",
+        "generated_dir",
+        "csv_files",
+        "png_files",
+        "log_files",
+        "html_files",
+        "other_files",
+        "st_size",
+        "stat",
+        "exists",
+        "iterdir",
+        "write_text",
+        "read_text",
+        "print",
+        "bytes",
+        "visual",
+        "section",
+        "now",
+        "strptime",
+        "strftime",
+        "datetime",
+        "timedelta",
+        "yyyy",
+        "mm",
+        "dd",
+        "hh",
+        "ss",
+    }
+
     def is_likely_table(token: str) -> bool:
         lowered = token.lower()
         if not lowered:
             return False
         if lowered in COMMON_WORDS or lowered.startswith("session_"):
+            return False
+        # 过滤 Python 内置函数和常见变量名
+        if lowered in PYTHON_BUILTINS:
             return False
         if "_" in lowered:
             parts = lowered.split("_")
@@ -3597,6 +3637,20 @@ def bot_stream(messages, workspace, session_id="default"):
                                 messages.append({"role": "user", "content": prompt})
                                 refund_iteration()
                                 continue
+
+                        # Round 9 HTML 生成成功后，更新 README.md 包含 HTML 文件
+                        if mode_for_current == "html_report":
+                            try:
+                                from backend_helpers import update_readme_after_html
+
+                                update_readme_after_html(generated_dir)
+                                logger.info(
+                                    "[bot_stream] README.md updated with HTML file"
+                                )
+                            except Exception as err:
+                                logger.warning(
+                                    "[bot_stream] Failed to update README: %s", err
+                                )
 
                     if current_round == 6:
                         disabled_csv_path = next(

@@ -92,6 +92,7 @@ def build_html_report_template(html_filename):
 ```python
 from pathlib import Path
 from datetime import datetime
+import re
 
 generated_dir = Path("generated")
 if not generated_dir.exists():
@@ -103,6 +104,38 @@ png_files = [f for f in files if f.suffix.lower() == ".png"]
 log_files = [f for f in files if f.name.startswith("execute_round_") and f.suffix == ".txt"]
 readme_path = generated_dir / "README.md"
 
+# 读取开始时间（从 bootstrap 日志）
+start_time_str = None
+end_time = datetime.now()
+bootstrap_log = generated_dir / "execute_round_0_bootstrap.txt"
+if bootstrap_log.exists():
+    try:
+        content = bootstrap_log.read_text(encoding="utf-8")
+        # 查找第一个时间戳（格式：YYYY-MM-DD HH:MM:SS）
+        match = re.search(r'(\\d{{4}}-\\d{{2}}-\\d{{2}} \\d{{2}}:\\d{{2}}:\\d{{2}})', content)
+        if match:
+            start_time_str = match.group(1)
+    except Exception:
+        pass
+
+# 计算执行时长
+duration_str = "未知"
+if start_time_str:
+    try:
+        start_time = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S")
+        duration = end_time - start_time
+        hours = int(duration.total_seconds() // 3600)
+        minutes = int((duration.total_seconds() % 3600) // 60)
+        seconds = int(duration.total_seconds() % 60)
+        if hours > 0:
+            duration_str = f"{{hours}} 小时 {{minutes}} 分钟 {{seconds}} 秒"
+        elif minutes > 0:
+            duration_str = f"{{minutes}} 分钟 {{seconds}} 秒"
+        else:
+            duration_str = f"{{seconds}} 秒"
+    except Exception:
+        duration_str = "计算失败"
+
 def build_list(items, empty_text):
     if not items:
         return [f"<li>{{empty_text}}</li>"]
@@ -112,6 +145,15 @@ def build_list(items, empty_text):
             f"<li><a href='{{item.name}}' target='_blank'>{{item.name}}</a> ({{item.stat().st_size}} bytes)</li>"
         )
     return entries
+
+# 构建执行时间统计
+time_stats = []
+time_stats.append("<h2>执行时间统计</h2>")
+time_stats.append("<ul>")
+time_stats.append(f"<li><strong>开始时间</strong>: {{start_time_str or '未知'}}</li>")
+time_stats.append(f"<li><strong>结束时间</strong>: {{end_time:%Y-%m-%d %H:%M:%S}}</li>")
+time_stats.append(f"<li><strong>总执行时长</strong>: {{duration_str}}</li>")
+time_stats.append("</ul>")
 
 # 构建分析过程总结
 analysis_summary = []
@@ -148,16 +190,18 @@ html_lines = [
     "    a {{ color: #3498db; text-decoration: none; }}",
     "    a:hover {{ text-decoration: underline; }}",
     "    .timestamp {{ color: #7f8c8d; font-size: 0.9em; }}",
+    "    .time-stat {{ color: #27ae60; font-weight: bold; }}",
     "  </style>",
     "</head>",
     "<body>",
     "  <h1>Student Loan 多表分析总结报告</h1>",
-    f"  <p class='timestamp'>生成时间：{{datetime.now():%Y-%m-%d %H:%M:%S}}</p>",
+    f"  <p class='timestamp'>报告生成时间：{{datetime.now():%Y-%m-%d %H:%M:%S}}</p>",
     "",
     "  <section id='summary'>",
     "    <h2>文件概览</h2>",
     f"    <p>本次分析共生成 {{len(files)}} 个文件，包括数据文件、可视化图表、执行日志和索引文档。</p>",
 ]
+html_lines.extend(time_stats)
 html_lines.extend(analysis_summary)
 html_lines.extend(key_findings)
 html_lines.append("  </section>")
@@ -254,3 +298,60 @@ def validate_readme_document(readme_text, generated_dir):
     # 这是一个可选的最佳实践，但不应该作为校验失败的理由
 
     return (not issues), issues
+
+
+def update_readme_after_html(generated_dir):
+    """在 Round 9 HTML 生成后更新 README.md，包含 HTML 文件"""
+    from pathlib import Path
+    from datetime import datetime
+
+    generated_path = Path(generated_dir)
+    if not generated_path.exists():
+        return
+
+    files = sorted([p for p in generated_path.iterdir() if p.is_file()])
+    total_files = len(files)
+
+    html_files = [f for f in files if f.suffix.lower() in {".html", ".htm"}]
+    csv_files = [f for f in files if f.suffix.lower() == ".csv"]
+    png_files = [f for f in files if f.suffix.lower() == ".png"]
+    log_files = [f for f in files if f.name.startswith("execute_round_")]
+    other_files = [
+        f
+        for f in files
+        if f not in html_files + csv_files + png_files and f not in log_files
+    ]
+
+    def format_items(items, placeholder):
+        return [f"- `{f.name}` ({f.stat().st_size} bytes)" for f in items] or [
+            placeholder
+        ]
+
+    lines = [
+        "# 生成文件目录",
+        f"共生成 {total_files} 个文件，全部存放于 `generated/` 目录。",
+        f"生成时间：{datetime.now():%Y-%m-%d %H:%M:%S}",
+        "",
+        "## HTML 报告",
+    ]
+    lines += format_items(html_files, "- （无 HTML 报告）")
+
+    lines.append("")
+    lines.append("## CSV 数据文件")
+    lines += format_items(csv_files, "- （无 CSV 数据文件）")
+
+    lines.append("")
+    lines.append("## PNG 可视化")
+    lines += format_items(png_files, "- （无 PNG 可视化）")
+
+    lines.append("")
+    lines.append("## 执行日志")
+    lines += format_items(log_files, "- （无 execute_round_*.txt）")
+
+    lines.append("")
+    lines.append("## 其他文件")
+    lines += format_items(other_files, "- （无其他文件）")
+
+    readme_path = generated_path / "README.md"
+    readme_path.write_text("\n".join(lines), encoding="utf-8")
+    return True
