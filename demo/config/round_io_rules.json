@@ -34,6 +34,7 @@
       "round": 5,
       "mode": "csv_analysis",
       "input": {"type": "csv", "filename": "enlist.csv"},
+      "guidance": "enlist.csv 只有 name 与 organ 两列。organ 表示组织/学院名称，若需要分析组织分布，必须使用 df['organ'] 而非 df['school']；禁止直接访问不存在的 school 列。",
       "outputs": [
         {"type": "csv", "filename": "enlist_summary.csv"},
         {"type": "png", "filename": "enlist_organ_dist.png"}
