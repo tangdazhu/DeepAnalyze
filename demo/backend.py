@@ -3539,7 +3539,7 @@ def bot_stream(messages, workspace, session_id="default"):
                                     ", ".join(html_missing),
                                 )
                                 prompt = (
-                                    "multi_table_analysis.html 结构不符合要求："
+                                    f"{html_filename} 结构不符合要求："
                                     + "；".join(html_missing)
                                     + "。请按照提示模板补全 <html>/<head>/<body> 以及 summary/visual/data/readme 四个 section，"
                                     "并重新生成 HTML。"
@@ -3553,7 +3553,7 @@ def bot_stream(messages, workspace, session_id="default"):
                                 for f in generated_dir.iterdir()
                                 if f.is_file()
                                 and f.name.lower()
-                                not in {"multi_table_analysis.html", "readme.md"}
+                                not in {html_filename.lower(), "readme.md"}
                             ]
                             csv_missing_refs = [
                                 f.name

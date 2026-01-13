@@ -100,6 +100,7 @@ if not generated_dir.exists():
 files = sorted([p for p in generated_dir.iterdir() if p.is_file()])
 csv_files = [f for f in files if f.suffix.lower() == ".csv"]
 png_files = [f for f in files if f.suffix.lower() == ".png"]
+log_files = [f for f in files if f.name.startswith("execute_round_") and f.suffix == ".txt"]
 readme_path = generated_dir / "README.md"
 
 def build_list(items, empty_text):
@@ -112,26 +113,73 @@ def build_list(items, empty_text):
         )
     return entries
 
+# 构建分析过程总结
+analysis_summary = []
+analysis_summary.append("<h2>分析过程总结</h2>")
+analysis_summary.append("<ul>")
+analysis_summary.append("<li><strong>Round 2-6</strong>: CSV 数据分析阶段，分别处理了 enrolled、no_payment_due、longest_absense_from_school、enlist、disabled 五个数据文件</li>")
+analysis_summary.append("<li><strong>Round 7</strong>: SQLite 多表关联阶段，将五个表通过 name 字段进行 JOIN，生成综合分析结果</li>")
+analysis_summary.append("<li><strong>Round 8</strong>: 文件系统总结阶段，遍历 generated 目录生成 README.md 索引文件</li>")
+analysis_summary.append("<li><strong>Round 9</strong>: HTML 报告生成阶段，创建本可视化报告</li>")
+analysis_summary.append("</ul>")
+
+# 构建关键发现总结
+key_findings = []
+key_findings.append("<h2>关键发现</h2>")
+key_findings.append("<ul>")
+key_findings.append(f"<li>共处理 {{len([f for f in csv_files if 'summary' not in f.name and 'join' not in f.name])}} 个原始数据文件</li>")
+key_findings.append(f"<li>生成 {{len([f for f in csv_files if 'summary' in f.name or 'join' in f.name])}} 个统计汇总文件</li>")
+key_findings.append(f"<li>创建 {{len(png_files)}} 个数据可视化图表</li>")
+key_findings.append(f"<li>记录 {{len(log_files)}} 个执行日志文件</li>")
+key_findings.append("</ul>")
+
 html_lines = [
     "<html>",
     "<head>",
     "  <meta charset='utf-8' />",
-    "  <title>multi_table_analysis</title>",
+    "  <title>Student Loan Analysis Summary</title>",
+    "  <style>",
+    "    body {{ font-family: Arial, sans-serif; margin: 20px; background-color: #f5f5f5; }}",
+    "    h1 {{ color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 10px; }}",
+    "    h2 {{ color: #34495e; margin-top: 30px; border-bottom: 2px solid #95a5a6; padding-bottom: 5px; }}",
+    "    section {{ background: white; padding: 20px; margin: 20px 0; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }}",
+    "    ul {{ line-height: 1.8; }}",
+    "    li {{ margin: 5px 0; }}",
+    "    a {{ color: #3498db; text-decoration: none; }}",
+    "    a:hover {{ text-decoration: underline; }}",
+    "    .timestamp {{ color: #7f8c8d; font-size: 0.9em; }}",
+    "  </style>",
     "</head>",
     "<body>",
-    f"  <section id='summary'><h1>生成文件概览</h1><p>共 {{len(files)}} 个文件，更新时间 {{datetime.now():%Y-%m-%d %H:%M:%S}}</p></section>",
-    "  <section id='visuals'><h2>PNG 可视化</h2>",
+    "  <h1>Student Loan 多表分析总结报告</h1>",
+    f"  <p class='timestamp'>生成时间：{{datetime.now():%Y-%m-%d %H:%M:%S}}</p>",
+    "",
+    "  <section id='summary'>",
+    "    <h2>文件概览</h2>",
+    f"    <p>本次分析共生成 {{len(files)}} 个文件，包括数据文件、可视化图表、执行日志和索引文档。</p>",
 ]
+html_lines.extend(analysis_summary)
+html_lines.extend(key_findings)
+html_lines.append("  </section>")
+
+html_lines.append("  <section id='visual'>")
+html_lines.append("    <h2>PNG 可视化图表</h2>")
+html_lines.append("    <ul>")
 html_lines += build_list(png_files, "（无 PNG 文件）")
+html_lines.append("    </ul>")
 html_lines.append("  </section>")
 
-html_lines.append("  <section id='data-files'><h2>CSV 数据文件</h2>")
+html_lines.append("  <section id='data'>")
+html_lines.append("    <h2>CSV 数据文件</h2>")
+html_lines.append("    <ul>")
 html_lines += build_list(csv_files, "（无 CSV 文件）")
+html_lines.append("    </ul>")
 html_lines.append("  </section>")
 
-html_lines.append("  <section id='readme'><h2>README</h2>")
+html_lines.append("  <section id='readme'>")
+html_lines.append("    <h2>README 索引</h2>")
 if readme_path.exists():
-    html_lines.append(f"    <p><a href='{{readme_path.name}}'>{{readme_path.name}}</a></p>")
+    html_lines.append(f"    <p><a href='{{readme_path.name}}'>{{readme_path.name}}</a> - 完整文件列表索引</p>")
 else:
     html_lines.append("    <p>（未找到 README.md）</p>")
 html_lines.append("  </section>")
@@ -145,6 +193,7 @@ print(f"✅ HTML 报告已写入：{{html_path.resolve()}}")
 
 - ❗ HTML 必须通过 `html_lines` 逐行构建，禁止 `html_template = \\"""...\\"""` 或 `print("<html>")` 写死整段 HTML。
 - ❗ 需遍历 generated/ 下真实存在的 CSV/PNG/README 文件，并写入 `<li>` 列表。
+- ❗ 必须包含 id='summary'、id='visual'、id='data'、id='readme' 四个 section。
 '''
     return textwrap.dedent(template).strip()
 

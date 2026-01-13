@@ -858,6 +858,217 @@ invalid_msg = (
 
 ### 修复 8：在 answer_requested 使用点增加轮次检查（12月 23 日下午）✅
 
+---
+
+## 问题 9：Round 5 模型使用错误列名导致 KeyError（2026-01-13）
+
+### 现象描述
+
+重新执行后流程仍然在 6 轮后停止，查看日志发现：
+
+1. **Round 5 代码执行失败**：
+   ```python
+   KeyError: 'school'
+   ```
+
+2. **实际列名不匹配**：
+   ```
+   缺失值统计:
+   name     0
+   organ    0    # ← 实际列名是 organ
+   dtype: int64
+   ```
+
+3. **模型反复生成错误代码**：
+   - 日志显示 Round 5 在 iteration 4 中经历了 raw=9 到 raw=24 共 16 次重试
+   - 每次都因为 `KeyError: 'school'` 失败
+   - 最终因为 `[WARNING] Round 5 outputs missing required filenames: enlist_summary.csv, enlist_organ_dist.png` 而停止
+
+### 根本原因分析
+
+#### 1. 配置文件缺少列名指导
+
+`@demo/config/round_io_rules.json:33-41` 第5轮配置：
+```json
+{
+  "round": 5,
+  "mode": "csv_analysis",
+  "input": {"type": "csv", "filename": "enlist.csv"},
+  "outputs": [
+    {"type": "csv", "filename": "enlist_summary.csv"},
+    {"type": "png", "filename": "enlist_organ_dist.png"}
+  ]
+}
+```
+
+**问题**：缺少 `guidance` 字段，没有明确说明 `enlist.csv` 的实际列名。
+
+对比第3、4、6轮都有详细的 `guidance`：
+- Round 3: 明确说明 `no_payment_due.csv` 有 `name` 和 `bool` 列
+- Round 4: 明确说明 `longest_absense_from_school.csv` 有 `name` 和 `month` 列
+- Round 6: 明确说明 `disabled.csv` 只有 `name` 列
+
+#### 2. 模型推测错误
+
+由于缺少明确指导，模型可能：
+1. 从 Round 2 的 `enrolled.csv` 中看到 `school` 列
+2. 从输出文件名 `enlist_organ_dist.png` 中推测应该分析"组织分布"
+3. 错误地假设 `enlist.csv` 也有 `school` 列
+
+#### 3. 后端校验未捕获列名错误
+
+`@demo/backend.py:2710-2731` 的 CSV 文件名校验只检查文件名是否正确，不检查列名：
+```python
+required_csv = round_input_filename(rule_for_next)
+if required_csv:
+    normalized_code_for_path = effective_code.lower()
+    if required_csv.lower() not in normalized_code_for_path:
+        # 只检查文件名，不检查列名
+```
+
+### 修复方案
+
+#### 修复 9.1：添加 guidance 字段明确列名
+
+在 `round_io_rules.json` 第5轮配置中添加 `guidance`：
+
+```json
+{
+  "round": 5,
+  "mode": "csv_analysis",
+  "input": {"type": "csv", "filename": "enlist.csv"},
+  "guidance": "enlist.csv 只有 name 与 organ 两列。organ 表示组织/学院名称，若需要分析组织分布，必须使用 df['organ'] 而非 df['school']；禁止直接访问不存在的 school 列。",
+  "outputs": [
+    {"type": "csv", "filename": "enlist_summary.csv"},
+    {"type": "png", "filename": "enlist_organ_dist.png"}
+  ]
+}
+```
+
+**效果**：
+- 模型在生成代码前会看到明确的列名说明
+- 避免从其他轮次或文件名中错误推测列名
+- 与第3、4、6轮保持一致的配置风格
+
+#### 验证步骤
+
+重新运行测试后，观察：
+1. Round 5 应该能够正确使用 `df['organ']` 而非 `df['school']`
+2. 不再出现 `KeyError: 'school'` 的错误
+3. Round 5 能够在第一次或少量重试内成功生成 `enlist_summary.csv` 和 `enlist_organ_dist.png`
+4. 流程能够继续推进到 Round 6、7、8、9，最终完成 10 轮分析
+
+---
+
+## 问题 10：Round 9 HTML section id 不匹配及内容不足（2026-01-13）
+
+### 现象描述
+
+修复问题 9 后，流程成功完成 9 轮分析并生成了 README.md 和 HTML 报告，但仍存在以下问题：
+
+1. **Round 9 HTML section id 不匹配**：
+   ```
+   2026-01-13 09:15:04,739 [WARNING] [bot_stream] HTML report validation failed: 缺少 id='visual' 段落, 缺少 id='data' 段落
+   ```
+   
+   实际生成的 HTML：
+   ```html
+   <section id='visuals'>  <!-- ❌ 应该是 id='visual' -->
+   <section id='data-files'>  <!-- ❌ 应该是 id='data' -->
+   ```
+
+2. **HTML 报告内容过于简单**：
+   - 只列出了文件清单，与 README.md 没有太大区别
+   - 缺少分析过程总结和关键发现
+   - 缺少样式美化
+
+3. **Round 2/7 重试次数较多**：
+   - Round 2 经历了 raw=3-6 共 4 次重试（缺少 CSV 读取、文件名错误）
+   - Round 7 经历了 raw=16-18 共 3 次重试（缺少 PRAGMA、路径错误）
+
+### 根本原因分析
+
+#### 1. HTML 模板中的 section id 不匹配
+
+`@demo/backend_helpers.py:123-128` 的 HTML 模板使用了错误的 id：
+```python
+"  <section id='visuals'><h2>PNG 可视化</h2>",  # ❌ 应该是 id='visual'
+"  <section id='data-files'><h2>CSV 数据文件</h2>",  # ❌ 应该是 id='data'
+```
+
+但后端校验 `@demo/backend.py:1482` 要求的是：
+```python
+HTML_SECTION_IDS = ("summary", "visual", "data", "readme")
+```
+
+#### 2. HTML 报告内容不足
+
+模板只包含简单的文件列表，缺少：
+- 分析过程的总结（Round 2-9 各轮做了什么）
+- 关键发现统计（处理了多少文件、生成了多少图表等）
+- 样式美化（CSS）
+
+#### 3. Round 2/7 guidance 不够明确
+
+- Round 2 缺少 guidance，导致模型不知道必须使用 CSV 而非 SQLite
+- Round 7 的 guidance 没有明确说明必须使用首轮提供的数据库路径和 PRAGMA
+
+### 修复方案
+
+#### 修复 10.1：修正 HTML section id 并增强内容
+
+**修改 `backend_helpers.py` 的 `build_html_report_template` 函数**：
+
+1. **修正 section id**：
+   - `id='visuals'` → `id='visual'`
+   - `id='data-files'` → `id='data'`
+
+2. **增强内容**：
+   - 添加分析过程总结（Round 2-9 各轮任务）
+   - 添加关键发现统计（文件数量、图表数量等）
+   - 添加 CSS 样式美化
+   - 添加时间戳和标题
+
+3. **改名为 `summary_analysis.html`**：
+   - 更新 `round_io_rules.json` 中的文件名
+   - 更新 `backend.py` 中的错误提示
+
+**效果**：
+- HTML 报告包含完整的分析总结
+- section id 符合后端校验要求
+- 视觉效果更加专业
+
+#### 修复 10.2：优化 Round 2/7 的 guidance
+
+**修改 `round_io_rules.json`**：
+
+1. **Round 2 添加 guidance**：
+   ```json
+   "guidance": "enrolled.csv 包含 name 与 school 两列。第2轮必须使用 pd.read_csv() 读取 enrolled.csv 的绝对路径（从首轮 bootstrap 提供的路径列表中获取），严禁使用 sqlite3 或其他数据库连接。"
+   ```
+
+2. **Round 7 增强 guidance**：
+   ```json
+   "guidance": "student_loan.sqlite 中的 enrolled/no_payment_due/longest_absense_from_school/enlist/disabled 均只有 name 列作为关联键，且其余字段分别为 school、bool、month、organ。第 7 轮必须：1) 使用首轮 bootstrap 提供的数据库绝对路径（DB_PATH）；2) 在 sqlite3.connect() 后立即执行 conn.execute('PRAGMA busy_timeout = 30000;')；3) 以 name 作为 JOIN 条件，禁止使用不存在的 id/disabled_flag 等列。"
+   ```
+
+**效果**：
+- Round 2 应在首次或少量重试内成功（不再尝试使用 SQLite）
+- Round 7 应在首次或少量重试内成功（不再缺少 PRAGMA 或路径）
+
+#### 验证步骤
+
+重新运行测试后，观察：
+1. Round 9 应该能够正确生成包含 `id='visual'` 和 `id='data'` 的 HTML
+2. 不再出现 `HTML report validation failed` 的警告
+3. HTML 报告包含分析过程总结、关键发现和样式美化
+4. 文件名为 `summary_analysis.html`
+5. Round 2 和 Round 7 的重试次数显著减少（≤2 次）
+
+---
+
+### 修复 8：在 answer_requested 使用点增加轮次检查（12月 23 日下午）✅
+
 #### 问题 8：answer_requested 标志的多重触发机制
 
 **根本原因**：

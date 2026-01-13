@@ -5,6 +5,7 @@
       "round": 2,
       "mode": "csv_analysis",
       "input": {"type": "csv", "filename": "enrolled.csv"},
+      "guidance": "enrolled.csv 包含 name 与 school 两列。第2轮必须使用 pd.read_csv() 读取 enrolled.csv 的绝对路径（从首轮 bootstrap 提供的路径列表中获取），严禁使用 sqlite3 或其他数据库连接。",
       "outputs": [
         {"type": "csv", "filename": "enrolled_summary.csv"},
         {"type": "png", "filename": "enrolled_school_dist.png"}
@@ -64,7 +65,7 @@
           "disabled"
         ]
       },
-      "guidance": "student_loan.sqlite 中的 enrolled/no_payment_due/longest_absense_from_school/enlist/disabled 均只有 name 列作为关联键，且其余字段分别为 school、bool、month、organ。第 7 轮必须以 name=... 作为 JOIN 条件，不能使用并不存在的 id/disabled_flag 等列。",
+      "guidance": "student_loan.sqlite 中的 enrolled/no_payment_due/longest_absense_from_school/enlist/disabled 均只有 name 列作为关联键，且其余字段分别为 school、bool、month、organ。第 7 轮必须：1) 使用首轮 bootstrap 提供的数据库绝对路径（DB_PATH）；2) 在 sqlite3.connect() 后立即执行 conn.execute('PRAGMA busy_timeout = 30000;')；3) 以 name 作为 JOIN 条件，禁止使用不存在的 id/disabled_flag 等列。",
       "outputs": [
         {"type": "csv", "filename": "multi_table_join_result.csv"},
         {"type": "png", "filename": "multi_table_join_result.png"}
@@ -91,11 +92,12 @@
       "mode": "html_report",
       "input": {"type": "directory", "path": "generated"},
       "outputs": [
-        {"type": "html", "filename": "multi_table_analysis.html"}
+        {"type": "html", "filename": "summary_analysis.html"}
       ],
       "requirements": [
         "HTML 必须包含 <html>、<head>、<body>、#summary/#visual/#data/#readme 等段落",
-        "需遍历 generated/ 下的 CSV/PNG/README 并生成对应列表"
+        "需遍历 generated/ 下的 CSV/PNG/README 并生成对应列表",
+        "必须包含分析过程总结和关键发现"
       ]
     }
   ]
