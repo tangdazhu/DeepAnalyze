@@ -136,6 +136,36 @@ if start_time_str:
     except Exception:
         duration_str = "计算失败"
 
+# 提取每轮执行时间
+def extract_round_time(log_path):
+    """从执行日志中提取开始和结束时间"""
+    try:
+        content = log_path.read_text(encoding="utf-8")
+        # 查找所有时间戳
+        timestamps = re.findall(r'(\\d{{4}}-\\d{{2}}-\\d{{2}} \\d{{2}}:\\d{{2}}:\\d{{2}})', content)
+        if len(timestamps) >= 2:
+            start = datetime.strptime(timestamps[0], "%Y-%m-%d %H:%M:%S")
+            end = datetime.strptime(timestamps[-1], "%Y-%m-%d %H:%M:%S")
+            duration = (end - start).total_seconds()
+            return start, end, duration
+    except Exception:
+        pass
+    return None, None, None
+
+# 统计每轮执行时间
+round_times = []
+for log_file in sorted(log_files):
+    if log_file.name.startswith("execute_round_"):
+        round_num = log_file.name.replace("execute_round_", "").replace(".txt", "")
+        start, end, duration = extract_round_time(log_file)
+        if start and end:
+            minutes = int(duration // 60)
+            seconds = int(duration % 60)
+            time_str = f"{{minutes}} 分 {{seconds}} 秒" if minutes > 0 else f"{{seconds}} 秒"
+            round_times.append((round_num, start, end, time_str))
+        else:
+            round_times.append((round_num, None, None, "未知"))
+
 def build_list(items, empty_text):
     if not items:
         return [f"<li>{{empty_text}}</li>"]
@@ -149,11 +179,31 @@ def build_list(items, empty_text):
 # 构建执行时间统计
 time_stats = []
 time_stats.append("<h2>执行时间统计</h2>")
+time_stats.append("<h3>总体时间</h3>")
 time_stats.append("<ul>")
 time_stats.append(f"<li><strong>开始时间</strong>: {{start_time_str or '未知'}}</li>")
 time_stats.append(f"<li><strong>结束时间</strong>: {{end_time:%Y-%m-%d %H:%M:%S}}</li>")
 time_stats.append(f"<li><strong>总执行时长</strong>: {{duration_str}}</li>")
 time_stats.append("</ul>")
+
+# 添加每轮执行时间
+if round_times:
+    time_stats.append("<h3>各轮执行时间</h3>")
+    time_stats.append("<table style='width:100%; border-collapse: collapse;'>")
+    time_stats.append("<tr style='background-color: #f0f0f0;'>")
+    time_stats.append("<th style='border: 1px solid #ddd; padding: 8px;'>轮次</th>")
+    time_stats.append("<th style='border: 1px solid #ddd; padding: 8px;'>开始时间</th>")
+    time_stats.append("<th style='border: 1px solid #ddd; padding: 8px;'>结束时间</th>")
+    time_stats.append("<th style='border: 1px solid #ddd; padding: 8px;'>耗时</th>")
+    time_stats.append("</tr>")
+    for round_num, start, end, time_str in round_times:
+        time_stats.append("<tr>")
+        time_stats.append(f"<td style='border: 1px solid #ddd; padding: 8px;'>Round {{round_num}}</td>")
+        time_stats.append(f"<td style='border: 1px solid #ddd; padding: 8px;'>{{start.strftime('%H:%M:%S') if start else '未知'}}</td>")
+        time_stats.append(f"<td style='border: 1px solid #ddd; padding: 8px;'>{{end.strftime('%H:%M:%S') if end else '未知'}}</td>")
+        time_stats.append(f"<td style='border: 1px solid #ddd; padding: 8px;'>{{time_str}}</td>")
+        time_stats.append("</tr>")
+    time_stats.append("</table>")
 
 # 构建分析过程总结
 analysis_summary = []
