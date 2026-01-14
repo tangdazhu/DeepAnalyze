@@ -288,7 +288,7 @@ html_lines.append("</html>")
 
 html_path = generated_dir / "{html_filename}"
 html_path.write_text("\\n".join(html_lines), encoding="utf-8")
-print(f"✅ HTML 报告已写入：{{html_path.resolve()}}")
+print(f"✅ HTML 报告已写入：{{html_path.name}}")
 ```
 
 - ❗ HTML 必须通过 `html_lines` 逐行构建，禁止 `html_template = \\"""...\\"""` 或 `print("<html>")` 写死整段 HTML。
