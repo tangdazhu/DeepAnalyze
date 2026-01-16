@@ -159,7 +159,7 @@ time_stats.append("</ul>")
 analysis_summary = []
 analysis_summary.append("<h2>分析过程总结</h2>")
 analysis_summary.append("<ul>")
-analysis_summary.append("<li><strong>Round 2-6</strong>: CSV 数据分析阶段，分别处理了 enrolled、no_payment_due、longest_absense_from_school、enlist、disabled 五个数据文件</li>")
+analysis_summary.append("<li><strong>Round 2-6</strong>: CSV 数据分析阶段，对多个数据文件进行了单表分析并生成汇总结果</li>")
 analysis_summary.append("<li><strong>Round 7</strong>: SQLite 多表关联阶段，将五个表通过 name 字段进行 JOIN，生成综合分析结果</li>")
 analysis_summary.append("<li><strong>Round 8</strong>: 文件系统总结阶段，遍历 generated 目录生成 README.md 索引文件</li>")
 analysis_summary.append("<li><strong>Round 9</strong>: HTML 报告生成阶段，创建本可视化报告</li>")

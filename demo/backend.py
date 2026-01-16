@@ -2184,7 +2184,7 @@ def bot_stream(messages, workspace, session_id="default"):
                         warn_msg = (
                             f"⚠️ 检测到提前输出 <Answer>：当前仅完成 {execute_rounds} 轮分析，但任务要求完成至少 {MIN_REQUIRED_ROUNDS} 轮。\n\n"
                             "**必须继续执行以下轮次**：\n"
-                            "- 第 2-6 轮：单表分析（enrolled, no_payment_due, longest_absense_from_school, enlist, disabled）\n"
+                            "- 第 2-6 轮：单表分析（处理多个数据文件）\n"
                             "- 第 7 轮：多表关联分析\n"
                             "- 第 8 轮：生成 README.md 索引文件\n"
                             "- 第 9 轮：生成 multi_table_analysis.html 汇总报告\n"
@@ -2447,7 +2447,7 @@ def bot_stream(messages, workspace, session_id="default"):
                     reject_msg = (
                         f"⚠️ 检测到提前终止：当前仅完成 {execute_rounds} 轮分析，但任务要求完成至少 {MIN_REQUIRED_ROUNDS} 轮。\n\n"
                         "**必须继续执行以下轮次**：\n"
-                        "- 第 2-6 轮：单表分析（enrolled, no_payment_due, longest_absense_from_school, enlist, disabled）\n"
+                        "- 第 2-6 轮：单表分析（处理多个数据文件）\n"
                         "- 第 7 轮：多表关联分析\n"
                         "- 第 8 轮：生成 README.md 索引文件\n"
                         "- 第 9 轮：生成 multi_table_analysis.html 汇总报告\n"
