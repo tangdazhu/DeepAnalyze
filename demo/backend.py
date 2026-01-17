@@ -2397,10 +2397,18 @@ def bot_stream(messages, workspace, session_id="default"):
             known_mentions = set()
             unknown_mentions = set()
             require_known_reference = schema_confirmed
+
+            # 获取当前轮次的模式
+            current_mode = round_mode(rule_for_next) if rule_for_next else None
+
+            # Round 8/9（filesystem_summary 和 html_report）跳过表名检测
+            # 因为这些轮次的 <Analyze> 可能包含 Python 代码片段，会被误识别为表名
+            skip_table_check = current_mode in ("filesystem_summary", "html_report")
+
             logger.info(
-                f"[bot_stream] Extracting table mentions: known_tables={len(known_tables)}, analyze_content_len={len(analyze_content)}"
+                f"[bot_stream] Extracting table mentions: known_tables={len(known_tables)}, analyze_content_len={len(analyze_content)}, mode={current_mode}, skip={skip_table_check}"
             )
-            if known_tables:
+            if known_tables and not skip_table_check:
                 try:
                     known_mentions, unknown_mentions = extract_table_mentions_from_text(
                         analyze_content, known_tables
