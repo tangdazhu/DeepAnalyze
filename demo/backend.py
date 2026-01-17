@@ -1992,6 +1992,7 @@ def bot_stream(messages, workspace, session_id="default"):
     schema_summary_injected = False
     schema_bootstrap_used = False
     unknown_table_warnings: set[str] = set()  # 跟踪已警告的未知表名,防止重复警告
+    rule_for_next = None  # 初始化 rule_for_next，避免在表名检测时出现 UnboundLocalError
 
     def refund_iteration():
         nonlocal iteration
