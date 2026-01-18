@@ -1787,8 +1787,11 @@ def run_schema_bootstrap(workspace_path: Path, session_id: str = None) -> str:
         try:
             log_file = generated_dir / "execute_round_0_bootstrap.txt"
             with open(log_file, "w", encoding="utf-8") as f:
+                from datetime import datetime
+
                 f.write("=== Schema Bootstrap Execution ===\n")
                 f.write(f"Session: {session_id}\n")
+                f.write(f"Timestamp: {datetime.now():%Y-%m-%d %H:%M:%S}\n")
                 f.write(f"Workspace: {workspace_path}\n\n")
                 f.write("=== Code ===\n")
                 f.write(script)
