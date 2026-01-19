@@ -121,7 +121,8 @@
 - **第 7 轮**：使用 SQLite 数据库进行多表关联分析 📊
 - **第 8 轮**：生成 README.md 索引文件（记录所有生成的文件及其说明）
 - **第 9 轮**：生成 multi_table_analysis.html 汇总报告
-- **第 10 轮**：输出 `<Answer>`（唯一允许输出 Answer 的轮次）
+- **第 10 轮**：生成 comprehensive_analysis_report.html（Phase II 综合分析）
+- **第 11 轮**：输出 `<Answer>`（唯一允许输出 Answer 的轮次）
 
 ### 4. 第 2-6 轮：CSV 文件单表分析（必须完成）
 
