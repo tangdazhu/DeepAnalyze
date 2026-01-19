@@ -862,22 +862,6 @@ import seaborn as sns
 from pathlib import Path
 
 CSV_PATH = r"<使用第1轮显示的 CSV 绝对路径>"
-OUTPUT_DIR = Path("generated")
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-df = pd.read_csv(CSV_PATH)
-summary = df.describe(include='all').transpose().reset_index()
-summary.to_csv(OUTPUT_DIR / "enrolled_summary.csv", index=False, encoding="utf-8")
-
-plt.figure(figsize=(8, 5))
-sns.countplot(x='school', data=df, order=df['school'].value_counts().index[:15])
-plt.title("Top 15 Schools by Enrollment")
-plt.xticks(rotation=45)
-plt.tight_layout()
-plt.savefig(OUTPUT_DIR / "enrolled_school_dist.png", dpi=120)
-plt.close()
-</Code>
-```
 
 ---
 
@@ -893,39 +877,5 @@ plt.close()
 - 不要等待用户指令，不要询问用户需求
 - **第 8 轮：生成 README.md（保持不变）**
 - **第 9 轮：生成 multi_table_analysis.html（保持不变）**
-- **第 10 轮：输出 `<Answer>` 总结报告（保持不变）**
-- **第 11 轮：新增 - 生成 comprehensive_analysis_report.html 综合分析报告（Phase II）**
-
----
-
-### 第 11 轮：生成 comprehensive_analysis_report.html 综合分析报告（Phase II）
-
-**⚠️ 轮次说明**：
-- 第11轮是在第10轮 `<Answer>` 输出**之后**执行的新增轮次
-- 第2-10轮的任务定义和顺序**完全不变**
-- 本轮不影响前面任何轮次的执行
-
-**任务**：对第2-9轮生成的所有分析结果进行二次分析，生成综合分析报告 `comprehensive_analysis_report.html`。
-
-**⚠️ 重要警告**：
-- **禁止访问原始数据库**（不得使用 `DB_PATH` 或 `sqlite3.connect()`）
-- **禁止访问原始CSV文件**（不得读取 `data/` 目录下的任何文件）
-- **只能读取 `generated/` 目录下已生成的文件**（CSV、PNG、README.md、multi_table_analysis.html）
-
-**任务目标**：
-基于第2-9轮的分析结果，进行更深入的二次分析和洞察挖掘。
-
-**分析重点**：
-1. **跨表关联洞察**：基于 `multi_table_join_result.csv`，分析不同维度之间的关联模式
-2. **趋势与异常**：识别数据中的趋势、异常值和潜在问题
-3. **群体特征**：分析不同学生群体的特征差异（如残疾学生、失业学生、参军学生等）
-4. **风险评估**：基于还款状态、缺勤时长等指标，评估潜在风险
-5. **可视化整合**：整合所有PNG图表，提供统一的可视化视图
-
-**输出文件**：`comprehensive_analysis_report.html`
-
-**代码要求**：
-- 只能使用 `pathlib`、`pandas`、`matplotlib` 等标准库
-- 只能读取 `generated/` 目录下的文件
-- 必须生成完整的HTML报告，包含分析结论和可视化图表
-- 禁止访问原始数据源
+- **第 10 轮：生成 comprehensive_analysis_report.html（Phase II）**
+- **第 11 轮：输出 `<Answer>` 总结报告**
