@@ -99,6 +99,33 @@
         "需遍历 generated/ 下的 CSV/PNG/README 并生成对应列表",
         "必须包含分析过程总结和关键发现"
       ]
+    },
+    {
+      "round": 10,
+      "mode": "final_answer",
+      "input": {"type": "summary", "source_rounds": [2, 3, 4, 5, 6, 7, 8, 9]},
+      "guidance": "仅输出一个 <Answer>，总结第 2-9 轮的分析过程、生成的关键文件以及整体结论/下一步建议，禁止再出现 <Analyze>/<Code>。引用文件必须来自 generated/ 目录。",
+      "outputs": [
+        {"type": "answer", "filename": "<Answer>"}
+      ],
+      "requirements": [
+        "只能输出单个 <Answer> 块",
+        "必须引用实际存在的文件（如 README.md、summary_analysis.html、multi_table_join_result.png 等）"
+      ]
+    },
+    {
+      "round": 11,
+      "mode": "html_report_phase2",
+      "input": {"type": "directory", "path": "generated"},
+      "guidance": "基于 generated/ 目录下已生成的 CSV/PNG/README/multi_table_analysis.html 等成果，进行二次综合分析并输出 comprehensive_analysis_report.html。禁止访问原始 data/ 目录或 SQLite，允许使用 pandas/matplotlib 处理 generated 目录中的文件。",
+      "outputs": [
+        {"type": "html", "filename": "comprehensive_analysis_report.html"}
+      ],
+      "requirements": [
+        "只允许读取 generated/ 目录下的文件",
+        "HTML 需包含综合洞察、趋势/异常、群体特征等段落，可嵌入 PNG 图表",
+        "禁止在本轮执行 sqlite3.connect 或读取 data/ 下的原始 CSV 文件"
+      ]
     }
   ]
 }

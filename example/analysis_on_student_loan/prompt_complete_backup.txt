@@ -11,10 +11,9 @@
 2. **第 7 轮：使用 SQLite 数据库进行多表关联**
    - ✅ 此时才允许使用 `sqlite3.connect()`
 
-3. **第 10 轮：输出 `<Answer>` 总结报告**
+3. **第 10 轮：输出 `<Answer>`**
    - ❌ **第 10 轮之前禁止输出 `<Answer>`**
-   - ✅ **第 10 轮输出 `<Answer>` 总结第 2-9 轮的分析结果**
-   - ⚠️ **第 10 轮完成后，立即开始第 11 轮（Phase II 综合分析）**
+   - ✅ **只有第 10 轮才能输出 `<Answer>`**
 
 **如果你在第 10 轮之前输出 `<Answer>`，系统会强制终止任务并报错。**
 
@@ -631,50 +630,6 @@ print(f"📊 记录了 {len(csv_files)} 个CSV文件, {len(png_files)} 个PNG文
 - **严格禁止**在本轮生成任何 `*_field_types.txt` 等临时文件，`generated/` 只能出现要求的 CSV 与 PNG。
 - 仍需在脚本末尾 `plt.savefig(... 'disabled_vs_total.png')` 并 `plt.close()`
 
-**标准代码模板（必须使用）**：
-```python
-import pandas as pd
-import matplotlib.pyplot as plt
-from pathlib import Path
-
-# 路径配置（从 bootstrap 获取实际路径）
-DISABLED_PATH = r"/path/to/disabled.csv"
-ENROLLED_PATH = r"/path/to/enrolled.csv"
-OUTPUT_DIR = Path("generated")
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-# 读取数据
-df_disabled = pd.read_csv(DISABLED_PATH)
-df_enrolled = pd.read_csv(ENROLLED_PATH)
-
-disabled_count = len(df_disabled)
-total_count = len(df_enrolled)
-
-# ✅ 必须生成 disabled_count.csv
-summary = pd.DataFrame({
-    'Category': ['Disabled', 'Total'],
-    'Count': [disabled_count, total_count]
-})
-summary.to_csv(OUTPUT_DIR / 'disabled_count.csv', index=False, encoding='utf-8')
-
-# ✅ 必须生成 disabled_vs_total.png
-plt.figure(figsize=(6, 4))
-categories = ['Disabled', 'Total Enrolled']
-counts = [disabled_count, total_count]
-bars = plt.bar(categories, counts, color=['red', 'blue'])
-# 使用bar中心位置设置xticks，确保数量一致
-positions = [bar.get_x() + bar.get_width() / 2 for bar in bars]
-plt.xticks(positions, categories)
-plt.title('Disabled vs Total Enrolled')
-plt.xlabel('Category')
-plt.ylabel('Count')
-plt.tight_layout()
-plt.savefig(OUTPUT_DIR / 'disabled_vs_total.png', dpi=120)
-plt.close()
-
-print(f"✅ 第6轮完成：disabled={disabled_count}, total={total_count}")
-```
-
 ---
 
 ### 第 8 轮：遍历 generated 目录并生成 README.md
@@ -883,49 +838,12 @@ plt.close()
 
 ## 🔒 轮次进度追踪
 
-**当前进度**：第 2 轮 / 共 11 轮
+**当前进度**：第 2 轮 / 共 10 轮
 **已完成**：第 1 轮（Bootstrap）
-**待完成**：第 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 轮
+**待完成**：第 2, 3, 4, 5, 6, 7, 8, 9, 10 轮
 
 **⚠️ 重要提醒**：
 - 每轮输出 `</Code>` 后立即停止
 - 等待代码执行完成后，立即开始下一轮
 - 不要等待用户指令，不要询问用户需求
-- **第 8 轮：生成 README.md（保持不变）**
-- **第 9 轮：生成 multi_table_analysis.html（保持不变）**
-- **第 10 轮：输出 `<Answer>` 总结报告（保持不变）**
-- **第 11 轮：新增 - 生成 comprehensive_analysis_report.html 综合分析报告（Phase II）**
-
----
-
-### 第 11 轮：生成 comprehensive_analysis_report.html 综合分析报告（Phase II）
-
-**⚠️ 轮次说明**：
-- 第11轮是在第10轮 `<Answer>` 输出**之后**执行的新增轮次
-- 第2-10轮的任务定义和顺序**完全不变**
-- 本轮不影响前面任何轮次的执行
-
-**任务**：对第2-9轮生成的所有分析结果进行二次分析，生成综合分析报告 `comprehensive_analysis_report.html`。
-
-**⚠️ 重要警告**：
-- **禁止访问原始数据库**（不得使用 `DB_PATH` 或 `sqlite3.connect()`）
-- **禁止访问原始CSV文件**（不得读取 `data/` 目录下的任何文件）
-- **只能读取 `generated/` 目录下已生成的文件**（CSV、PNG、README.md、multi_table_analysis.html）
-
-**任务目标**：
-基于第2-9轮的分析结果，进行更深入的二次分析和洞察挖掘。
-
-**分析重点**：
-1. **跨表关联洞察**：基于 `multi_table_join_result.csv`，分析不同维度之间的关联模式
-2. **趋势与异常**：识别数据中的趋势、异常值和潜在问题
-3. **群体特征**：分析不同学生群体的特征差异（如残疾学生、失业学生、参军学生等）
-4. **风险评估**：基于还款状态、缺勤时长等指标，评估潜在风险
-5. **可视化整合**：整合所有PNG图表，提供统一的可视化视图
-
-**输出文件**：`comprehensive_analysis_report.html`
-
-**代码要求**：
-- 只能使用 `pathlib`、`pandas`、`matplotlib` 等标准库
-- 只能读取 `generated/` 目录下的文件
-- 必须生成完整的HTML报告，包含分析结论和可视化图表
-- 禁止访问原始数据源
+- **只有第 10 轮才能输出 `<Answer>`**
