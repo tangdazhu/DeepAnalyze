@@ -801,33 +801,49 @@ print(f\"✅ multi_table_analysis.html 已写入，统计 {len(files)} 个文件
 4. **输出文件**：`comprehensive_analysis_report.html`（必须写入 `generated/` 目录）
 
 **分析内容要求**：
-- 综合洞察：基于已生成的 CSV 数据，提炼跨表的关联发现
-- 趋势分析：识别数据中的模式、异常值、分布特征
-- 群体特征：总结不同学生群体的特征（如残疾学生、参军学生、失业学生等）
-- 可视化嵌入：可在 HTML 中嵌入 PNG 图表的引用或 base64 编码
+- **必须读取真实文件**：使用 `pd.read_csv()` 读取 `multi_table_join_result.csv` 等实际存在的文件
+- **禁止编造数据**：所有分析结论必须基于读取的真实数据，禁止假设或虚构字段、数值
+- 综合洞察：基于 `multi_table_join_result.csv` 中的实际字段（name, school, bool, month, organ 等）进行分析
+- 群体特征：总结不同学生群体的特征（如残疾学生、参军学生、缺勤学生等）
+- 可视化引用：引用 `generated/` 下实际存在的 PNG 文件（如 `enrolled_school_dist.png`、`multi_table_join_result.png` 等）
 
 **硬性要求**：
-1. 必须使用 Python 构造 `html_lines` 列表并写入文件，禁止直接粘贴 HTML 字符串
-2. HTML 需包含完整的 `<html>`、`<head>`、`<body>` 结构
-3. 至少包含 3 个 `<section>`：综合洞察、数据分析、结论建议
-4. 结束时打印 "✅ comprehensive_analysis_report.html 已写入"
+1. **必须先读取 CSV 文件**：至少读取 `multi_table_join_result.csv`，查看其实际列名和数据
+2. **禁止引用不存在的文件**：只能引用 `generated/` 目录下真实存在的 CSV 和 PNG 文件
+3. **禁止编造字段名**：如果数据中没有 `loan_amount`、`monthly_income` 等字段，不得在分析中提及
+4. 必须使用 Python 构造 `html_lines` 列表并写入文件，禁止直接粘贴 HTML 字符串
+5. HTML 需包含完整的 `<html>`、`<head>`、`<body>` 结构
+6. 至少包含 3 个 `<section>`：综合洞察、数据分析、结论建议
+7. 结束时打印 "✅ comprehensive_analysis_report.html 已写入"
 
-**示例代码框架**：
+**强制代码模板（必须完全照抄，不得修改）**：
 ```python
 from pathlib import Path
 import pandas as pd
 from datetime import datetime
 
 generated_dir = Path("generated")
-if not generated_dir.exists():
-    raise FileNotFoundError(f"目录不存在：{generated_dir.resolve()}")
-
-# 读取已生成的 CSV 文件进行分析
 csv_files = list(generated_dir.glob("*.csv"))
 png_files = list(generated_dir.glob("*.png"))
 
-# 示例：读取 multi_table_join_result.csv 进行分析
-# df = pd.read_csv(generated_dir / "multi_table_join_result.csv")
+# 读取 multi_table_join_result.csv
+df_join = pd.read_csv(generated_dir / "multi_table_join_result.csv")
+print(f"✅ 读取 multi_table_join_result.csv，共 {len(df_join)} 行，列名：{list(df_join.columns)}")
+
+# 读取各 summary 文件
+df_enrolled = pd.read_csv(generated_dir / "enrolled_summary.csv")
+df_payment = pd.read_csv(generated_dir / "payment_status_summary.csv")
+df_absense = pd.read_csv(generated_dir / "absense_summary.csv")
+df_enlist = pd.read_csv(generated_dir / "enlist_summary.csv")
+df_disabled = pd.read_csv(generated_dir / "disabled_count.csv")
+
+# 统计关键指标
+total_students = len(df_join)
+enrolled_schools = df_enrolled['school'].nunique() if 'school' in df_enrolled.columns else 0
+payment_status_count = len(df_payment)
+absense_students = len(df_absense)
+enlist_students = len(df_enlist)
+disabled_students = df_disabled['disabled_count'].sum() if 'disabled_count' in df_disabled.columns else 0
 
 # 构造 HTML
 html_lines = [
@@ -835,28 +851,63 @@ html_lines = [
     "<html lang='zh-CN'>",
     "<head>",
     "  <meta charset='utf-8' />",
-    "  <title>Phase II 综合分析报告</title>",
+    "  <title>Student Loan Phase II 综合分析报告</title>",
     "  <style>",
-    "    body { font-family: 'Segoe UI','Microsoft YaHei',sans-serif; margin: 2rem; }",
-    "    section { margin-bottom: 2rem; border-bottom: 1px solid #ddd; padding-bottom: 1rem; }",
-    "    h2 { color: #2c3e50; }",
+    "    body { font-family: 'Microsoft YaHei',Arial,sans-serif; margin: 2rem; background: #f5f5f5; }",
+    "    section { background: white; padding: 1.5rem; margin: 1.5rem 0; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }",
+    "    h1 { color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 10px; }",
+    "    h2 { color: #34495e; margin-top: 20px; border-bottom: 2px solid #95a5a6; padding-bottom: 5px; }",
+    "    h3 { color: #555; margin-top: 15px; }",
+    "    img { max-width: 100%; height: auto; margin: 10px 0; border: 1px solid #ddd; border-radius: 6px; }",
+    "    .metric { font-weight: bold; color: #27ae60; }",
+    "    ul { line-height: 1.8; }",
     "  </style>",
     "</head>",
     "<body>",
     f"  <h1>Student Loan 数据综合分析报告（Phase II）</h1>",
     f"  <p>生成时间：{datetime.now():%Y-%m-%d %H:%M:%S}</p>",
     "  <section id='overview'>",
-    "    <h2>1. 综合洞察</h2>",
-    f"    <p>本次分析基于 {len(csv_files)} 个 CSV 文件和 {len(png_files)} 个可视化图表。</p>",
-    "    <!-- 在此添加基于 CSV 数据的综合分析 -->",
+    "    <h2>1. 数据概览</h2>",
+    f"    <p>本次分析基于 <span class='metric'>{len(csv_files)}</span> 个 CSV 文件和 <span class='metric'>{len(png_files)}</span> 个可视化图表。</p>",
+    f"    <p>多表关联结果共 <span class='metric'>{total_students}</span> 条记录，包含字段：{', '.join(df_join.columns)}</p>",
+    "    <ul>",
+    f"      <li>在校学生涉及 <span class='metric'>{enrolled_schools}</span> 所学校</li>",
+    f"      <li>缴费状态记录 <span class='metric'>{payment_status_count}</span> 条</li>",
+    f"      <li>缺勤记录 <span class='metric'>{absense_students}</span> 条</li>",
+    f"      <li>参军学生 <span class='metric'>{enlist_students}</span> 人</li>",
+    f"      <li>残疾学生 <span class='metric'>{disabled_students}</span> 人</li>",
+    "    </ul>",
     "  </section>",
     "  <section id='analysis'>",
-    "    <h2>2. 深度分析</h2>",
-    "    <!-- 在此添加趋势分析、群体特征等 -->",
+    "    <h2>2. 多维度分析</h2>",
+    "    <h3>学校分布</h3>",
+    "    <img src='enrolled_school_dist.png' alt='学校分布图' />",
+    "    <h3>缴费状态分布</h3>",
+    "    <img src='payment_status_dist.png' alt='缴费状态分布图' />",
+    "    <h3>缺勤月份分布</h3>",
+    "    <img src='absense_month_dist.png' alt='缺勤月份分布图' />",
+    "    <h3>参军机构分布</h3>",
+    "    <img src='enlist_organ_dist.png' alt='参军机构分布图' />",
+    "    <h3>残疾学生统计</h3>",
+    "    <img src='disabled_vs_total.png' alt='残疾学生占比图' />",
+    "    <h3>多表关联可视化</h3>",
+    "    <img src='multi_table_join_result.png' alt='多表关联结果' />",
     "  </section>",
     "  <section id='conclusion'>",
     "    <h2>3. 结论与建议</h2>",
-    "    <!-- 在此添加结论和下一步建议 -->",
+    "    <ul>",
+    f"      <li>学生群体覆盖 {enrolled_schools} 所学校，建议针对不同学校制定差异化贷款政策</li>",
+    f"      <li>缺勤学生占比较高（{absense_students} 条记录），需关注学业连续性对还款能力的影响</li>",
+    f"      <li>参军学生（{enlist_students} 人）与残疾学生（{disabled_students} 人）属于特殊群体，建议提供专项贷款优惠政策</li>",
+    "      <li>多表关联分析揭示了学生状态的多维特征，为精准风控提供数据支持</li>",
+    "    </ul>",
+    "  </section>",
+    "  <section id='references'>",
+    "    <h2>4. 参考文件</h2>",
+    "    <ul>",
+    "      <li><a href='multi_table_analysis.html'>multi_table_analysis.html</a> - 前序分析过程总结</li>",
+    "      <li><a href='README.md'>README.md</a> - 生成文件列表索引</li>",
+    "    </ul>",
     "  </section>",
     "</body>",
     "</html>",
@@ -879,7 +930,12 @@ print(f"✅ comprehensive_analysis_report.html 已写入，共 {len(html_lines)}
    - **生成了哪些结果**：列出关键文件（CSV/PNG/README/HTML 等）并点明它们代表的含义或可视化内容。  
    - **整体结论/下一步**：基于已生成的文件给出至少 2 条定量或定性结论（务必引用具体文件作为依据），如出现被回滚的轮次也需说明原因及修复。  
 3. `<Answer>` 内正文可以是 Markdown 段落，也可以嵌入内联 HTML（如 `<section>`、`<ul>`），但不得引用外部脚本或 CSS。  
-4. 引用文件时务必使用真实存在的文件名（如 `enrolled_summary.csv`、`multi_table_join_result.png`、`README.md`、`multi_table_analysis.html`、`comprehensive_analysis_report.html`）；禁止杜撰未生成的文件。  
+4. **禁止编造文件名**：只能引用以下真实存在的文件：
+   - CSV: `enrolled_summary.csv`, `payment_status_summary.csv`, `absense_summary.csv`, `enlist_summary.csv`, `disabled_count.csv`, `multi_table_join_result.csv`
+   - PNG: `enrolled_school_dist.png`, `payment_status_dist.png`, `absense_month_dist.png`, `enlist_organ_dist.png`, `disabled_vs_total.png`, `multi_table_join_result.png`
+   - HTML: `multi_table_analysis.html`, `comprehensive_analysis_report.html`
+   - 其他: `README.md`
+5. **禁止编造数据内容**：不得提及不存在的字段（如 `loan_amount`、`monthly_income`、`region` 等），只能基于实际的学生数据字段（name, school, bool, month, organ 等）进行总结。  
 
 ---
 
