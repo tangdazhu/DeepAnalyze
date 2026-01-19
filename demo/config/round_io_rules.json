@@ -92,7 +92,7 @@
       "mode": "html_report",
       "input": {"type": "directory", "path": "generated"},
       "outputs": [
-        {"type": "html", "filename": "summary_analysis.html"}
+        {"type": "html", "filename": "multi_table_analysis.html"}
       ],
       "requirements": [
         "HTML 必须包含 <html>、<head>、<body>、#summary/#visual/#data/#readme 等段落",
