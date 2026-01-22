@@ -79,6 +79,7 @@
       "round": 8,
       "mode": "filesystem_summary",
       "input": {"type": "directory", "path": "generated"},
+      "guidance": "仅输出 <Analyze> + <Code> 两段；<Analyze> 只写一句话目标（不超过30字），禁止复述提示词/代码骨架/统计结论；<Code> 必须是可执行 Python 脚本，禁止只粘贴文字说明或再次输出用户提示。",
       "outputs": [
         {"type": "markdown", "filename": "README.md"}
       ],
@@ -91,6 +92,7 @@
       "round": 9,
       "mode": "html_report",
       "input": {"type": "directory", "path": "generated"},
+      "guidance": "仅输出 <Analyze> + <Code> 两段；<Analyze> 只写一句话目标（不超过30字），禁止复述提示词/代码骨架；<Code> 必须是可执行 Python 脚本，必须通过 html_lines 列表构造 HTML，禁止直接粘贴完整 HTML 文本。",
       "outputs": [
         {"type": "html", "filename": "multi_table_analysis.html"}
       ],

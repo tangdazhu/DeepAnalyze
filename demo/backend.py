@@ -481,7 +481,7 @@ def execute_code_safe(
 # API endpoint and model path
 API_BASE = "http://localhost:8000/v1"  # this localhost is for vllm api, do not change
 MODEL_PATH = "qwen3-4b-instruct"  # replace to your path to DeepAnalyze-8B
-MAX_ITERATIONS = 12
+MAX_ITERATIONS = 20
 ANSWER_MIN_EXEC_ROUNDS = 10  # 确保完成第 2-9 轮分析后才请求 Answer
 ANSWER_MIN_NON_SCHEMA_ROUNDS = 8  # 对应 8 轮非 schema 代码执行(第 2-9 轮)
 MAX_PROMPT_CHARS = getattr(api_config, "MAX_PROMPT_CHARS", 16000)
