@@ -65,7 +65,7 @@
           "disabled"
         ]
       },
-      "guidance": "student_loan.sqlite 中的 enrolled/no_payment_due/longest_absense_from_school/enlist/disabled 均只有 name 列作为关联键，且其余字段分别为 school、bool、month、organ。第 7 轮必须：1) 使用首轮 bootstrap 提供的数据库绝对路径（DB_PATH）；2) 在 sqlite3.connect() 后立即执行 conn.execute('PRAGMA busy_timeout = 30000;')；3) 以 name 作为 JOIN 条件，禁止使用不存在的 id/disabled_flag 等列。",
+      "guidance": "student_loan.sqlite 中的 enrolled/no_payment_due/longest_absense_from_school/enlist/disabled 均只有 name 列作为关联键，且其余字段分别为 school、bool、month、organ。第 7 轮必须：1) 使用首轮 bootstrap 提供的数据库绝对路径（DB_PATH）；2) 在 sqlite3.connect() 后立即执行 conn.execute('PRAGMA busy_timeout = 30000;')；3) 以 name 作为 JOIN 条件，禁止使用不存在的 id/disabled_flag 等列；4) 各表在 set_index/reindex 之前必须对 name 去重（如 drop_duplicates 或 groupby 聚合）以避免 pandas duplicate labels 错误。",
       "outputs": [
         {"type": "csv", "filename": "multi_table_join_result.csv"},
         {"type": "png", "filename": "multi_table_join_result.png"}
