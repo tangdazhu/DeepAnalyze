@@ -2402,12 +2402,17 @@ def bot_stream(messages, workspace, session_id="default"):
             unknown_mentions = set()
             require_known_reference = schema_confirmed
 
-            # 获取当前轮次的模式
-            current_mode = round_mode(rule_for_next) if rule_for_next else None
+            # 获取当前轮次的模式（必须以当前轮为准，避免沿用上一轮）
+            rule_for_current = get_round_rule(current_round)
+            current_mode = round_mode(rule_for_current) if rule_for_current else None
 
-            # Round 8/9（filesystem_summary 和 html_report）跳过表名检测
-            # 因为这些轮次的 <Analyze> 可能包含 Python 代码片段，会被误识别为表名
-            skip_table_check = current_mode in ("filesystem_summary", "html_report")
+            # Round 7/8/9（sqlite_join / filesystem_summary / html_report）跳过表名检测
+            # 这些轮次的 <Analyze> 易包含非表名词汇或代码片段，可能被误识别为表名
+            skip_table_check = current_mode in (
+                "sqlite_join",
+                "filesystem_summary",
+                "html_report",
+            )
 
             logger.info(
                 f"[bot_stream] Extracting table mentions: known_tables={len(known_tables)}, analyze_content_len={len(analyze_content)}, mode={current_mode}, skip={skip_table_check}"
