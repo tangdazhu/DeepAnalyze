@@ -243,9 +243,14 @@ print(f"分析完成：no_payment_due.csv 共 {len(df)} 条记录")
 - ✅ 使用第 1 轮 Bootstrap 提供的 SQLite 数据库绝对路径
 - ✅ 使用 SQL JOIN 语句进行多表关联
 - ✅ 严格使用第 1 轮显示的表名和字段名
+- ✅ **每张表在 set_index/reindex 之前必须先 `drop_duplicates(subset=['name'])`**，确保唯一键再做 JOIN，避免 pandas duplicate labels 报错
+- ✅ **合并结果中必须保留 `name` 列**（不要 `set_index('name')` 后又访问 `name`，若已设为索引请 `reset_index()`）
+- ✅ `longest_absense_from_school.month` 需重命名为 `absense_month`（例如 `df.rename(columns={'month': 'absense_month'})`），`no_payment_due.bool` 需映射为 `payment_status`
 - ❌ **禁止使用 "Join"、"Merged"、"Result" 等作为表名**
 - ❌ **JOIN 只是 SQL 关键字,不是表名,不能写 FROM Join**
 - ✅ **正确写法**: `FROM enrolled e LEFT JOIN disabled d ON e.name = d.name`
+
+> **若 pandas 在生成 CSV/PNG 时提示 `"['name'] not in index"`，表示你把 name 设为了索引。请在写入前执行 `merged_df = merged_df.reset_index(drop=True)`，或直接避免 `set_index('name')`。**
 
 **示例：分析失业学生的性别和还款情况**
 
@@ -364,21 +369,31 @@ DB_PATH = r"真实的数据库绝对路径"
 OUTPUT_DIR = Path("generated")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-# 使用 SQL JOIN 合并多个表
-query = """
-SELECT e.name, e.school, e.month, m.name AS is_male
-FROM enrolled e
-LEFT JOIN male m ON e.name = m.name
-LIMIT 1000
-"""
-
+# 读取并去重
 with sqlite3.connect(DB_PATH, timeout=30) as conn:
     conn.execute("PRAGMA busy_timeout = 30000;")
-    merged = pd.read_sql_query(query, conn)
+    df_enrolled = pd.read_sql_query("SELECT name, school FROM enrolled", conn).drop_duplicates(subset=["name"])
+    df_no_due = (
+        pd.read_sql_query("SELECT name, bool FROM no_payment_due", conn)
+        .drop_duplicates(subset=["name"])
+        .rename(columns={"bool": "payment_status"})
+    )
+    df_absense = (
+        pd.read_sql_query("SELECT name, month FROM longest_absense_from_school", conn)
+        .drop_duplicates(subset=["name"])
+        .rename(columns={"month": "absense_month"})
+    )
 
-# 分析合并后的数据
+# 合并并保留 name 列
+merged = (
+    df_enrolled
+    .merge(df_no_due, on="name", how="left")
+    .merge(df_absense, on="name", how="left")
+)
+
+# 保证 name 仍是列（不要 set_index），避免后续选择列时报错
+merged.to_csv(OUTPUT_DIR / "multi_table_join_result.csv", index=False)
 print(merged.head())
-merged.to_csv(OUTPUT_DIR / "merged_data.csv", index=False)
 ```
 
 **注意**：`male` 表只有 `name` 字段，如果 name 存在则表示是男性，不存在则为女性。
