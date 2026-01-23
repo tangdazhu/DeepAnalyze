@@ -283,7 +283,7 @@ def validate_readme_document(readme_text, generated_dir):
         line.strip() for line in text.splitlines() if line.strip().startswith("- ")
     ]
     for line in bullet_lines:
-        if line.startswith("- （") or line.startswith("- 无"):
+        if line.startswith("- （"):
             continue
         if not README_BULLET_PATTERN.match(line):
             issues.append("文件条目须使用正确格式")

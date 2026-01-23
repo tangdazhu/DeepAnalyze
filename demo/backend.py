@@ -803,6 +803,8 @@ def extract_table_mentions_from_text(
             parts = lowered.split("_")
             if len(parts) >= 2 and parts[-1] in FILE_SUFFIXES:
                 return False
+            if len(parts) >= 2 and parts[-1] in COMMON_WORDS:
+                return False
             # 长下划线 token 很可能是文件/字段描述,两段以上直接跳过
             if len(parts) >= 3 and lowered not in normalized_known:
                 return False
