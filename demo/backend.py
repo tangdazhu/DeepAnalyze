@@ -3894,6 +3894,22 @@ def bot_stream(messages, workspace, session_id="default"):
                                     "3. 不要臆测字段名，必须严格使用 sqlite_master 和 PRAGMA table_info 返回的字段\n\n"
                                     "请立即修正代码并重新提交。"
                                 )
+                            elif "length mismatch" in exe_output.lower():
+                                error_warning = (
+                                    f"⚠️ pandas 列长度不匹配：{error_hint}\n\n"
+                                    "常见原因：对 describe()/transpose() 的结果强制重命名列，"
+                                    "导致列数不一致。\n\n"
+                                    "修正建议：\n"
+                                    "1. 直接保存 describe() 结果，不要强制改列名；或\n"
+                                    "2. 若只需条目数，请用两列统计表，例如：\n"
+                                    "```python\n"
+                                    "count_summary = pd.DataFrame({\n"
+                                    "    'metric': ['disabled_count'],\n"
+                                    "    'value': [len(df_disabled)],\n"
+                                    "})\n"
+                                    "```\n\n"
+                                    "请根据上述建议修正后重新提交。"
+                                )
                             else:
                                 error_warning = (
                                     f"代码执行过程中出现错误：{error_hint}\n\n"

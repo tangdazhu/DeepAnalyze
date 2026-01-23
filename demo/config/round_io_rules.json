@@ -45,7 +45,7 @@
       "round": 6,
       "mode": "csv_analysis",
       "input": {"type": "csv", "filename": "disabled.csv"},
-      "guidance": "disabled.csv 只有 name 一列，表示这些人均为 disabled。读取后需新增一列 disabled_flag=1，统计条目数写入 disabled_count.csv，并绘制 disabled_vs_total.png（可以使用常量列或与 enrolled 表对比总人数）。绘制条形图时务必保证 plt.xticks 的刻度数量与 labels 数量一致，可使用 bars 对象计算刻度位置，例如 positions = [bar.get_x() + bar.get_width() / 2 for bar in bars]；严禁访问不存在的 'disabled' 字段。",
+      "guidance": "disabled.csv 只有 name 一列，表示这些人均为 disabled。读取后需新增一列 disabled_flag=1，统计条目数写入 disabled_count.csv（建议直接构造两列表 metric/value，如 disabled_count/total_count 对应人数，避免对 describe()/transpose() 结果强制改列名导致列数不匹配），并绘制 disabled_vs_total.png（可以使用常量列或与 enrolled 表对比总人数）。绘制条形图时务必保证 plt.xticks 的刻度数量与 labels 数量一致，可使用 bars 对象计算刻度位置，例如 positions = [bar.get_x() + bar.get_width() / 2 for bar in bars]；严禁访问不存在的 'disabled' 字段。",
       "outputs": [
         {"type": "csv", "filename": "disabled_count.csv"},
         {"type": "png", "filename": "disabled_vs_total.png"}

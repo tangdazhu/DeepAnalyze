@@ -641,7 +641,7 @@ print(f"📊 记录了 {len(csv_files)} 个CSV文件, {len(png_files)} 个PNG文
 - 绘制 `disabled_vs_total.png` 时务必保证 `plt.xticks` 的刻度数量与标签数量一致，可使用 `bars = plt.bar(... )` 后通过 `positions = [bar.get_x() + bar.get_width() / 2 for bar in bars]` 再调用 `plt.xticks(positions, labels)`
 
 **产出要求**：
-- `disabled_count.csv`：必须至少包含 “Disabled” 与 “Total” 两行（或中文对应描述），写明残疾学生数量与总人数，可额外附带占比或布尔列。
+- `disabled_count.csv`：必须至少包含 “Disabled” 与 “Total” 两行（或中文对应描述），写明残疾学生数量与总人数，可额外附带占比或布尔列。建议直接构造两列表 `metric/value` 表（如 disabled_count/total_count 对应人数），避免对 `describe()/transpose()` 结果强制改列名导致列数不匹配。
 - `disabled_vs_total.png`：条形图需同时展示 “Disabled” 与 “Total” 两根柱，标题/图例清晰对比两者，保存前务必调用 `plt.tight_layout()`、`plt.savefig(... 'disabled_vs_total.png')`、`plt.close()`。
 - **严格禁止**在本轮生成任何 `*_field_types.txt` 等临时文件，`generated/` 只能出现要求的 CSV 与 PNG。
 - 仍需在脚本末尾 `plt.savefig(... 'disabled_vs_total.png')` 并 `plt.close()`
