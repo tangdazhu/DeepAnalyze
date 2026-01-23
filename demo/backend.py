@@ -3447,6 +3447,13 @@ def bot_stream(messages, workspace, session_id="default"):
                     artifact_paths = []
                     generated_dir_path = generated_dir.resolve()
                     generated_dir_str = str(generated_dir_path)
+                    rule_for_current = get_round_rule(current_round)
+                    expected_files = (
+                        round_expected_filenames(rule_for_current)
+                        if rule_for_current
+                        else []
+                    )
+                    expected_files_lower = {name.lower() for name in expected_files}
 
                     def is_in_generated(path_obj: Path) -> bool:
                         try:
@@ -3492,6 +3499,19 @@ def bot_stream(messages, workspace, session_id="default"):
                                 if resolved not in artifact_paths:
                                     artifact_paths.append(resolved)
                                 continue
+                            if (
+                                resolved.name.lower() == "readme.md"
+                                and "readme.md" in expected_files_lower
+                            ):
+                                target_path = generated_dir_path / "README.md"
+                                logger.info(
+                                    "[bot_stream] Copying README.md to generated: %s -> %s",
+                                    resolved,
+                                    target_path,
+                                )
+                                shutil.copy2(resolved, target_path)
+                                artifact_paths.append(target_path.resolve())
+                                continue
                             dest_path = uniquify_path(
                                 generated_dir_path
                                 / f"{resolved.stem}_modified{resolved.suffix}"
@@ -3501,11 +3521,9 @@ def bot_stream(messages, workspace, session_id="default"):
                         except Exception as e:
                             logger.error(f"Error copying modified file {p}: {e}")
 
-                    rule_for_current = get_round_rule(current_round)
                     mode_for_current = round_mode(rule_for_current)
                     if rule_for_current:
                         produced_names = {Path(p).name for p in artifact_paths}
-                        expected_files = round_expected_filenames(rule_for_current)
                         missing_files = [
                             name
                             for name in expected_files
