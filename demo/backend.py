@@ -3102,6 +3102,15 @@ def bot_stream(messages, workspace, session_id="default"):
                         and "import seaborn as sns" not in effective_code
                     ):
                         missing_imports.append("import seaborn as sns")
+                    uses_path = (
+                        "Path(" in effective_code or "pathlib.Path" in effective_code
+                    )
+                    has_path_import = (
+                        "from pathlib import Path" in effective_code
+                        or "import pathlib" in effective_code
+                    )
+                    if uses_path and not has_path_import:
+                        missing_imports.append("from pathlib import Path")
                     if missing_imports:
                         logger.warning(
                             f"[bot_stream] Code rejected: missing imports {missing_imports}"
@@ -3547,6 +3556,32 @@ def bot_stream(messages, workspace, session_id="default"):
                                 + "。请修正产物命名后重新提交。"
                             )
                             messages.append({"role": "user", "content": prompt})
+                            refund_iteration()
+                            continue
+                    if (
+                        mode_for_current == "filesystem_summary"
+                        and "readme.md" in expected_files_lower
+                    ):
+                        extra_md_files = sorted(
+                            {
+                                Path(p).name
+                                for p in artifact_paths
+                                if Path(p).suffix.lower() == ".md"
+                                and Path(p).name.lower() not in expected_files_lower
+                            }
+                        )
+                        if extra_md_files:
+                            logger.warning(
+                                "[bot_stream] Round %s produced unexpected markdown files: %s",
+                                current_round,
+                                ", ".join(extra_md_files),
+                            )
+                            extra_prompt = (
+                                f"第 {current_round} 轮仅允许生成 README.md。"
+                                f"检测到多余的 Markdown 文件：{', '.join(extra_md_files)}。"
+                                "请删除这些文件并仅生成 README.md。"
+                            )
+                            messages.append({"role": "user", "content": extra_prompt})
                             refund_iteration()
                             continue
 
