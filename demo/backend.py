@@ -3023,9 +3023,10 @@ def bot_stream(messages, workspace, session_id="default"):
                             refund_iteration()
                             continue
                     else:
-                        sql_tables_used = extract_sql_table_names(effective_code)
-                        if sql_tables_used:
-                            recent_tables_used = sql_tables_used
+                        if uses_sqlite:
+                            sql_tables_used = extract_sql_table_names(effective_code)
+                            if sql_tables_used:
+                                recent_tables_used = sql_tables_used
                     invalid_tables = set()
                     if known_tables and sql_tables_used:
                         invalid_tables = {
