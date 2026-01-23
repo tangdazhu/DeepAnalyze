@@ -2412,6 +2412,7 @@ def bot_stream(messages, workspace, session_id="default"):
                 "sqlite_join",
                 "filesystem_summary",
                 "html_report",
+                "html_report_phase2",
             )
 
             logger.info(
@@ -2755,6 +2756,23 @@ def bot_stream(messages, workspace, session_id="default"):
                     rule_for_next = get_round_rule(target_round)
                     mode_for_next = round_mode(rule_for_next)
 
+                    if mode_for_next == "html_report_phase2":
+                        uses_sqlite_master = "sqlite_master" in normalized_code
+                        if uses_sqlite or uses_sqlite_master:
+                            logger.warning(
+                                "[bot_stream] Code rejected: html_report_phase2 should not execute SQLite"
+                            )
+                            sqlite_block_prompt = (
+                                f"第 {target_round} 轮仅允许读取 generated/ 目录下的 CSV/PNG/README/HTML，"
+                                "禁止连接 SQLite 或查询 sqlite_master（如 sqlite3.connect/pd.read_sql/cursor.execute）。"
+                                "请删除所有 SQL 相关代码后重新生成 comprehensive_analysis_report.html。"
+                            )
+                            messages.append(
+                                {"role": "user", "content": sqlite_block_prompt}
+                            )
+                            refund_iteration()
+                            continue
+
                     if mode_for_next == "csv_analysis":
                         if not uses_csv:
                             logger.warning(
@@ -2946,6 +2964,7 @@ def bot_stream(messages, workspace, session_id="default"):
                         and has_sqlite_master_query
                         and not has_real_table_query
                         and "pragma" not in normalized_code
+                        and mode_for_next != "html_report_phase2"
                     ):
                         logger.warning(
                             f"[bot_stream] Code rejected: only sqlite_master query after schema confirmed"
