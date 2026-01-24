@@ -78,7 +78,9 @@ readme_path.write_text("\\n".join(lines), encoding="utf-8")
 print(f"✅ README.md 已写入，列出了 {total_files} 个文件。")
 ```
 
-- ❗ 严禁 `README_CONTENT = \\"""...\\"""` 等三引号常量写死 Markdown。
+- ❗ README 首行必须是 `# 生成文件目录`，禁止添加其他主标题。
+- ❗ 所有分节标题必须使用 `##` 开头，禁止使用 `###`。
+- ❗ 严禁 `README_CONTENT = """..."""` 等三引号常量写死 Markdown。
 - ❗ 必须调用 `Path.write_text`（或等价写盘方法）真实写入 README.md。
 '''
     return textwrap.dedent(template).strip()
@@ -253,6 +255,10 @@ def validate_readme_document(readme_text, generated_dir):
     issues = []
     text = readme_text or ""
     normalized_text = re.sub(r"\*\*(\d+)\*\*", r"\1", text)
+
+    stripped_lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not stripped_lines or stripped_lines[0] != "# 生成文件目录":
+        issues.append("README 必须以 # 生成文件目录 开头")
 
     # 检查必需章节
     for section in README_SECTION_HEADERS:

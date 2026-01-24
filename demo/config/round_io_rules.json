@@ -84,8 +84,10 @@
         {"type": "markdown", "filename": "README.md"}
       ],
       "requirements": [
-        "README.md 必须包含 # 生成文件目录、### HTML 报告、### CSV 数据文件、### 其他文件 等章节",
-        "需列出所有 execute_round_*.txt 和 README.md 本身"
+        "README.md 必须以 # 生成文件目录 开头，并依次包含 ## HTML 报告、## CSV 数据文件、## PNG 可视化、## 执行日志、## 其他文件",
+        "需列出所有 execute_round_*.txt 和 README.md 本身",
+        "文件列表项需包含文件大小（格式：- `filename.ext` (123 bytes)）",
+        "必须写明文件总数行：共生成 X 个文件，全部存放于 `generated/` 目录。"
       ]
     },
     {

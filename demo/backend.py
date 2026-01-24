@@ -232,10 +232,18 @@ def describe_round(rule: dict[str, Any]) -> str:
 
 
 def guidance_for_rule(rule: dict[str, Any]) -> str:
+    mode = (rule.get("mode") or "").lower()
     custom = rule.get("guidance")
     if custom:
+        if mode == "filesystem_summary":
+            return custom + "\n\n" + build_filesystem_summary_template()
+        if mode == "html_report":
+            html_name = "multi_table_analysis.html"
+            html_files = round_expected_filenames_by_type(rule, "html")
+            if html_files:
+                html_name = html_files[0]
+            return custom + "\n\n" + build_html_report_template(html_name)
         return custom
-    mode = (rule.get("mode") or "").lower()
     if mode == "csv_analysis":
         return (
             "直接输出 <Analyze> 和 <Code>，使用 pandas 读取配置指定的 CSV 绝对路径，"
