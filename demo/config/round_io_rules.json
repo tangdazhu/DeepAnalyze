@@ -92,7 +92,7 @@
       "round": 9,
       "mode": "html_report",
       "input": {"type": "directory", "path": "generated"},
-      "guidance": "仅输出 <Analyze> + <Code> 两段；<Analyze> 只写一句话目标（不超过30字），禁止复述提示词/代码骨架；<Code> 必须是可执行 Python 脚本，必须通过 html_lines 列表构造 HTML，禁止直接粘贴完整 HTML 文本。",
+      "guidance": "仅输出 <Analyze> + <Code> 两段；<Analyze> 只写一句话目标（不超过30字），禁止复述提示词/代码骨架；<Code> 必须是可执行 Python 脚本，必须通过 html_lines 列表构造 HTML，禁止直接粘贴完整 HTML 文本；输出文件必须写入 generated/ 目录（例如 OUTPUT_DIR = Path('generated')，并使用 OUTPUT_DIR / 'multi_table_analysis.html'），禁止写到 session 根目录。",
       "outputs": [
         {"type": "html", "filename": "multi_table_analysis.html"}
       ],
@@ -106,7 +106,7 @@
       "round": 10,
       "mode": "html_report_phase2",
       "input": {"type": "directory", "path": "generated"},
-      "guidance": "基于 generated/ 目录下已生成的 CSV/PNG/README/multi_table_analysis.html 等成果，进行二次综合分析并输出 comprehensive_analysis_report.html。禁止访问原始 data/ 目录或 SQLite，允许使用 pandas/matplotlib 处理 generated 目录中的文件。",
+      "guidance": "基于 generated/ 目录下已生成的 CSV/PNG/README/multi_table_analysis.html 等成果，进行二次综合分析并输出 comprehensive_analysis_report.html。禁止访问原始 data/ 目录或 SQLite，允许使用 pandas/matplotlib 处理 generated 目录中的文件；输出文件必须写入 generated/ 目录（例如 OUTPUT_DIR = Path('generated')，并使用 OUTPUT_DIR / 'comprehensive_analysis_report.html'），禁止写到 session 根目录。",
       "outputs": [
         {"type": "html", "filename": "comprehensive_analysis_report.html"}
       ],

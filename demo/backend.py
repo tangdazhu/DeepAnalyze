@@ -3522,6 +3522,16 @@ def bot_stream(messages, workspace, session_id="default"):
                                 shutil.copy2(resolved, target_path)
                                 artifact_paths.append(target_path.resolve())
                                 continue
+                            if resolved.name.lower() in expected_files_lower:
+                                target_path = generated_dir_path / resolved.name
+                                logger.info(
+                                    "[bot_stream] Copying expected artifact to generated: %s -> %s",
+                                    resolved,
+                                    target_path,
+                                )
+                                shutil.copy2(resolved, target_path)
+                                artifact_paths.append(target_path.resolve())
+                                continue
                             dest_path = uniquify_path(
                                 generated_dir_path
                                 / f"{resolved.stem}_modified{resolved.suffix}"
