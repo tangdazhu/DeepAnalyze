@@ -252,6 +252,7 @@ def validate_readme_document(readme_text, generated_dir):
     """校验 README.md 是否满足通用结构与动态文件列表要求"""
     issues = []
     text = readme_text or ""
+    normalized_text = re.sub(r"\*\*(\d+)\*\*", r"\1", text)
 
     # 检查必需章节
     for section in README_SECTION_HEADERS:
@@ -259,11 +260,13 @@ def validate_readme_document(readme_text, generated_dir):
             issues.append(f"缺少段落：{section}")
 
     # 检查文件总数（允许 ±2 的误差，因为 README.md 和 execute_round_N.txt 在生成时还不存在）
-    total_match = re.search(r"共生成\s+(\d+)\s+个文件", text)
+    total_match = re.search(r"共生成\s+(\d+)\s+个文件", normalized_text)
     if not total_match:
-        total_match = re.search(r"文件总数\s*[:：]?\s*(\d+)", text)
+        total_match = re.search(r"文件总数\s*[:：]?\s*(\d+)", normalized_text)
     if not total_match:
-        total_match = re.search(r"A total of\s+(\d+)\s+files", text, re.IGNORECASE)
+        total_match = re.search(
+            r"A total of\s+(\d+)\s+files", normalized_text, re.IGNORECASE
+        )
     actual_total = sum(1 for p in generated_dir.iterdir() if p.is_file())
     if not total_match:
         issues.append("缺少文件总数描述")
@@ -303,6 +306,20 @@ def validate_readme_document(readme_text, generated_dir):
         ]  # 只检查前 N-1 个日志
         if missing_logs:
             issues.append("未列出执行日志：" + ", ".join(missing_logs))
+
+    # 校验是否列出实际生成的文件（排除最新日志，避免生成时尚不存在）
+    actual_files = [f.name for f in generated_dir.iterdir() if f.is_file()]
+    latest_log = log_files[-1] if log_files else None
+    expected_names = [
+        name for name in actual_files if not (latest_log and name == latest_log)
+    ]
+    text_lower = text.lower()
+    missing_names = [name for name in expected_names if name.lower() not in text_lower]
+    if missing_names:
+        preview = ", ".join(missing_names[:8])
+        if len(missing_names) > 8:
+            preview += " 等"
+        issues.append("未列出生成文件：" + preview)
 
     # 不强制要求列出 README.md 自身（因为生成时它还不存在）
     # 这是一个可选的最佳实践，但不应该作为校验失败的理由
