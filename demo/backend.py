@@ -332,7 +332,7 @@ def log_prompt_payload(tag: str, prompt_text: str) -> None:
 def build_round_retry_prompt(round_no: int, retry_idx: int) -> str:
     rule = get_round_rule(round_no)
     base = f"⚠️ 检测到第 {round_no} 轮输出为空（已重试 {retry_idx}/3 次）。\n\n"
-    if round_no == 10:
+    if round_no == 10 and (not rule or round_mode(rule) == "final_answer"):
         prompt = (
             base + "**第 10 轮任务**：仅输出 `<Answer>` 总结所有轮次的发现与建议。\n\n"
             "**⚡ 立即输出以下格式（不要输出任何其他内容）**：\n\n"

@@ -416,146 +416,21 @@ print(merged.head())
 - ✅ **在 README 中说明哪些分析成功、哪些失败即可**
 - ❌ **禁止因为某轮失败就停止整个流程**
 
-### 7. 第 8 轮：生成 README.md 索引文件
-
-**前置条件**：已完成第 2-7 轮的数据分析。
-
-**⚠️ 重要**：此轮生成索引文件,记录所有生成的文件及其说明,为阶段2的报告生成提供文件清单。
-
-**索引内容**：
-- 记录所有生成的CSV文件及其说明
-- 记录所有生成的PNG图表及其说明
-- 记录每轮分析的任务和结果
-- 提供文件的用途和数据来源说明
-
-**第 8 轮任务**：
-
-```
-<Analyze>生成 README.md 索引文件</Analyze>
-
-<Code>
-from pathlib import Path
-from datetime import datetime
-import json
-
-# ⚠️ 本轮禁止连接 SQLite 或执行 SQL，只能遍历 generated/ 目录的文件。
-# ⚠️ 如需数据，请直接读取 generated/ 下已生成的 CSV/PNG/TXT。
-
-OUTPUT_DIR = Path("generated")
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-# 扫描所有生成的文件
-csv_files = sorted(OUTPUT_DIR.glob("*.csv"))
-png_files = sorted(OUTPUT_DIR.glob("*.png"))
-txt_files = sorted(OUTPUT_DIR.glob("execute_round_*.txt"))
-
-# 构建文件索引
-readme_content = f"""# 数据分析结果索引
-
-生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-
-## 📊 分析概况
-
-- **CSV文件数量**: {len(csv_files)}
-- **PNG图表数量**: {len(png_files)}
-- **执行日志数量**: {len(txt_files)}
-- **总文件数**: {len(csv_files) + len(png_files) + len(txt_files)}
-
-## 📁 文件清单
-
-### CSV数据文件
-
-"""
-
-# 添加CSV文件列表
-for csv_file in csv_files:
-    file_size = csv_file.stat().st_size
-    readme_content += f"- `{csv_file.name}` ({file_size:,} bytes)\n"
-
-readme_content += "\n### PNG可视化图表\n\n"
-
-# 添加PNG文件列表
-for png_file in png_files:
-    file_size = png_file.stat().st_size
-    readme_content += f"- `{png_file.name}` ({file_size:,} bytes)\n"
-
-readme_content += "\n### 执行日志文件\n\n"
-
-# 添加执行日志列表
-for txt_file in txt_files:
-    file_size = txt_file.stat().st_size
-    readme_content += f"- `{txt_file.name}` ({file_size:,} bytes)\n"
-
-readme_content += """\n## 📝 分析轮次说明
-
-### 第 2 轮: enrolled 表分析
-- **任务**: 分析学生入学信息
-- **数据源**: enrolled.csv / enrolled 表
-- **生成文件**: enrolled相关的CSV和PNG文件
-
-### 第 3 轮: no_payment_due 表分析
-- **任务**: 分析学生还款状态
-- **数据源**: no_payment_due.csv / no_payment_due 表
-- **生成文件**: payment相关的CSV和PNG文件
-
-### 第 4 轮: longest_absense_from_school 表分析
-- **任务**: 分析学生缺勤时长
-- **数据源**: longest_absense_from_school.csv / longest_absense_from_school 表
-- **生成文件**: absense相关的CSV和PNG文件
-
-### 第 5 轮: enlist 表分析
-- **任务**: 分析参军学生信息
-- **数据源**: enlist.csv / enlist 表
-- **生成文件**: enlist相关的CSV和PNG文件
-
-### 第 6 轮: disabled 表分析
-- **任务**: 分析残疾学生信息
-- **数据源**: disabled.csv / disabled 表
-- **生成文件**: disabled相关的CSV和PNG文件
-
-### 第 7 轮: 多表关联分析
-- **任务**: SQLite多表JOIN分析
-- **数据源**: student_loan.sqlite 数据库
-- **生成文件**: join/correlation/multi相关的CSV和PNG文件
-
-## 🎯 使用说明
-
-此目录下的文件是阶段1数据分析的输出结果:
-
-1. **CSV文件**: 包含描述性统计、分组统计等数据分析结果
-2. **PNG文件**: 包含柱状图、折线图、热力图等数据可视化图表
-3. **TXT文件**: 包含每轮代码执行的详细日志
-
-## 📌 下一步（人工操作提示）
-
-阶段 1 在第 10 轮 `<Answer>` 输出后即告结束，本阶段任务已经包含 README 与 HTML 报告；若需要额外的定制 Stage 2（例如对接前端模板），可在阶段 1 完整结束后再另启一轮运行加载 `prompt_stage2_html_report.md`，绝不可在阶段 1 的任何轮次内擅自执行 Stage 2 的脚本。
-"""
-
-# 保存README文件
-readme_path = OUTPUT_DIR / "README.md"
-with open(readme_path, "w", encoding="utf-8") as f:
-    f.write(readme_content)
-
-print(f"✅ README.md 索引文件已生成: {readme_path}")
-print(f"📊 记录了 {len(csv_files)} 个CSV文件, {len(png_files)} 个PNG文件")
-</Code>
-```
-
-**注意事项**：
-- 自动扫描generated目录下的所有文件
-- 记录文件名和大小信息
-- 为每轮分析添加说明
-- 为阶段2提供清晰的文件索引
-- ❌ 禁止引用 DB_PATH、sqlite3、SQL 查询；本轮只允许使用 pathlib/os/json 等文件操作
+### 7. 第 8 轮：生成 README.md 索引文件（旧模板已废弃）
+旧版 README 模板与当前规则冲突，已停用。请严格使用本文后部“第 8 轮：遍历 generated 目录并生成 README.md”的硬性要求与标准脚本。
 
 ### 8. 第 9 轮：生成 multi_table_analysis.html 汇总报告
 - **任务**：遍历 `generated/` 目录下的 CSV/PNG/README 等产物，生成 HTML 报告 `multi_table_analysis.html`。
 - **约束**：只能使用 `pathlib/os/datetime` 等标准库操作文件；禁止引用 pandas、matplotlib、sqlite3；必须真正写入 HTML 文件而不是直接粘贴。
 
-### 9. 第 10 轮：输出最终答案
+### 9. 第 10 轮：生成 comprehensive_analysis_report.html（Phase II 综合分析）
 
 **前置条件**：已完成第 2-9 轮的所有分析任务（包含 README 与 HTML 报告）。
+**说明**：请以本文后部“第 10 轮：生成 Phase II 综合分析报告”的完整模板为准。
 
+### 10. 第 11 轮：输出最终答案
+
+**前置条件**：已完成第 2-10 轮的所有分析任务（包含 README 与 HTML 报告）。
 **格式**：
 
 ```
