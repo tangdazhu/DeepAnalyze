@@ -3239,7 +3239,15 @@ def bot_stream(messages, workspace, session_id="default"):
                             continue
 
                     uses_plot = "plt." in normalized_code or "sns." in normalized_code
-                    if uses_plot and "plt.savefig" not in normalized_code:
+                    requires_png = (
+                        rule_for_next is not None
+                        and round_requires_output_type(rule_for_next, "png")
+                    )
+                    if (
+                        uses_plot
+                        and requires_png
+                        and "plt.savefig" not in normalized_code
+                    ):
                         logger.warning(
                             f"[bot_stream] Code rejected: missing plt.savefig"
                         )
@@ -3250,7 +3258,11 @@ def bot_stream(messages, workspace, session_id="default"):
                         messages.append({"role": "user", "content": save_prompt})
                         refund_iteration()
                         continue
-                    if uses_plot and "plt.close" not in normalized_code:
+                    if (
+                        uses_plot
+                        and requires_png
+                        and "plt.close" not in normalized_code
+                    ):
                         close_prompt = "绘图结束后需调用 `plt.close()` 释放资源，避免多轮叠加。请在 <Code> 末尾补充 `plt.close()`。"
                         messages.append({"role": "user", "content": close_prompt})
                         refund_iteration()
