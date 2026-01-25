@@ -32,6 +32,10 @@ generated_dir = Path("generated")
 if not generated_dir.exists():
     raise FileNotFoundError(f"目录不存在：{generated_dir.resolve()}")
 
+readme_path = generated_dir / "README.md"
+if not readme_path.exists():
+    readme_path.touch()
+
 files = sorted([p for p in generated_dir.iterdir() if p.is_file()])
 total_files = len(files)
 

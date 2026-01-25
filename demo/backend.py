@@ -3394,6 +3394,21 @@ def bot_stream(messages, workspace, session_id="default"):
 
                     last_code_signature = code_signature
 
+                    if (
+                        mode_for_next == "filesystem_summary"
+                        and rule_for_next
+                        and "README.md"
+                        in round_expected_filenames_by_type(rule_for_next, "markdown")
+                    ):
+                        try:
+                            readme_placeholder = generated_dir / "README.md"
+                            readme_placeholder.touch(exist_ok=True)
+                        except Exception as err:
+                            logger.warning(
+                                "[bot_stream] Failed to touch README.md before filesystem summary: %s",
+                                err,
+                            )
+
                     logger.info(
                         f"[bot_stream] session={session_id} iteration={iteration} executing code, length={len(code_str)}"
                     )
