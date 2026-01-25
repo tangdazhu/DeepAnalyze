@@ -696,9 +696,9 @@ print(f\"✅ multi_table_analysis.html 已写入，统计 {len(files)} 个文件
 **分析内容要求**：
 - **必须读取真实文件**：使用 `pd.read_csv()` 读取 `multi_table_join_result.csv` 等实际存在的文件
 - **禁止编造数据**：所有分析结论必须基于读取的真实数据，禁止假设或虚构字段、数值
-- 综合洞察：基于 `multi_table_join_result.csv` 中的实际字段（name, school, bool, month, organ 等）进行分析
-- 群体特征：总结不同学生群体的特征（如残疾学生、参军学生、缺勤学生等）
-- 可视化引用：引用 `generated/` 下实际存在的 PNG 文件（如 `enrolled_school_dist.png`、`multi_table_join_result.png` 等）
+- 综合洞察：仅基于 `multi_table_join_result.csv` 的真实列名进行统计（如 name, school, bool, month, organ 等）
+- 群体特征：如需统计残疾/参军/缺勤等群体，必须来自 join 结果或 `disabled_count.csv` 的真实字段
+- 可视化引用：只能引用 `generated/` 下真实存在的 PNG 文件（如 `enrolled_school_dist.png`、`multi_table_join_result.png` 等）
 
 **硬性要求**：
 1. **必须先读取 CSV 文件**：至少读取 `multi_table_join_result.csv`，查看其实际列名和数据
@@ -712,8 +712,9 @@ print(f\"✅ multi_table_analysis.html 已写入，统计 {len(files)} 个文件
 **强制代码模板（必须完全照抄，不得修改）**：
 ```python
 from pathlib import Path
-import pandas as pd
 from datetime import datetime
+
+import pandas as pd
 
 generated_dir = Path("generated")
 csv_files = list(generated_dir.glob("*.csv"))
@@ -723,20 +724,41 @@ png_files = list(generated_dir.glob("*.png"))
 df_join = pd.read_csv(generated_dir / "multi_table_join_result.csv")
 print(f"✅ 读取 multi_table_join_result.csv，共 {len(df_join)} 行，列名：{list(df_join.columns)}")
 
-# 读取各 summary 文件
-df_enrolled = pd.read_csv(generated_dir / "enrolled_summary.csv")
-df_payment = pd.read_csv(generated_dir / "payment_status_summary.csv")
-df_absense = pd.read_csv(generated_dir / "absense_summary.csv")
-df_enlist = pd.read_csv(generated_dir / "enlist_summary.csv")
-df_disabled = pd.read_csv(generated_dir / "disabled_count.csv")
+def read_csv_safe(path: Path) -> pd.DataFrame:
+    if path.exists():
+        return pd.read_csv(path)
+    return pd.DataFrame()
 
-# 统计关键指标
+df_disabled = read_csv_safe(generated_dir / "disabled_count.csv")
+
+def extract_metric_value(df: pd.DataFrame, keywords: list[str]) -> float:
+    if df.empty:
+        return 0.0
+    if {"metric", "value"}.issubset(df.columns):
+        metric_lower = df["metric"].astype(str).str.lower()
+        for key in keywords:
+            mask = metric_lower.str.contains(key)
+            if mask.any():
+                try:
+                    return float(df.loc[mask, "value"].iloc[0])
+                except Exception:
+                    return 0.0
+    for col in df.columns:
+        col_lower = str(col).lower()
+        if any(key in col_lower for key in keywords) and pd.api.types.is_numeric_dtype(df[col]):
+            try:
+                return float(df[col].iloc[0])
+            except Exception:
+                return 0.0
+    return 0.0
+
+# 统计关键指标（仅基于真实列名）
 total_students = len(df_join)
-enrolled_schools = df_enrolled['school'].nunique() if 'school' in df_enrolled.columns else 0
-payment_status_count = len(df_payment)
-absense_students = len(df_absense)
-enlist_students = len(df_enlist)
-disabled_students = df_disabled['disabled_count'].sum() if 'disabled_count' in df_disabled.columns else 0
+enrolled_schools = df_join["school"].nunique() if "school" in df_join.columns else 0
+payment_records = int(df_join["bool"].notna().sum()) if "bool" in df_join.columns else 0
+absense_records = int(df_join["month"].notna().sum()) if "month" in df_join.columns else 0
+enlist_records = int(df_join["organ"].notna().sum()) if "organ" in df_join.columns else 0
+disabled_students = extract_metric_value(df_disabled, ["disabled", "残疾"])
 
 # 构造 HTML
 html_lines = [
@@ -765,10 +787,10 @@ html_lines = [
     f"    <p>多表关联结果共 <span class='metric'>{total_students}</span> 条记录，包含字段：{', '.join(df_join.columns)}</p>",
     "    <ul>",
     f"      <li>在校学生涉及 <span class='metric'>{enrolled_schools}</span> 所学校</li>",
-    f"      <li>缴费状态记录 <span class='metric'>{payment_status_count}</span> 条</li>",
-    f"      <li>缺勤记录 <span class='metric'>{absense_students}</span> 条</li>",
-    f"      <li>参军学生 <span class='metric'>{enlist_students}</span> 人</li>",
-    f"      <li>残疾学生 <span class='metric'>{disabled_students}</span> 人</li>",
+    f"      <li>缴费状态记录 <span class='metric'>{payment_records}</span> 条</li>",
+    f"      <li>缺勤记录 <span class='metric'>{absense_records}</span> 条</li>",
+    f"      <li>参军学生记录 <span class='metric'>{enlist_records}</span> 条</li>",
+    f"      <li>残疾学生数量 <span class='metric'>{int(disabled_students)}</span> 人</li>",
     "    </ul>",
     "  </section>",
     "  <section id='analysis'>",
@@ -790,8 +812,8 @@ html_lines = [
     "    <h2>3. 结论与建议</h2>",
     "    <ul>",
     f"      <li>学生群体覆盖 {enrolled_schools} 所学校，建议针对不同学校制定差异化贷款政策</li>",
-    f"      <li>缺勤学生占比较高（{absense_students} 条记录），需关注学业连续性对还款能力的影响</li>",
-    f"      <li>参军学生（{enlist_students} 人）与残疾学生（{disabled_students} 人）属于特殊群体，建议提供专项贷款优惠政策</li>",
+    f"      <li>缺勤学生占比较高（{absense_records} 条记录），需关注学业连续性对还款能力的影响</li>",
+    f"      <li>参军学生记录（{enlist_records} 条）与残疾学生（{int(disabled_students)} 人）属于特殊群体，建议提供专项贷款优惠政策</li>",
     "      <li>多表关联分析揭示了学生状态的多维特征，为精准风控提供数据支持</li>",
     "    </ul>",
     "  </section>",
