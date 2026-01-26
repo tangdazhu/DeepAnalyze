@@ -2678,6 +2678,35 @@ def bot_stream(messages, workspace, session_id="default"):
                     else:
                         empty_code_rounds = 0  # 重置计数
 
+                    target_round = execute_rounds + 1
+                    rule_for_next = get_round_rule(target_round)
+                    mode_for_next = round_mode(rule_for_next)
+
+                    if mode_for_next in ("html_report", "html_report_phase2"):
+                        expected_html_files = (
+                            round_expected_filenames_by_type(rule_for_next, "html")
+                            if rule_for_next
+                            else []
+                        )
+                        if (
+                            expected_html_files
+                            and "html_lines" in effective_code
+                            and "# AUTO_WRITE_HTML" not in effective_code
+                        ):
+                            html_name = expected_html_files[0]
+                            auto_write_block = (
+                                "\n\n# AUTO_WRITE_HTML\n"
+                                "try:\n"
+                                '    output_dir = Path("generated")\n'
+                                "    output_dir.mkdir(parents=True, exist_ok=True)\n"
+                                f'    html_path = output_dir / "{html_name}"\n'
+                                '    html_path.write_text("\\n".join(html_lines), encoding="utf-8")\n'
+                                f'    print("✅ {html_name} 已写入")\n'
+                                "except Exception as err:\n"
+                                '    print(f"⚠️ 自动写入 HTML 失败: {err}")\n'
+                            )
+                            effective_code = f"{effective_code}{auto_write_block}"
+
                     # 拦截 HTML/前端模板被误当作 Python 代码的情况
                     # 只拒绝以 HTML 标签开头的代码（直接输出 HTML），允许包含 HTML 字符串的 Python 代码
                     first_line = (
@@ -2763,10 +2792,6 @@ def bot_stream(messages, workspace, session_id="default"):
                         )
                         refund_iteration()
                         continue
-
-                    target_round = execute_rounds + 1
-                    rule_for_next = get_round_rule(target_round)
-                    mode_for_next = round_mode(rule_for_next)
 
                     if mode_for_next == "html_report_phase2":
                         uses_sqlite_master = "sqlite_master" in normalized_code
