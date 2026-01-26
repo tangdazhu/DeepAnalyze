@@ -2492,6 +2492,15 @@ def bot_stream(messages, workspace, session_id="default"):
                 logger.info(f"[bot_stream] Finished flag detected, breaking loop")
                 break
 
+            # 修复：模型可能输出了 <Code> 但遗漏 </Code>，导致被误判为缺少 Code block 并触发强制终止。
+            # 必须在 has_code_block 校验前进行补齐。
+            if last_finish_reason in {"stop", "length"}:
+                if "<Code>" in cur_res and "</Code>" not in cur_res:
+                    cur_res += "</Code>"
+                    logger.info(
+                        "[bot_stream] Auto-closed missing </Code> before validation"
+                    )
+
             logger.info(f"[bot_stream] Checking for <Code> block in response")
             has_code_block = "<Code>" in cur_res and "</Code>" in cur_res
             logger.info(f"[bot_stream] has_code_block={has_code_block}")
