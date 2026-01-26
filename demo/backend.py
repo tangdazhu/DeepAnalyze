@@ -2417,9 +2417,10 @@ def bot_stream(messages, workspace, session_id="default"):
             rule_for_current = get_round_rule(current_round)
             current_mode = round_mode(rule_for_current) if rule_for_current else None
 
-            # Round 7/8/9（sqlite_join / filesystem_summary / html_report）跳过表名检测
-            # 这些轮次的 <Analyze> 易包含非表名词汇或代码片段，可能被误识别为表名
+            # CSV 分析/报告轮次跳过表名检测
+            # 这些轮次的 <Analyze> 易包含字段/文件/变量名，可能被误识别为表名
             skip_table_check = current_mode in (
+                "csv_analysis",
                 "sqlite_join",
                 "filesystem_summary",
                 "html_report",
