@@ -381,15 +381,6 @@ def build_round_retry_prompt(round_no: int, retry_idx: int) -> str:
 def build_continue_prompt_text(completed_round: int, next_round: int) -> Optional[str]:
     rule = get_round_rule(next_round)
     if not rule:
-        if next_round == 9:
-            prompt = (
-                f"✅ 已完成第 {completed_round} 轮。\n\n"
-                "⚡ 立即开始第 10 轮总结，不要等待指令。\n\n"
-                "**第 10 轮任务**：输出 <Answer> 总结所有分析结果与关键发现。\n\n"
-                "本轮只允许输出 <Answer>，总结 2+ 条定量结论、失败轮次说明、后续建议。⚠️ 禁止再输出 <Analyze>/<Code>。"
-            )
-            log_prompt_payload(f"round_{next_round}_continue", prompt)
-            return prompt
         return None
 
     desc = describe_round(rule)
@@ -1973,6 +1964,7 @@ def bot_stream(messages, workspace, session_id="default"):
     max_raw_iterations = MAX_ITERATIONS * 2
     empty_retry = 0
     forced_reason = ""
+    stop_requested = False
 
     last_code_signature = None
     last_analyze_signature = None
@@ -2180,11 +2172,11 @@ def bot_stream(messages, workspace, session_id="default"):
                 if chunk.choices and chunk.choices[0].finish_reason:
                     last_finish_reason = chunk.choices[0].finish_reason
                 if should_stop(session_id):
-                    stop_msg = "\n<Execute>\n``````\n检测到停止指令，正在安全结束当前迭代。\n```\n</Execute>\n"
+                    stop_msg = "\n<Execute>\n```\n检测到停止指令，本轮生成已中断（未推进轮次）。\n```\n</Execute>\n"
                     assistant_reply += stop_msg
                     yield stop_msg
-                    forced_reason = "任务已根据用户的停止指令终止"
-                    finished = True
+                    stop_requested = True
+                    reset_stop_flag(session_id)
                     break
                 current_stream = sanitized_stream
 
@@ -4112,10 +4104,14 @@ def bot_stream(messages, workspace, session_id="default"):
                     assistant_reply += warn_block
                     yield warn_block
 
-        if should_stop(session_id) and not forced_reason:
-            forced_reason = "任务已根据用户的停止指令终止"
-            finished = True
-            break
+        if stop_requested:
+            logger.info(
+                "[bot_stream] Stop requested by user, aborting without advancing rounds"
+            )
+            return
+
+        if should_stop(session_id):
+            reset_stop_flag(session_id)
 
     if not finished and forced_reason == "" and iteration >= MAX_ITERATIONS:
         forced_reason = f"已达到最大迭代次数（{MAX_ITERATIONS}），自动结束当前任务"
@@ -4134,12 +4130,12 @@ def bot_stream(messages, workspace, session_id="default"):
 @app.post("/chat/completions")
 async def chat(body: dict = Body(...)):
     messages = body.get("messages", [])
-    workspace = body.get("workspace", [])
+    workspace_payload = body.get("workspace", [])
     session_id = body.get("session_id", "default")
 
     def generate():
         chunk_count = 0
-        for delta_content in bot_stream(messages, workspace, session_id):
+        for delta_content in bot_stream(messages, workspace_payload, session_id):
             chunk_count += 1
             if chunk_count <= 3 or chunk_count % 10 == 0:
                 print(
