@@ -2000,6 +2000,25 @@ def bot_stream(messages, workspace, session_id="default"):
     unknown_table_warnings: set[str] = set()  # 跟踪已警告的未知表名,防止重复警告
     rule_for_next = None  # 初始化 rule_for_next，避免在表名检测时出现 UnboundLocalError
 
+    def append_user_prompt(prompt_text: str) -> bool:
+        """向 messages 追加 user 提示，并对相邻重复提示做去重，避免前端刷屏。"""
+        if not prompt_text:
+            return False
+        if messages:
+            last = messages[-1]
+            if (
+                isinstance(last, dict)
+                and last.get("role") == "user"
+                and str(last.get("content") or "") == str(prompt_text)
+            ):
+                logger.info(
+                    "[bot_stream] Skip duplicate user prompt injection: %.120s",
+                    str(prompt_text).replace("\n", " ")[:120],
+                )
+                return False
+        messages.append({"role": "user", "content": prompt_text})
+        return True
+
     def refund_iteration():
         nonlocal iteration
         iteration = max(0, iteration - 1)
@@ -3631,7 +3650,7 @@ def bot_stream(messages, workspace, session_id="default"):
                                 + produced_hint
                                 + "。请在本轮同时生成所有要求文件（包含已生成的），不要遗漏任何必需产物。"
                             )
-                            messages.append({"role": "user", "content": prompt})
+                            append_user_prompt(prompt)
                             refund_iteration()
                             continue
                     if (
@@ -4051,9 +4070,7 @@ def bot_stream(messages, workspace, session_id="default"):
                                 next_round,
                                 continue_prompt.replace("\n", " ")[:120],
                             )
-                            messages.append(
-                                {"role": "user", "content": continue_prompt}
-                            )
+                            append_user_prompt(continue_prompt)
                     if (
                         execute_rounds >= ANSWER_MIN_EXEC_ROUNDS
                         and non_schema_exec_rounds >= ANSWER_MIN_NON_SCHEMA_ROUNDS
