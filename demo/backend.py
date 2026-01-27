@@ -2912,7 +2912,7 @@ def bot_stream(messages, workspace, session_id="default"):
                                 f"第 {target_round} 轮必须通过 `sqlite3.connect(DB_PATH, timeout=30)` 执行多表 JOIN，"
                                 "禁止改用 CSV。请基于配置列出的真实表完成 SQL 查询，再写出结果 CSV/PNG。"
                             )
-                            messages.append({"role": "user", "content": join_prompt})
+                            append_user_prompt(join_prompt)
                             refund_iteration()
                             continue
 
@@ -2923,12 +2923,10 @@ def bot_stream(messages, workspace, session_id="default"):
                                     target_round,
                                 )
                                 busy_prompt = (
-                                    "第 7 轮必须在连接 SQLite 后执行 "
+                                    f"第 {target_round} 轮必须在连接 SQLite 后执行 "
                                     '`conn.execute("PRAGMA busy_timeout = 30000;")` 以保证查询稳定。'
                                 )
-                                messages.append(
-                                    {"role": "user", "content": busy_prompt}
-                                )
+                                append_user_prompt(busy_prompt)
                                 refund_iteration()
                                 continue
 
@@ -2955,9 +2953,7 @@ def bot_stream(messages, workspace, session_id="default"):
                                     '```python\nDB_PATH = r"{path}"\n```\n'
                                     "请删除 `education.db` / `data/student_loan.sqlite` 等无关路径，改为以上路径，并重新执行 SQLite JOIN。"
                                 ).format(round=target_round, path=expected_sqlite_path)
-                                messages.append(
-                                    {"role": "user", "content": sqlite_path_prompt}
-                                )
+                                append_user_prompt(sqlite_path_prompt)
                                 refund_iteration()
                                 continue
 
@@ -2987,9 +2983,7 @@ def bot_stream(messages, workspace, session_id="default"):
                                     f"第 {target_round} 轮必须先通过 SQLite JOIN 生成 `{csv_name}`，再基于结果做分析。"
                                     "请在同一段代码中完成 SQL JOIN 并写入该 CSV。"
                                 )
-                                messages.append(
-                                    {"role": "user", "content": warn_join_file}
-                                )
+                                append_user_prompt(warn_join_file)
                                 refund_iteration()
                                 continue
 
@@ -4100,10 +4094,27 @@ def bot_stream(messages, workspace, session_id="default"):
                             execute_rounds, next_round
                         )
                         if continue_prompt:
+                            rule_for_continue = get_round_rule(next_round)
+                            if (
+                                rule_for_continue
+                                and round_mode(rule_for_continue) == "sqlite_join"
+                            ):
+                                expected_sqlite = find_primary_sqlite(
+                                    Path(workspace_path)
+                                )
+                                if expected_sqlite:
+                                    expected_sqlite_path = str(
+                                        expected_sqlite.resolve()
+                                    )
+                                    continue_prompt += (
+                                        "\n\n"
+                                        "**【数据库绝对路径（自动注入）】后续 SQLite JOIN 必须使用：**\n\n"
+                                        "```python\n"
+                                        f'DB_PATH = r"{expected_sqlite_path}"\n'
+                                        "```\n"
+                                    )
                             logger.info(
-                                "[bot_stream] Injecting continue prompt for round %s: %.120s",
-                                next_round,
-                                continue_prompt.replace("\n", " ")[:120],
+                                f"[bot_stream] Injecting continue prompt for round {next_round}: {continue_prompt[:120]}"
                             )
                             append_user_prompt(continue_prompt)
                     if (
