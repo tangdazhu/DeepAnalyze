@@ -3653,6 +3653,41 @@ def bot_stream(messages, workspace, session_id="default"):
                             append_user_prompt(prompt)
                             refund_iteration()
                             continue
+
+                    if rule_for_current and mode_for_current in (
+                        "html_report",
+                        "html_report_phase2",
+                    ):
+                        unexpected_md_files = sorted(
+                            {
+                                Path(p).name
+                                for p in artifact_paths
+                                if Path(p).suffix.lower() == ".md"
+                                and Path(p).name.lower() not in expected_files_lower
+                            }
+                        )
+                        if unexpected_md_files:
+                            logger.warning(
+                                "[bot_stream] Round %s produced unexpected markdown files: %s",
+                                current_round,
+                                ", ".join(unexpected_md_files),
+                            )
+                            expected_list = (
+                                ", ".join(expected_files)
+                                if expected_files
+                                else "（无）"
+                            )
+                            prompt = (
+                                f"第 {current_round} 轮属于 HTML 报告阶段（{mode_for_current}），"
+                                f"根据 round_io_rules 本轮只允许生成：{expected_list}。"
+                                f"检测到多余的 Markdown 文件：{', '.join(unexpected_md_files)}。"
+                                "请删除这些 .md 文件，并改为生成规则要求的 HTML 文件："
+                                "必须使用 Python 构造 html_lines 列表并写入 generated/ 目录，"
+                                "禁止生成 Markdown 报告替代 HTML。"
+                            )
+                            append_user_prompt(prompt)
+                            refund_iteration()
+                            continue
                     if (
                         mode_for_current == "filesystem_summary"
                         and "readme.md" in expected_files_lower
