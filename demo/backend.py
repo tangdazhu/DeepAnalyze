@@ -3987,6 +3987,21 @@ def bot_stream(messages, workspace, session_id="default"):
                                     "请根据上述建议修正后重新提交。"
                                 )
                             else:
+                                mode_for_current = (
+                                    round_mode(rule_for_current)
+                                    if rule_for_current
+                                    else ""
+                                )
+                                html_phase2_hint = ""
+                                if mode_for_current == "html_report_phase2":
+                                    html_phase2_hint = (
+                                        "\n\n**第 10 轮（综合 HTML 报告）纠错提示**：\n"
+                                        "- 只允许读取 `generated/` 下真实存在的 CSV/PNG/README/HTML；禁止访问 `data/` 或 SQLite。\n"
+                                        "- 不要对整张 DataFrame 直接 `mean()/std()`：CSV 往往混有字符串列，会触发 TypeError。\n"
+                                        "- 需要数值统计时请先筛选数值列，例如：`num_df = df.select_dtypes(include='number')`，或使用 `df.mean(numeric_only=True)`。\n"
+                                        "- 任何列名/字段都必须来自 `df.columns` 的真实值；先 `print(df.columns.tolist())` 再决定做哪些统计/图表，禁止假设 `loan_amount/income/region/default_rate` 等列。\n"
+                                        "- 如果发现没有可用数值列：请降级为“文件清单 + 行数/缺失值 + 分类计数”等不依赖数值列的统计，并仍然生成 `comprehensive_analysis_report.html`。"
+                                    )
                                 error_warning = (
                                     f"代码执行过程中出现错误：{error_hint}\n\n"
                                     "请仔细检查上方 <Execute> 块中的完整错误信息，常见问题包括：\n"
@@ -3995,6 +4010,7 @@ def bot_stream(messages, workspace, session_id="default"):
                                     "3. 数据类型不匹配\n"
                                     "4. 缺少必要的数据预处理步骤\n\n"
                                     "请修正代码后重新提交。如果部分代码已成功执行，可以基于已生成的文件继续分析。"
+                                    + html_phase2_hint
                                 )
                             messages.append({"role": "user", "content": error_warning})
                             allow_duplicate_analyze_retry()
