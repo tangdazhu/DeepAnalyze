@@ -2870,16 +2870,51 @@ def bot_stream(messages, workspace, session_id="default"):
                             )
                             sqlite_block_prompt = (
                                 f"第 {target_round} 轮仅允许读取 generated/ 目录下的 CSV/PNG/README/HTML，"
-                                "禁止连接 SQLite 或查询 sqlite_master（如 sqlite3.connect/pd.read_sql/cursor.execute）。"
-                                "请删除所有 SQL 相关代码后重新生成 comprehensive_analysis_report.html。"
+                                "禁止使用 sqlite3.connect()/pd.read_sql() 访问 SQLite，也禁止查询 sqlite_master。"
+                                "请改为用 pd.read_csv() 读取 generated/ 下真实存在的 CSV（至少包含 multi_table_join_result.csv），"
+                                "再生成综合 HTML 报告写入 generated/。"
                             )
-                            messages.append(
-                                {"role": "user", "content": sqlite_block_prompt}
-                            )
+                            append_user_prompt(sqlite_block_prompt)
                             refund_iteration()
                             continue
 
-                    if mode_for_next == "csv_analysis":
+                        if not uses_csv:
+                            logger.warning(
+                                "[bot_stream] Code rejected: html_report_phase2 must read generated CSV"
+                            )
+                            csv_prompt = (
+                                f"第 {target_round} 轮必须用 pd.read_csv() 读取 generated/ 下真实存在的 CSV（至少 multi_table_join_result.csv），"
+                                "禁止跳过读盘或只读取 execute_round_*.txt。请先读取 CSV 获取真实列名与统计，再生成综合 HTML 报告。"
+                            )
+                            append_user_prompt(csv_prompt)
+                            refund_iteration()
+                            continue
+
+                        if "html_lines" not in normalized_code:
+                            logger.warning(
+                                "[bot_stream] Code rejected: html_report_phase2 must build html_lines"
+                            )
+                            html_lines_prompt = (
+                                f"第 {target_round} 轮生成 HTML 时必须用 Python 构造 html_lines 列表逐行拼接，"
+                                "并写入 generated/ 下规则要求的 HTML 文件；禁止直接 print 整段 HTML。"
+                            )
+                            append_user_prompt(html_lines_prompt)
+                            refund_iteration()
+                            continue
+
+                        if '"""' in effective_code and "<html" in normalized_code:
+                            logger.warning(
+                                "[bot_stream] Code rejected: html_report_phase2 should not embed full HTML via triple quotes"
+                            )
+                            template_prompt = (
+                                f'第 {target_round} 轮禁止使用三引号把整段 HTML 模板写死（例如 html = """<html>..."""）。'
+                                "请改为使用 html_lines 列表逐行构造 HTML，再 write_text 写入 generated/。"
+                            )
+                            append_user_prompt(template_prompt)
+                            refund_iteration()
+                            continue
+
+                    elif mode_for_next == "csv_analysis":
                         if not uses_csv:
                             logger.warning(
                                 f"[bot_stream] Code rejected: round {target_round} missing CSV read"
@@ -3714,6 +3749,9 @@ def bot_stream(messages, workspace, session_id="default"):
                                 + extra_md_hint
                             )
                             append_user_prompt(prompt)
+                            # 缺少必需产物时，允许模型在下一次重试中保持相同的总体结构，但必须补齐缺失文件。
+                            # 若不重置签名，模型可能因为“duplicate code”被拒绝，从而漂移输出无关代码导致死循环。
+                            last_code_signature = None
                             refund_iteration()
                             continue
 
