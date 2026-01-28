@@ -4142,6 +4142,41 @@ def bot_stream(messages, workspace, session_id="default"):
                                     "请根据上述建议修正后重新提交。"
                                 )
                             elif (
+                                "unknown format code" in exe_output.lower()
+                                and "for object of type 'str'" in exe_output.lower()
+                            ):
+                                mode_for_current = (
+                                    round_mode(rule_for_current)
+                                    if rule_for_current
+                                    else ""
+                                )
+                                extra_hint = ""
+                                if mode_for_current == "html_report_phase2":
+                                    extra_hint = (
+                                        "\n\n**纠错提示（数值/字符串格式化）**：\n"
+                                        "- 你很可能写了类似 `f\"{avg_age:.1f}\"`，但 avg_age 实际是字符串（例如你设成了 'N/A'）。\n"
+                                        "- 解决方法：在写入 html_lines 前做安全格式化，例如：\n"
+                                        "```python\n"
+                                        "def fmt_num(x, digits=1):\n"
+                                        "    try:\n"
+                                        '        return f"{float(x):.{digits}f}"\n'
+                                        "    except Exception:\n"
+                                        "        return str(x)\n"
+                                        "\n"
+                                        "avg_age_str = fmt_num(avg_age, 1)\n"
+                                        "avg_income_str = fmt_num(avg_income, 2)\n"
+                                        "avg_loan_amount_str = fmt_num(avg_loan_amount, 2)\n"
+                                        "default_rate_str = fmt_num(default_rate, 1)\n"
+                                        "```\n"
+                                        "- 然后在 HTML 中用 `{avg_age_str}` 等字符串变量，避免任何 `:.1f` 直接作用在可能为字符串的值上。\n"
+                                        "- 修正后仍必须把规则要求的 HTML 文件写入 `generated/`（例如 `generated/comprehensive_analysis_report.html`），否则会继续被判定缺文件。"
+                                    )
+                                error_warning = (
+                                    f"⚠️ Python 格式化错误：{error_hint}\n\n"
+                                    "常见原因：对字符串使用了浮点格式化（例如 `:.1f`）。"
+                                    + extra_hint
+                                )
+                            elif (
                                 "unhashable type" in exe_output.lower()
                                 and "series" in exe_output.lower()
                             ):
