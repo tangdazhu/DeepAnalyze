@@ -2512,6 +2512,29 @@ def bot_stream(messages, workspace, session_id="default"):
                         "[bot_stream] Auto-closed missing </Code> before validation"
                     )
 
+            # 容错：允许 <code>/<Code > 等大小写与空白差异；若只有 markdown 代码块但缺少 <Code>，自动包裹。
+            normalized_res = cur_res
+            normalized_res = re.sub(
+                r"<\s*/\s*code\s*>", "</Code>", normalized_res, flags=re.IGNORECASE
+            )
+            normalized_res = re.sub(
+                r"<\s*code\s*>", "<Code>", normalized_res, flags=re.IGNORECASE
+            )
+            if "<Code>" not in normalized_res and "```" in normalized_res:
+                md_block = re.search(
+                    r"```(?:python)?\s*(.*?)```", normalized_res, re.DOTALL
+                )
+                if md_block:
+                    code_body = md_block.group(1).strip()
+                    normalized_res = (
+                        normalized_res + "\n<Code>\n" + code_body + "\n</Code>\n"
+                    )
+                    logger.info(
+                        "[bot_stream] Wrapped fenced code block into <Code> for validation"
+                    )
+
+            cur_res = normalized_res
+
             logger.info(f"[bot_stream] Checking for <Code> block in response")
             has_code_block = "<Code>" in cur_res and "</Code>" in cur_res
             logger.info(f"[bot_stream] has_code_block={has_code_block}")
@@ -2555,6 +2578,17 @@ def bot_stream(messages, workspace, session_id="default"):
                         return
                     # 修复19: 当execute_rounds=1(Bootstrap后)且缺少代码时,明确指导开始第2轮分析
                     if execute_rounds == 1:
+                        rule_for_next = get_round_rule(execute_rounds + 1)
+                        required_csv = (
+                            round_input_filename(rule_for_next)
+                            if rule_for_next
+                            else None
+                        )
+                        csv_abs_path = ""
+                        if required_csv:
+                            csv_abs_path = str(
+                                (Path(workspace_path) / "data" / required_csv).resolve()
+                            )
                         code_prompt = (
                             "⚠️ Bootstrap已完成,禁止重复输出Bootstrap代码!\n\n"
                             "🚨 立即开始第2轮分析 - enrolled.csv 🚨\n\n"
@@ -2568,7 +2602,7 @@ def bot_stream(messages, workspace, session_id="default"):
                             "import seaborn as sns\n"
                             "from pathlib import Path\n\n"
                             "# 读取enrolled.csv\n"
-                            "CSV_PATH = r'/home/tdz/DeepAnalyze/demo/workspace/session_xxx/data/enrolled.csv'\n"
+                            f"CSV_PATH = r'{csv_abs_path or '<请从首轮CSV路径列表复制>'}'\n"
                             "df = pd.read_csv(CSV_PATH)\n\n"
                             "# 生成enrolled_summary.csv\n"
                             "OUTPUT_DIR = Path('generated')\n"
@@ -2604,12 +2638,27 @@ def bot_stream(messages, workspace, session_id="default"):
                 elif "<Code>" not in cur_res:
                     # 模型未输出 <Code>，向其追加纠错提示并进入下一轮
                     messages.append({"role": "assistant", "content": cur_res})
+                    missing_code_rounds += 1
+                    logger.warning(
+                        f"[bot_stream] Code block missing (round {missing_code_rounds}/{MAX_MISSING_CODE_ROUNDS})"
+                    )
+                    if missing_code_rounds >= MAX_MISSING_CODE_ROUNDS:
+                        forced_reason = (
+                            f"连续 {MAX_MISSING_CODE_ROUNDS} 轮未输出 <Code> 标签，"
+                            "系统判定模型未遵守提示词约束（每轮必须包含 <Analyze> + <Code>），强制终止任务。"
+                            "请检查提示词是否明确要求输出 <Code>，或更换模型/重新发起会话。"
+                        )
+                        violation_block = f"\n<Answer>\n{forced_reason}\n</Answer>\n"
+                        assistant_reply += violation_block
+                        yield violation_block
+                        return
                     correction_prompt = (
                         "你必须严格按如下结构输出：先用 <Analyze> 拆解任务，紧接着在 <Code> 中给出可执行的"
                         " Python 代码（使用 ```python ... ``` 包裹），等待系统执行，再结合 <Execute>/<File> 结果"
                         " 继续分析。不要重复欢迎语，立刻补充缺失的 <Code>。"
                     )
                     messages.append({"role": "user", "content": correction_prompt})
+                    refund_iteration()
                     continue
 
             # 重置缺少 <Code> 的计数器
