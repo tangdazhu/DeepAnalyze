@@ -3687,13 +3687,31 @@ def bot_stream(messages, workspace, session_id="default"):
                             )
                             required_list = ", ".join(expected_files)
                             missing_list = ", ".join(missing_files)
+                            unexpected_md_files = sorted(
+                                {
+                                    name
+                                    for name in produced_names
+                                    if name.lower().endswith(".md")
+                                    and name.lower() not in expected_files_lower
+                                }
+                            )
+                            extra_md_hint = ""
+                            if unexpected_md_files:
+                                extra_md_hint = (
+                                    "另外检测到未在本轮 outputs 中声明的 Markdown 文件："
+                                    + ", ".join(unexpected_md_files)
+                                    + "。请删除这些 .md 文件，严格按要求生成 HTML 文件。"
+                                )
                             prompt = (
                                 f"根据 round_io_rules 配置，第 {current_round} 轮必须生成："
                                 f"{required_list}。当前缺少：{missing_list}"
                                 + produced_hint
                                 + "。请在本轮同时生成所有要求文件（包含已生成的），不要遗漏任何必需产物。"
+                                + extra_md_hint
                             )
                             append_user_prompt(prompt)
+                            # 缺少必需产物时，本轮不应算作完成：回滚轮次进度，避免继续注入下一轮提示
+                            refund_round_progress(is_schema_round=False)
                             refund_iteration()
                             continue
 
