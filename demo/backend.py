@@ -4034,6 +4034,31 @@ def bot_stream(messages, workspace, session_id="default"):
                                     "```\n\n"
                                     "请根据上述建议修正后重新提交。"
                                 )
+                            elif (
+                                "unhashable type" in exe_output.lower()
+                                and "series" in exe_output.lower()
+                            ):
+                                mode_for_current = (
+                                    round_mode(rule_for_current)
+                                    if rule_for_current
+                                    else ""
+                                )
+                                extra_hint = ""
+                                if mode_for_current == "html_report_phase2":
+                                    extra_hint = (
+                                        "\n\n**纠错提示（集合/去重统计）**：\n"
+                                        "- 你很可能写了类似 `set([df['source'] for df in dfs])`，其中 `df['source']` 是一个 Series，无法放进 set。\n"
+                                        "- 如果你想统计数据源数量：\n"
+                                        "  - ✅ 用 `len(csv_files)`（每个 CSV 一个数据源），或\n"
+                                        "  - ✅ 用 `combined_df['source'].nunique()`（合并后按列去重）。\n"
+                                        "- 修正后仍必须把规则要求的 HTML 文件写入 `generated/` 目录，否则会继续被判定缺文件。"
+                                    )
+                                error_warning = (
+                                    f"⚠️ Python 类型错误：{error_hint}\n\n"
+                                    "常见原因：把 pandas 的 Series 当作普通标量放入 `set()`/字典 key/另一个 set，导致不可哈希。\n"
+                                    "请将 Series 改为标量（例如取 `.iloc[0]`）或改用 `.nunique()` 等统计方法。"
+                                    + extra_hint
+                                )
                             else:
                                 mode_for_current = (
                                     round_mode(rule_for_current)
