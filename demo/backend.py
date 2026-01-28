@@ -3669,10 +3669,14 @@ def bot_stream(messages, workspace, session_id="default"):
                     mode_for_current = round_mode(rule_for_current)
                     if rule_for_current:
                         produced_names = {Path(p).name for p in artifact_paths}
+                        # 重要：不能只用本轮 artifact_paths 判断“是否生成”。
+                        # 例如 README.md 可能在 generated/ 内被覆盖写入，但未被 modified_paths 捕获。
+                        # 因此这里也认可 generated/ 目录里已存在的期望文件。
                         missing_files = [
                             name
                             for name in expected_files
                             if name not in produced_names
+                            and not (generated_dir_path / name).exists()
                         ]
                         if missing_files:
                             logger.warning(
@@ -3710,8 +3714,6 @@ def bot_stream(messages, workspace, session_id="default"):
                                 + extra_md_hint
                             )
                             append_user_prompt(prompt)
-                            # 缺少必需产物时，本轮不应算作完成：回滚轮次进度，避免继续注入下一轮提示
-                            refund_round_progress(is_schema_round=False)
                             refund_iteration()
                             continue
 
