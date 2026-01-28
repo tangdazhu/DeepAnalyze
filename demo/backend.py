@@ -3244,7 +3244,22 @@ def bot_stream(messages, workspace, session_id="default"):
                         or "import pathlib" in effective_code
                     )
                     if uses_path and not has_path_import:
-                        missing_imports.append("from pathlib import Path")
+                        # 标准库导入缺失可自愈：避免模型因小错误被拒绝后再输出无 <Code> 导致卡死
+                        lines = effective_code.splitlines()
+                        insert_at = 0
+                        for i, line in enumerate(lines):
+                            stripped = line.strip()
+                            if not stripped:
+                                continue
+                            if stripped.startswith("import ") or stripped.startswith(
+                                "from "
+                            ):
+                                insert_at = i + 1
+                                continue
+                            break
+                        lines.insert(insert_at, "from pathlib import Path")
+                        effective_code = "\n".join(lines)
+                        has_path_import = True
                     if missing_imports:
                         logger.warning(
                             f"[bot_stream] Code rejected: missing imports {missing_imports}"
