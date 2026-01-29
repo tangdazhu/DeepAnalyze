@@ -2710,6 +2710,16 @@ def bot_stream(messages, workspace, session_id="default"):
                             md_match.group(1).strip() if md_match else code_content
                         )
                     effective_code = extract_effective_code(code_str)
+                    # 额外清理：模型有时会把 Markdown 代码围栏 ``` / ```python 夹进 <Code> 中
+                    # 这会在执行阶段触发 SyntaxError: invalid syntax，导致反复重试/重复输出。
+                    if effective_code and "```" in effective_code:
+                        cleaned_lines: list[str] = []
+                        for line in effective_code.splitlines():
+                            stripped = line.strip()
+                            if stripped.startswith("```"):
+                                continue
+                            cleaned_lines.append(line)
+                        effective_code = "\n".join(cleaned_lines).strip()
                     logger.info(
                         f"[bot_stream] Effective code extracted, length={len(effective_code) if effective_code else 0}"
                     )
