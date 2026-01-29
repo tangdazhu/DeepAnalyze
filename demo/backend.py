@@ -2533,6 +2533,22 @@ def bot_stream(messages, workspace, session_id="default"):
                         "[bot_stream] Wrapped fenced code block into <Code> for validation"
                     )
 
+            # 兜底：有些模型会直接输出 Python 脚本但不带 <Code> 标签/``` 围栏。
+            # 这种情况下 has_code_block=False 会触发反复重试，导致轮次/提示词错位与重复输出。
+            if "<Code>" not in normalized_res:
+                leading = normalized_res.lstrip()
+                looks_like_python = bool(
+                    re.match(
+                        r"^(?:#!|from\s+\w+\s+import\s+|import\s+\w+)",
+                        leading,
+                    )
+                )
+                if looks_like_python:
+                    normalized_res = f"<Code>\n{normalized_res.strip()}\n</Code>\n"
+                    logger.info(
+                        "[bot_stream] Wrapped raw python script into <Code> for validation"
+                    )
+
             cur_res = normalized_res
 
             logger.info(f"[bot_stream] Checking for <Code> block in response")
