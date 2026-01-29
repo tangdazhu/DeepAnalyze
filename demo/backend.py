@@ -3246,6 +3246,25 @@ def bot_stream(messages, workspace, session_id="default"):
                         and "import seaborn as sns" not in effective_code
                     ):
                         missing_imports.append("import seaborn as sns")
+
+                    uses_np = "np." in effective_code
+                    has_np_import = "import numpy as np" in effective_code
+                    if uses_np and not has_np_import:
+                        # 第三方导入缺失可自愈：避免因为 np 未导入导致 NameError 触发反复重试
+                        lines = effective_code.splitlines()
+                        insert_at = 0
+                        for i, line in enumerate(lines):
+                            stripped = line.strip()
+                            if not stripped:
+                                continue
+                            if stripped.startswith("import ") or stripped.startswith(
+                                "from "
+                            ):
+                                insert_at = i + 1
+                                continue
+                            break
+                        lines.insert(insert_at, "import numpy as np")
+                        effective_code = "\n".join(lines)
                     uses_path = (
                         "Path(" in effective_code or "pathlib.Path" in effective_code
                     )
