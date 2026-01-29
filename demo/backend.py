@@ -2112,6 +2112,7 @@ def bot_stream(messages, workspace, session_id="default"):
         code_executed = False
         MAX_STREAM_LENGTH = 50000  # 最大流式输出长度
         repetition_check_window = ""  # 用于检测重复内容
+        stream_forced_abort = False  # 流式阶段强制终止后，避免进入后置解析导致重复重试
         try:
             chunk_index = 0
             for chunk in response:
@@ -2134,6 +2135,7 @@ def bot_stream(messages, workspace, session_id="default"):
                         assistant_reply += error_block
                         yield error_block
                         finished = True
+                        stream_forced_abort = True
                         break
 
                     # 流式阶段只做标签归一化，不过滤 <File> 标签（避免截断未闭合的标签）
@@ -2183,6 +2185,7 @@ def bot_stream(messages, workspace, session_id="default"):
                                 assistant_reply += error_block
                                 yield error_block
                                 finished = True
+                                stream_forced_abort = True
                                 break
 
                         assistant_reply += new_segment
@@ -2249,6 +2252,10 @@ def bot_stream(messages, workspace, session_id="default"):
             yield error_block
             finished = True  # 标记为完成，继续执行后续的报告生成逻辑
             break
+
+        # 若流式阶段已经强制终止（超长/重复），直接结束本次请求，避免进入后置解析触发 refund_iteration 导致重复输出。
+        if stream_forced_abort:
+            return
 
         if premature_answer_detected and not finished:
             refund_iteration()
