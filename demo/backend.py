@@ -4209,6 +4209,32 @@ def bot_stream(messages, workspace, session_id="default"):
                                     "请根据上述建议修正后重新提交。"
                                 )
                             elif (
+                                "syntaxerror" in exe_output.lower()
+                                and "unterminated string literal" in exe_output.lower()
+                            ):
+                                mode_for_current = (
+                                    round_mode(rule_for_current)
+                                    if rule_for_current
+                                    else ""
+                                )
+                                extra_hint = ""
+                                if mode_for_current == "html_report_phase2":
+                                    extra_hint = (
+                                        "\n\n**纠错提示（HTML 构造字符串未闭合）**：\n"
+                                        '- 你在构造 `html_lines = [...]` 时，有某一行字符串没有正确闭合引号，或字符串意外跨行（例如写成了 `"...` 后换行）。\n'
+                                        "- 常见诱因：把 `<Code>`/``` 之类的标签或示例文本误粘贴进了 `html_lines` 的字符串里，导致引号不成对。\n"
+                                        "- 修正方法：\n"
+                                        "  1) 确保 `html_lines` 里每个元素都是一行完整的 Python 字符串（用 `\"...\"` 或 `'...'`），不要跨行。\n"
+                                        '  2) 字符串内部若包含引号，要么换用另一种引号包裹，要么用 `\\"` 转义。\n'
+                                        "  3) 不要在 HTML 内容里出现 `<Code>`、`</Code>`、``` 等提示词标签（这些只属于对话格式，不属于 HTML）。\n"
+                                        "  4) 保持最后仍写入 `generated/comprehensive_analysis_report.html`（`Path('generated') / 'comprehensive_analysis_report.html'`）。"
+                                    )
+                                error_warning = (
+                                    f"⚠️ Python 语法错误：{error_hint}\n\n"
+                                    "错误原因：字符串字面量未闭合，代码无法运行，因此不会写出 HTML 文件。"
+                                    + extra_hint
+                                )
+                            elif (
                                 "unknown format code" in exe_output.lower()
                                 and "for object of type 'str'" in exe_output.lower()
                             ):
