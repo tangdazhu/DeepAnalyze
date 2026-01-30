@@ -700,6 +700,15 @@ print(f\"✅ multi_table_analysis.html 已写入，统计 {len(files)} 个文件
 - 群体特征：如需统计残疾/参军/缺勤等群体，必须来自 join 结果或 `disabled_count.csv` 的真实字段
 - 可视化引用：只能引用 `generated/` 下真实存在的 PNG 文件（如 `enrolled_school_dist.png`、`multi_table_join_result.png` 等）
 
+**可追溯性与一致性要求（必须遵守）**：
+- **必须写入“数据证据区块”**：在 HTML 中明确写出你读取的 CSV 文件名、`len(df)` 行数、`df.columns.tolist()` 真实列名、`df.dtypes` 真实类型，以及每列缺失数/缺失率（例如 `df.isnull().sum()` 与 `df.isnull().mean()`）。
+- **必须给出至少 3 条“分析型洞察”**：每条洞察都要 **引用真实列名（来自 df.columns）并给出你计算出的数值依据**，禁止泛泛而谈。
+  - 若存在类别列：用 `value_counts()`/`value_counts(normalize=True)` 给出 TopK 类别及占比。
+  - 若存在数值列：只对 `df.select_dtypes(include='number')` 的列做均值/中位数/分位数等统计（或使用 `mean(numeric_only=True)`）。
+  - 若没有任何数值列：也必须输出基于类别列分布、缺失率、唯一值数量（`nunique()`）等得到的结论。
+- **禁止“默认 0”**：某项无法解析/不存在时，请输出 `N/A`（或“无法从当前列计算”），不得用 0 作为占位，避免造成结论不一致与误导。
+- **禁止混入对话标签**：在 `html_lines` 的字符串内容里不要出现 `<Code>`、`</Code>`、``` 等对话格式标签，避免引号未闭合导致 SyntaxError。
+
 **硬性要求**：
 1. **必须先读取 CSV 文件**：至少读取 `multi_table_join_result.csv`，查看其实际列名和数据
 2. **禁止引用不存在的文件**：只能引用 `generated/` 目录下真实存在的 CSV 和 PNG 文件

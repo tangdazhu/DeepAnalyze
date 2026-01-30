@@ -2947,6 +2947,63 @@ def bot_stream(messages, workspace, session_id="default"):
                             refund_iteration()
                             continue
 
+                        # 通用可追溯性约束：必须显式输出真实列名/类型证据，避免“编造字段/默认 0”导致结论不可复现。
+                        # 不 hardcode 任何业务列名，仅要求代码必须读取 CSV 后引用 df.columns/dtypes。
+                        mentions_columns = (
+                            "df.columns" in normalized_code
+                            or "columns.tolist" in normalized_code
+                            or "dtypes" in normalized_code
+                        )
+                        if not mentions_columns:
+                            logger.warning(
+                                "[bot_stream] Code rejected: html_report_phase2 missing schema evidence (df.columns/dtypes)"
+                            )
+                            evidence_prompt = (
+                                f"第 {target_round} 轮综合 HTML 报告必须基于 generated/ 下真实 CSV 计算，并在代码中显式输出/写入可追溯证据："
+                                "至少包含 `df.columns.tolist()`（真实列名）、`df.dtypes`（真实类型）和 `len(df)`（行数）。"
+                                "\n\n注意：\n"
+                                "- 只能对 `df.select_dtypes(include='number')` 的列做均值/标准差等数值统计，或使用 `mean(numeric_only=True)`；"
+                                "- 若没有可用数值列或某项无法解析，请在报告中输出 `N/A`，不要用 0 作为默认值；"
+                                "- 任何洞察/指标都必须能对应到真实列名（来自 df.columns），禁止臆造字段名。"
+                            )
+                            append_user_prompt(evidence_prompt)
+                            refund_iteration()
+                            continue
+
+                        # 通用“分析型结论”约束：必须做出可追溯的统计计算，避免只做文件罗列导致报告缺少结论。
+                        # 不 hardcode 任何具体列名，只要求用真实列名生成至少若干条洞察（TopK/占比/缺失率/唯一值数/数值摘要等）。
+                        has_any_stats = any(
+                            kw in normalized_code
+                            for kw in [
+                                "value_counts",
+                                "nunique",
+                                "isnull",
+                                "notnull",
+                                "describe(",
+                                "select_dtypes",
+                                "mean(",
+                                "median(",
+                                "quantile",
+                            ]
+                        )
+                        if not has_any_stats:
+                            logger.warning(
+                                "[bot_stream] Code rejected: html_report_phase2 missing any analysis stats (value_counts/nunique/isnull/describe)"
+                            )
+                            analysis_prompt = (
+                                f"第 {target_round} 轮综合报告必须是**分析型**的：请基于你读取的真实 CSV 计算并写入至少 3 条可追溯洞察（不要泛泛而谈）。"
+                                "\n\n要求（通用，不依赖特定列名）：\n"
+                                "- 每条洞察必须明确引用真实列名（来自 `df.columns`），并附带你计算出的数值证据；\n"
+                                "- 若存在类别列：用 `value_counts().head(k)` 给出 TopK 类别及占比；\n"
+                                "- 若存在数值列：对 `df.select_dtypes(include='number')` 做 mean/median/quantile 等摘要；\n"
+                                "- 必须给出缺失情况：例如每列缺失数/缺失率（`df.isnull().sum()`）；\n"
+                                "- 建议在 HTML 中新增 `<section id='insights'>`，用 `<ul><li>...` 写出这些洞察，并确保所有数字来自代码计算结果；\n"
+                                "- 若没有任何数值列，也必须输出基于类别列/缺失率/唯一值数量（`nunique()`）的结论。"
+                            )
+                            append_user_prompt(analysis_prompt)
+                            refund_iteration()
+                            continue
+
                     elif mode_for_next == "csv_analysis":
                         if not uses_csv:
                             logger.warning(
