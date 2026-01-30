@@ -2795,6 +2795,35 @@ def bot_stream(messages, workspace, session_id="default"):
                         f"[bot_stream] Effective code extracted, length={len(effective_code) if effective_code else 0}"
                     )
 
+                    # 防御：模型偶发把对话标签残片（如 </Analyze>）混入 <Code>，会导致执行阶段把标签当 Python 运行
+                    # 这里仅拦截“看起来就是标签行”的情况，避免误伤正常的 HTML 字符串内容。
+                    if effective_code:
+                        suspicious_tag_lines = []
+                        for line in effective_code.splitlines()[:8]:
+                            stripped = line.strip()
+                            if stripped in {
+                                "<Analyze>",
+                                "</Analyze>",
+                                "<Code>",
+                                "</Code>",
+                                "<Answer>",
+                                "</Answer>",
+                            }:
+                                suspicious_tag_lines.append(stripped)
+                        if suspicious_tag_lines:
+                            logger.warning(
+                                "[bot_stream] Code rejected: detected conversation tag residues in <Code>: %s",
+                                ", ".join(suspicious_tag_lines),
+                            )
+                            tag_prompt = (
+                                "检测到你在 <Code> 中混入了对话标签（例如 </Analyze>）。"
+                                "这会导致系统把标签当成 Python 执行并报错。"
+                                "请只在 <Code> 中输出纯 Python 脚本（从 import 开始），不要包含任何 <Analyze>/<Code>/<Answer> 标签文本。"
+                            )
+                            messages.append({"role": "user", "content": tag_prompt})
+                            refund_iteration()
+                            continue
+
                     # 检测连续无有效代码
                     if not effective_code or not effective_code.strip():
                         logger.warning(
@@ -4401,9 +4430,9 @@ def bot_stream(messages, workspace, session_id="default"):
                                     "```\n\n"
                                     "请根据上述建议修正后重新提交。"
                                 )
-                            elif (
-                                "syntaxerror" in exe_output.lower()
-                                and "unterminated string literal" in exe_output.lower()
+                            elif "syntaxerror" in exe_output.lower() and (
+                                "unterminated string literal" in exe_output.lower()
+                                or "unterminated f-string literal" in exe_output.lower()
                             ):
                                 mode_for_current = (
                                     round_mode(rule_for_current)
@@ -4411,7 +4440,27 @@ def bot_stream(messages, workspace, session_id="default"):
                                     else ""
                                 )
                                 extra_hint = ""
-                                if mode_for_current == "html_report_phase2":
+                                if mode_for_current in (
+                                    "html_report",
+                                    "html_report_phase2",
+                                ):
+                                    expected_html_files = (
+                                        round_expected_filenames_by_type(
+                                            rule_for_current, "html"
+                                        )
+                                        if rule_for_current
+                                        else []
+                                    )
+                                    expected_html_name = (
+                                        expected_html_files[0]
+                                        if expected_html_files
+                                        else ""
+                                    )
+                                    expected_html_hint = (
+                                        f"`generated/{expected_html_name}`"
+                                        if expected_html_name
+                                        else "规则要求的 HTML 文件"
+                                    )
                                     extra_hint = (
                                         "\n\n**纠错提示（HTML 构造字符串未闭合）**：\n"
                                         '- 你在构造 `html_lines = [...]` 时，有某一行字符串没有正确闭合引号，或字符串意外跨行（例如写成了 `"...` 后换行）。\n'
@@ -4419,8 +4468,10 @@ def bot_stream(messages, workspace, session_id="default"):
                                         "- 修正方法：\n"
                                         "  1) 确保 `html_lines` 里每个元素都是一行完整的 Python 字符串（用 `\"...\"` 或 `'...'`），不要跨行。\n"
                                         '  2) 字符串内部若包含引号，要么换用另一种引号包裹，要么用 `\\"` 转义。\n'
-                                        "  3) 不要在 HTML 内容里出现 `<Code>`、`</Code>`、``` 等提示词标签（这些只属于对话格式，不属于 HTML）。\n"
-                                        "  4) 保持最后仍写入 `generated/comprehensive_analysis_report.html`（`Path('generated') / 'comprehensive_analysis_report.html'`）。"
+                                        "  3) HTML 正文里请使用 `<code>...</code>`，不要使用 `<Code>`（大写 C 的是对话标签，容易引发混淆）。\n"
+                                        "  4) 最后必须写出 "
+                                        + expected_html_hint
+                                        + "（例如 `Path('generated') / '<文件名>'`），否则系统会继续判定缺文件。"
                                     )
                                 error_warning = (
                                     f"⚠️ Python 语法错误：{error_hint}\n\n"
