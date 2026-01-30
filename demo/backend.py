@@ -1630,9 +1630,31 @@ def normalize_model_tags(content: str) -> str:
     if not content:
         return content
     normalized = strip_outer_html_wrappers(content)
+    # 兼容某些前端/模型会把 emoji 与标题拆成多行的情况，例如：
+    # "💻\nCode"、"🔍\nAnalyze"、"⚡\nExecute"
+    normalized = re.sub(r"🔍\s*\n\s*Analyze\b", "<Analyze>", normalized)
+    normalized = re.sub(r"💻\s*\n\s*Code\b", "<Code>", normalized)
+    normalized = re.sub(r"⚡\s*\n\s*Execute\b", "<Execute>", normalized)
+    normalized = re.sub(r"📎\s*\n\s*File\b", "<File>", normalized)
+    normalized = re.sub(r"✅\s*\n\s*Answer\b", "<Answer>", normalized)
     for emoji_tag, canonical in EMOJI_TAG_MAP.items():
         normalized = normalized.replace(emoji_tag, canonical)
     normalized = HEADING_TAG_PATTERN.sub(lambda m: f"<{m.group(1)}>", normalized)
+    # 兼容 "Code\npython" / "Code\npython\n..." 这种非 fenced / 非 <Code> 的代码开头。
+    # 只在尚未出现 <Code> 时进行替换，避免误伤正文中的普通单词。
+    if "<Code>" not in normalized:
+        normalized = re.sub(
+            r"(^|\n)\s*Code\s*\n\s*python\s*(?=\n)",
+            r"\1<Code>\n```python\n",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        normalized = re.sub(
+            r"(^|\n)\s*Code\s*(?=\n\s*```)",
+            r"\1<Code>\n",
+            normalized,
+            flags=re.IGNORECASE,
+        )
     normalized = FILES_OPEN_PATTERN.sub("<File>", normalized)
     normalized = FILES_CLOSE_PATTERN.sub("</File>", normalized)
     # 先移除 assistant 开头的重复段落（如 "assistant 根据第 2 轮 <Execute </Analyze>"）
