@@ -2923,6 +2923,22 @@ def bot_stream(messages, workspace, session_id="default"):
                             refund_iteration()
                             continue
 
+                        # 规则驱动约束：综合报告必须以 join 结果为主（提示词要求至少读取 multi_table_join_result.csv）。
+                        # 避免模型错误地把所有 CSV 混合在一起导致列名臆测、类型冲突或报错并陷入循环。
+                        if "multi_table_join_result.csv" not in effective_code.lower():
+                            logger.warning(
+                                "[bot_stream] Code rejected: html_report_phase2 must read multi_table_join_result.csv"
+                            )
+                            join_prompt = (
+                                f"第 {target_round} 轮生成综合报告时，必须显式读取 `generated/multi_table_join_result.csv`（join 结果是综合分析的主数据）。"
+                                "请先 `df = pd.read_csv(generated_dir / 'multi_table_join_result.csv')`，"
+                                "基于 df 的真实列名/类型/行数/缺失情况与分布生成洞察，再写入 `generated/comprehensive_analysis_report.html`。"
+                                "\n\n注意：不建议把 generated/ 下所有 CSV 直接 concat 混合分析（summary/join/count 等文件结构不同，会导致错误与不一致）。"
+                            )
+                            append_user_prompt(join_prompt)
+                            refund_iteration()
+                            continue
+
                         if "html_lines" not in normalized_code:
                             logger.warning(
                                 "[bot_stream] Code rejected: html_report_phase2 must build html_lines"
