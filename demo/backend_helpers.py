@@ -97,8 +97,9 @@ def build_html_report_template(html_filename):
 
 ```python
 from pathlib import Path
-from datetime import datetime
 import re
+
+import pandas as pd
 
 generated_dir = Path("generated")
 if not generated_dir.exists():
@@ -110,37 +111,19 @@ png_files = [f for f in files if f.suffix.lower() == ".png"]
 log_files = [f for f in files if f.name.startswith("execute_round_") and f.suffix == ".txt"]
 readme_path = generated_dir / "README.md"
 
-# 读取开始时间（从 bootstrap 日志）
-start_time_str = None
-end_time = datetime.now()
-bootstrap_log = generated_dir / "execute_round_0_bootstrap.txt"
-if bootstrap_log.exists():
+def to_plain_number(val):
+    """将 numpy/pandas 标量转为普通 Python 数值，避免 HTML 出现 np.int64 等不可读内容。"""
     try:
-        content = bootstrap_log.read_text(encoding="utf-8")
-        # 查找第一个时间戳（格式：YYYY-MM-DD HH:MM:SS）
-        match = re.search(r'(\\d{{4}}-\\d{{2}}-\\d{{2}} \\d{{2}}:\\d{{2}}:\\d{{2}})', content)
-        if match:
-            start_time_str = match.group(1)
+        if pd.isna(val):
+            return None
     except Exception:
         pass
-
-# 计算执行时长
-duration_str = "未知"
-if start_time_str:
     try:
-        start_time = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S")
-        duration = end_time - start_time
-        hours = int(duration.total_seconds() // 3600)
-        minutes = int((duration.total_seconds() % 3600) // 60)
-        seconds = int(duration.total_seconds() % 60)
-        if hours > 0:
-            duration_str = f"{{hours}} 小时 {{minutes}} 分钟 {{seconds}} 秒"
-        elif minutes > 0:
-            duration_str = f"{{minutes}} 分钟 {{seconds}} 秒"
-        else:
-            duration_str = f"{{seconds}} 秒"
+        if hasattr(val, "item"):
+            return val.item()
     except Exception:
-        duration_str = "计算失败"
+        pass
+    return val
 
 def build_list(items, empty_text):
     if not items:
@@ -151,15 +134,6 @@ def build_list(items, empty_text):
             f"<li><a href='{{item.name}}' target='_blank'>{{item.name}}</a> ({{item.stat().st_size}} bytes)</li>"
         )
     return entries
-
-# 构建执行时间统计
-time_stats = []
-time_stats.append("<h2>执行时间统计</h2>")
-time_stats.append("<ul>")
-time_stats.append(f"<li><strong>开始时间</strong>: {{start_time_str or '未知'}}</li>")
-time_stats.append(f"<li><strong>结束时间</strong>: {{end_time:%Y-%m-%d %H:%M:%S}}</li>")
-time_stats.append(f"<li><strong>总执行时长</strong>: {{duration_str}}</li>")
-time_stats.append("</ul>")
 
 # 构建分析过程总结
 analysis_summary = []
@@ -180,6 +154,62 @@ key_findings.append(f"<li>生成 {{len([f for f in csv_files if 'summary' in f.n
 key_findings.append(f"<li>创建 {{len(png_files)}} 个数据可视化图表</li>")
 key_findings.append(f"<li>记录 {{len(log_files)}} 个执行日志文件</li>")
 key_findings.append("</ul>")
+
+# 构建数据洞察（若 join 结果存在）
+insights = []
+join_path = generated_dir / "multi_table_join_result.csv"
+if join_path.exists():
+    try:
+        df_join = pd.read_csv(join_path)
+    except Exception:
+        df_join = pd.DataFrame()
+
+    if not df_join.empty:
+        insights.append("<h2>数据洞察（基于 multi_table_join_result.csv）</h2>")
+        insights.append("<ul>")
+        insights.append(
+            f"<li><strong>样本规模</strong>：{{len(df_join)}} 行，{{len(df_join.columns)}} 列；列名={{', '.join(map(str, df_join.columns.tolist()))}}</li>"
+        )
+
+        missing_rate = df_join.isna().mean().sort_values(ascending=False)
+        top_missing = missing_rate.head(3)
+        top_missing_items = []
+        for col, rate in top_missing.items():
+            top_missing_items.append(f"{{col}}={{rate:.2%}}")
+        insights.append(
+            "<li><strong>缺失率Top</strong>：" + ", ".join(top_missing_items) + "</li>"
+        )
+
+        cat_cols = (
+            df_join.select_dtypes(exclude="number").columns.tolist()
+            if not df_join.empty
+            else []
+        )
+        num_cols = df_join.select_dtypes(include="number").columns.tolist()
+
+        if cat_cols:
+            col = cat_cols[0]
+            vc = df_join[col].astype(str).value_counts(dropna=False)
+            topk = vc.head(3)
+            parts = []
+            for k, v in topk.items():
+                parts.append(f"{{k}}={{int(to_plain_number(v) or 0)}}")
+            insights.append(
+                f"<li><strong>类别分布示例</strong>：字段 <code>{{col}}</code> Top3={{'; '.join(parts)}}（共{{len(vc)}}类）</li>"
+            )
+
+        if num_cols:
+            col = num_cols[0]
+            s = df_join[col]
+            mean_val = to_plain_number(s.mean())
+            median_val = to_plain_number(s.median())
+            q25 = to_plain_number(s.quantile(0.25))
+            q75 = to_plain_number(s.quantile(0.75))
+            insights.append(
+                f"<li><strong>数值分布示例</strong>：字段 <code>{{col}}</code> mean={{mean_val}}, median={{median_val}}, p25={{q25}}, p75={{q75}}</li>"
+            )
+
+        insights.append("</ul>")
 
 html_lines = [
     "<html>",
@@ -207,15 +237,15 @@ html_lines = [
     "</head>",
     "<body>",
     "  <h1>Student Loan 多表分析总结报告</h1>",
-    f"  <p class='timestamp'>报告生成时间：{{datetime.now():%Y-%m-%d %H:%M:%S}}</p>",
+    "  <p class='timestamp'>注：为保证可复现，本报告不写入实时生成时间。</p>",
     "",
     "  <section id='summary'>",
     "    <h2>文件概览</h2>",
     f"    <p>本次分析共生成 {{len(files)}} 个文件，包括数据文件、可视化图表、执行日志和索引文档。</p>",
 ]
-html_lines.extend(time_stats)
 html_lines.extend(analysis_summary)
 html_lines.extend(key_findings)
+html_lines.extend(insights)
 html_lines.append("  </section>")
 
 html_lines.append("  <section id='visual'>")

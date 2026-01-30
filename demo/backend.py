@@ -1559,6 +1559,32 @@ def html_report_has_required_structure(text: str) -> tuple[bool, list[str]]:
     return (not missing), missing
 
 
+HTML_PLACEHOLDER_PATTERN = re.compile(r"\{\s*(rows|cols)\s*\}", re.IGNORECASE)
+
+
+def html_report_has_placeholders(text: str) -> bool:
+    if not text:
+        return False
+    return bool(HTML_PLACEHOLDER_PATTERN.search(text))
+
+
+def html_report_has_unfriendly_numpy_repr(text: str) -> bool:
+    if not text:
+        return False
+    lower = text.lower()
+    return "np.int" in lower or "np.float" in lower or "numpy." in lower
+
+
+def html_report_references_any_columns(text: str, columns: list[str]) -> bool:
+    if not text or not columns:
+        return False
+    # 仅做简单子串匹配：列名来源于真实 df.columns，不 hardcode 业务字段。
+    for col in columns:
+        if col and str(col) in text:
+            return True
+    return False
+
+
 def normalize_filename(name: str) -> str:
     """统一文件名对比：去除 (n)/_modified 等后缀并转小写。"""
     if not name:
@@ -3089,6 +3115,88 @@ def bot_stream(messages, workspace, session_id="default"):
                                 refund_iteration()
                                 continue
 
+                    if (
+                        mode_for_current == "html_report_phase2"
+                        and rule_for_current
+                        and round_expected_filenames_by_type(rule_for_current, "html")
+                    ):
+                        html_filename = round_expected_filenames_by_type(
+                            rule_for_current, "html"
+                        )[0]
+                        html_path = next(
+                            (
+                                Path(p)
+                                for p in artifact_paths
+                                if Path(p).name == html_filename
+                            ),
+                            None,
+                        )
+                        if html_path:
+                            try:
+                                html_text = html_path.read_text(encoding="utf-8")
+                            except Exception as err:
+                                logger.warning(
+                                    "[bot_stream] Failed to read %s: %s",
+                                    html_filename,
+                                    err,
+                                )
+                                html_text = ""
+
+                            if html_report_has_placeholders(html_text):
+                                prompt = (
+                                    f"{html_filename} 中检测到未替换的占位符（例如 {{rows}}/{{cols}}）。"
+                                    "请确保行数/列数/统计值都来自真实 CSV 的计算结果，再写入 HTML。"
+                                )
+                                messages.append({"role": "user", "content": prompt})
+                                refund_iteration()
+                                continue
+
+                            if html_report_has_unfriendly_numpy_repr(html_text):
+                                prompt = (
+                                    f"{html_filename} 中出现 np.int64/np.float64/numpy.* 等不可读对象表示。"
+                                    "请在写入 HTML 前把 numpy/pandas 标量转为普通 Python 数值（val.item()/int()/float()）。"
+                                )
+                                messages.append({"role": "user", "content": prompt})
+                                refund_iteration()
+                                continue
+
+                            join_path = generated_dir / "multi_table_join_result.csv"
+                            if join_path.exists():
+                                try:
+                                    join_df = pd.read_csv(join_path)
+                                    join_cols = [
+                                        str(c) for c in join_df.columns.tolist()
+                                    ]
+                                except Exception as err:
+                                    logger.warning(
+                                        "[bot_stream] Failed to read join CSV for phase2 HTML validation: %s",
+                                        err,
+                                    )
+                                    join_cols = []
+                                if (
+                                    join_cols
+                                    and not html_report_references_any_columns(
+                                        html_text, join_cols
+                                    )
+                                ):
+                                    prompt = (
+                                        f"{html_filename} 必须基于 join 主数据给出分析结论，但当前 HTML 未引用任何真实列名。"
+                                        "请在报告中写入 df.columns 的真实列名，并给出基于统计计算的结论（至少 3 条）。"
+                                    )
+                                    messages.append({"role": "user", "content": prompt})
+                                    refund_iteration()
+                                    continue
+
+                            li_count = html_text.lower().count("<li")
+                            if li_count < 3:
+                                prompt = (
+                                    f"{html_filename} 缺少足够的分析型要点（<li> 数量不足）。"
+                                    "请至少提供 3 条可追溯洞察：每条引用真实列名并给出你计算得到的数值证据。"
+                                )
+                                messages.append({"role": "user", "content": prompt})
+                                refund_iteration()
+                                continue
+
                     elif mode_for_next == "filesystem_summary":
                         if code_looks_like_markdown(effective_code):
                             logger.warning(
@@ -4082,6 +4190,78 @@ def bot_stream(messages, workspace, session_id="default"):
                                     + "；".join(html_missing)
                                     + "。请按照提示模板补全 <html>/<head>/<body> 以及 summary/visual/data/readme 四个 section，"
                                     "并重新生成 HTML。"
+                                )
+                                messages.append({"role": "user", "content": prompt})
+                                refund_iteration()
+                                continue
+
+                            if html_report_has_placeholders(html_text):
+                                logger.warning(
+                                    "[bot_stream] HTML report contains unresolved placeholders"
+                                )
+                                prompt = (
+                                    "检测到 HTML 报告中存在未替换的占位符（例如 {rows}/{cols}）。"
+                                    "这通常意味着你把模板直接粘贴进了 html_lines，未用真实数据渲染。"
+                                    "请确保所有行数/列数/统计值均由 Python 计算后写入 HTML，再重新生成。"
+                                )
+                                messages.append({"role": "user", "content": prompt})
+                                refund_iteration()
+                                continue
+
+                            if html_report_has_unfriendly_numpy_repr(html_text):
+                                logger.warning(
+                                    "[bot_stream] HTML report contains numpy scalar repr"
+                                )
+                                prompt = (
+                                    "检测到 HTML 报告中出现 np.int64/np.float64/numpy.* 等不可读对象表示。"
+                                    "请在写入 HTML 前把 pandas/numpy 标量转换为普通 Python 数值（例如 val.item() 或 int(val)/float(val)），"
+                                    "避免报告不可读且两次运行表现不一致。"
+                                )
+                                messages.append({"role": "user", "content": prompt})
+                                refund_iteration()
+                                continue
+
+                            join_path = generated_dir / "multi_table_join_result.csv"
+                            if join_path.exists():
+                                try:
+                                    join_df = pd.read_csv(join_path)
+                                    join_cols = [
+                                        str(c) for c in join_df.columns.tolist()
+                                    ]
+                                except Exception as err:
+                                    logger.warning(
+                                        "[bot_stream] Failed to read join CSV for HTML validation: %s",
+                                        err,
+                                    )
+                                    join_cols = []
+
+                                if (
+                                    join_cols
+                                    and not html_report_references_any_columns(
+                                        html_text, join_cols
+                                    )
+                                ):
+                                    logger.warning(
+                                        "[bot_stream] HTML report missing any join column references"
+                                    )
+                                    prompt = (
+                                        "multi_table_analysis.html 需要包含基于 join 主数据（multi_table_join_result.csv）的分析型结论，"
+                                        "但当前 HTML 未引用任何真实列名。请先读取 join CSV，"
+                                        "并在‘数据洞察/关键发现’中引用 df.columns 的真实列名与计算出的数值证据（至少 3 条）。"
+                                    )
+                                    messages.append({"role": "user", "content": prompt})
+                                    refund_iteration()
+                                    continue
+
+                            li_count = html_text.lower().count("<li")
+                            if li_count < 3:
+                                logger.warning(
+                                    "[bot_stream] HTML report contains too few <li> items: %s",
+                                    li_count,
+                                )
+                                prompt = (
+                                    "multi_table_analysis.html 缺少足够的分析型要点。"
+                                    "请在报告中加入至少 3 条可追溯的要点（<li>）：每条需引用真实列名并给出计算出的数值依据。"
                                 )
                                 messages.append({"role": "user", "content": prompt})
                                 refund_iteration()

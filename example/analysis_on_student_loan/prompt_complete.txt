@@ -718,6 +718,18 @@ print(f\"✅ multi_table_analysis.html 已写入，统计 {len(files)} 个文件
 6. 至少包含 3 个 `<section>`：综合洞察、数据分析、结论建议
 7. 结束时打印 "✅ comprehensive_analysis_report.html 已写入"
 
+---
+
+### 第 9 轮补充要求：multi_table_analysis.html 必须是“分析型”报告（可复现）
+**目标**：该报告不仅要列出 generated/ 下文件，还必须呈现对学生贷款数据（join 主数据）的分析结果。
+
+**硬性要求**：
+1. 必须读取 `generated/multi_table_join_result.csv`（若文件存在），基于 `df.columns` 的真实列名做统计。
+2. 必须给出至少 3 条“分析型洞察”（建议用 `<li>`）：每条洞察都要引用真实列名，并给出你计算得到的数值依据（例如 TopK 类别占比、缺失率、唯一值数量、数值列的均值/分位数等）。
+3. 禁止占位符残留：HTML 中不得出现 `{rows}`、`{cols}` 等未渲染模板占位符。
+4. 禁止不可读对象字符串：不要把 `np.int64(...)`、`numpy.*` 之类对象的 repr 直接写进 HTML；写入前将标量转换为普通 Python 数值（例如 `val.item()`/`int(val)`/`float(val)`）。
+5. 为保证两次运行输出一致性：建议不写入实时“生成时间”（或将其放在可忽略区块），并对目录遍历与 TopK 结果使用稳定排序。
+
 **强制代码模板（必须完全照抄，不得修改）**：
 ```python
 from pathlib import Path
