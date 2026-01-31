@@ -2747,6 +2747,45 @@ def bot_stream(messages, workspace, session_id="default"):
                             "请立即按照上述格式输出第2轮分析!"
                         )
                     else:
+                        # 对 csv_analysis 轮次做规则驱动的定向纠错：明确输入 CSV 与输出文件名
+                        rule_for_current = get_round_rule(current_round)
+                        mode_for_current = round_mode(rule_for_current)
+                        if mode_for_current == "csv_analysis" and rule_for_current:
+                            required_csv = round_input_filename(rule_for_current)
+                            csv_abs_path = ""
+                            if required_csv:
+                                csv_abs_path = str(
+                                    (Path(workspace_path) / "data" / required_csv).resolve()
+                                )
+                            expected_outputs = round_expected_filenames(rule_for_current)
+                            outputs_text = (
+                                "\n".join(
+                                    f"- {name}" for name in expected_outputs if name
+                                )
+                                or "- （未配置输出文件名）"
+                            )
+                            code_prompt = (
+                                f"你缺少 <Code> 段（已连续 {missing_code_rounds} 轮）。\n\n"
+                                f"第 {current_round} 轮为 csv_analysis，必须读取：{required_csv or '（未配置输入 CSV）'}\n"
+                                f"CSV 绝对路径：{csv_abs_path or '（请从首轮 CSV 路径列表复制）'}\n\n"
+                                "本轮必须生成以下文件（写入 generated/）：\n"
+                                f"{outputs_text}\n\n"
+                                "请立刻按如下结构输出（只允许 <Analyze> + <Code>，不要输出其他解释）：\n\n"
+                                "<Analyze>\n"
+                                "一句话说明本轮目标与依据。\n"
+                                "</Analyze>\n\n"
+                                "<Code>\n"
+                                "import pandas as pd\n"
+                                "import matplotlib.pyplot as plt\n"
+                                "import seaborn as sns\n"
+                                "from pathlib import Path\n\n"
+                                f"CSV_PATH = r\"{csv_abs_path or '<请从首轮CSV路径列表复制>'}\"\n"
+                                "OUTPUT_DIR = Path('generated')\n"
+                                "OUTPUT_DIR.mkdir(parents=True, exist_ok=True)\n\n"
+                                "df = pd.read_csv(CSV_PATH)\n"
+                                "</Code>"
+                            )
+                    else:
                         code_prompt = (
                             f"你的输出缺少 <Code> 段（已连续 {missing_code_rounds} 轮）。请在 <Analyze> 后立刻提供完整的 Python 代码（含 import/连接/EDA/plt 保存/conn.close()），"
                             "以便系统执行。参考提示词中的代码模板，必须输出 <Code>...</Code> 标签。"
@@ -2825,18 +2864,15 @@ def bot_stream(messages, workspace, session_id="default"):
                         if re.match(
                             r"^```\s*python\b\s*\S+", code_content, re.IGNORECASE
                         ):
-                            messages.append({"role": "assistant", "content": cur_res})
-                            format_prompt = (
-                                "你的 <Code> 中把 ```python 和代码写在了同一行，系统无法稳定解析。\n\n"
-                                "请改为严格的 fenced code 格式：\n"
-                                "```python\n"
-                                "<从下一行开始写 import/代码>\n"
-                                "```\n\n"
-                                "并确保 <Code>...</Code> 内只包含纯 Python，不要夹带提示词原文。"
+                            code_content = re.sub(
+                                r"^```\s*python\b\s+",
+                                "```python\n",
+                                code_content,
+                                flags=re.IGNORECASE,
                             )
-                            messages.append({"role": "user", "content": format_prompt})
-                            refund_iteration()
-                            continue
+                            logger.info(
+                                "[bot_stream] Normalized fenced code: inserted newline after ```python"
+                            )
 
                         # 找到第一个换行符,去除```python或```行
                         first_newline = code_content.find("\n")
