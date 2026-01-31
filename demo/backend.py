@@ -1625,6 +1625,16 @@ def strip_model_file_blocks(content: str) -> str:
             break
         cleaned = cleaned[:last_open] + cleaned[last_close + len("</File>") :]
         last_open = cleaned.find("<File>")
+
+    # 防御：部分模型会在 </Code> 之后继续输出“schema / Code / sql”块（常见为重复提示或虚构表结构）。
+    # 这类内容不属于对话协议，且会污染消息历史并导致后续轮次输出膨胀。
+    schema_tail = re.search(
+        r"\n\s*schema\s*\n\s*Code\s*\n\s*sql\s*\n",
+        cleaned,
+        re.IGNORECASE,
+    )
+    if schema_tail:
+        cleaned = cleaned[: schema_tail.start()].rstrip()
     return cleaned
 
 
@@ -2137,6 +2147,8 @@ def bot_stream(messages, workspace, session_id="default"):
         iteration += 1
         current_round = execute_rounds + 1
         premature_answer_detected = False
+        rule_for_current_round = get_round_rule(current_round)
+        mode_for_current_round = round_mode(rule_for_current_round)
         logger.info(
             f"[bot_stream] session={session_id} iteration={iteration} raw={raw_iterations} starting, messages={len(messages)}"
         )
@@ -2158,7 +2170,9 @@ def bot_stream(messages, workspace, session_id="default"):
         claimed_files_in_round: set[str] = set()
         last_finish_reason = None
         code_executed = False
-        MAX_STREAM_LENGTH = 50000  # 最大流式输出长度
+        MAX_STREAM_LENGTH = (
+            12000 if mode_for_current_round == "final_answer" else 50000
+        )  # 最大流式输出长度
         repetition_check_window = ""  # 用于检测重复内容
         stream_forced_abort = False  # 流式阶段强制终止后，避免进入后置解析导致重复重试
         try:
@@ -2252,21 +2266,15 @@ def bot_stream(messages, workspace, session_id="default"):
 
                 # 【重要】先检查 </Answer>，再检查 </Code>，避免提前 break 导致拦截失效
                 if "</Answer>" in current_stream:
-                    MIN_REQUIRED_ROUNDS = 9  # 确保第 8、9 轮的 HTML 报告都已生成
-                    if execute_rounds < MIN_REQUIRED_ROUNDS:
+                    if mode_for_current_round != "final_answer":
                         premature_answer_rounds += 1
                         messages.append(
                             {"role": "assistant", "content": current_stream}
                         )
                         warn_msg = (
-                            f"⚠️ 检测到提前输出 <Answer>：当前仅完成 {execute_rounds} 轮分析，但任务要求完成至少 {MIN_REQUIRED_ROUNDS} 轮。\n\n"
-                            "**必须继续执行以下轮次**：\n"
-                            "- 第 2-6 轮：单表分析（处理多个数据文件）\n"
-                            "- 第 7 轮：多表关联分析\n"
-                            "- 第 8 轮：生成 README.md 索引文件\n"
-                            "- 第 9 轮：生成 multi_table_analysis.html 汇总报告\n"
-                            "- 第 10 轮：输出最终 <Answer>\n\n"
-                            f"**请立即继续第 {execute_rounds + 1} 轮分析，禁止输出 <Answer>。**"
+                            "⚠️ 检测到你输出了 <Answer>，但当前轮次并非最终总结轮。\n\n"
+                            f"当前轮次：第 {current_round} 轮（mode={mode_for_current_round or 'unknown'}）。\n"
+                            "请继续按系统要求输出 <Analyze> + <Code> 完成本轮任务，禁止提前输出 <Answer>。"
                         )
                         messages.append({"role": "user", "content": warn_msg})
                         current_stream = current_stream.replace(
@@ -2275,7 +2283,7 @@ def bot_stream(messages, workspace, session_id="default"):
                         sanitized_stream = current_stream
                         premature_answer_detected = True
                         if premature_answer_rounds >= 3:
-                            forced_reason = f"连续 3 次尝试提前输出 <Answer>（当前 {execute_rounds} 轮，要求 {MIN_REQUIRED_ROUNDS} 轮），任务被终止"
+                            forced_reason = "连续 3 次在非 final_answer 轮次输出 <Answer>，任务被终止"
                             finished = True
                             break
                     else:
@@ -2382,6 +2390,43 @@ def bot_stream(messages, workspace, session_id="default"):
             analyze_signature = (
                 re.sub(r"\s+", " ", analyze_content) if analyze_content else ""
             )
+
+            rule_for_next = get_round_rule(current_round)
+            mode_for_next = round_mode(rule_for_next)
+
+            if mode_for_next == "final_answer":
+                if (
+                    "<Code>" in cur_res
+                    or "</Code>" in cur_res
+                    or "<Analyze>" in cur_res
+                ):
+                    logger.warning(
+                        "[bot_stream] Code rejected: final_answer round must not include <Analyze>/<Code>"
+                    )
+                    messages.append({"role": "assistant", "content": cur_res})
+                    prompt = (
+                        f"第 {current_round} 轮为 final_answer：只允许输出单个 <Answer>，"
+                        "禁止出现 <Analyze>/<Code>，也禁止输出 schema/sql 代码块。"
+                        "请立即改为只输出：\n\n"
+                        "<Answer>\n...\n</Answer>"
+                    )
+                    messages.append({"role": "user", "content": prompt})
+                    refund_iteration()
+                    continue
+                if "<Answer>" not in cur_res or "</Answer>" not in cur_res:
+                    logger.warning(
+                        "[bot_stream] Code rejected: final_answer round missing <Answer> block"
+                    )
+                    messages.append({"role": "assistant", "content": cur_res})
+                    prompt = (
+                        f"第 {current_round} 轮为 final_answer：必须输出单个完整 <Answer>...</Answer>，"
+                        "不要输出其他内容。请立即补全并确保闭合 </Answer>。"
+                    )
+                    messages.append({"role": "user", "content": prompt})
+                    refund_iteration()
+                    continue
+                finished = True
+                break
 
             # 记录 analyze_signature 用于调试重复检测
             logger.info(
@@ -2566,6 +2611,16 @@ def bot_stream(messages, workspace, session_id="default"):
                     logger.info(
                         "[bot_stream] Auto-closed missing </Code> before validation"
                     )
+                if "<File>" in cur_res and "</File>" not in cur_res:
+                    cur_res = cur_res.split("<File>")[0]
+
+                # 防御：部分模型会在 </Code> 之后继续输出“schema / Code / sql”块（常见为重复提示或虚构表结构）
+                # 这类内容会污染消息历史并导致后续轮次输出膨胀。
+                schema_tail = re.search(
+                    r"\n\s*schema\s*\n\s*Code\s*\n\s*sql\s*\n", cur_res, re.IGNORECASE
+                )
+                if schema_tail:
+                    cur_res = cur_res[: schema_tail.start()].rstrip()
 
             # 容错：允许 <code>/<Code > 等大小写与空白差异；若只有 markdown 代码块但缺少 <Code>，自动包裹。
             normalized_res = cur_res
@@ -2885,6 +2940,24 @@ def bot_stream(messages, workspace, session_id="default"):
                                 '    print(f"⚠️ 自动写入 HTML 失败: {err}")\n'
                             )
                             effective_code = f"{effective_code}{auto_write_block}"
+
+                        # 规则驱动校验：需要生成 HTML 时，代码中必须显式写入预期文件名。
+                        # 防止模型把第10轮写成 multi_table_analysis.html 或写成 execute_round_10.txt。
+                        if expected_html_files and expected_html_files[0]:
+                            expected_html_name = expected_html_files[0]
+                            if expected_html_name.lower() not in effective_code.lower():
+                                logger.warning(
+                                    "[bot_stream] Code rejected: expected HTML filename not referenced: %s",
+                                    expected_html_name,
+                                )
+                                prompt = (
+                                    f"第 {target_round} 轮必须写出 `{expected_html_name}`。"
+                                    "请在代码中使用 `Path('generated') / '<文件名>'` 写入该 HTML 文件（必须与规则一致），"
+                                    "不要写成其它 HTML 文件名，也不要写 execute_round_*.txt（该日志由系统自动生成）。"
+                                )
+                                messages.append({"role": "user", "content": prompt})
+                                refund_iteration()
+                                continue
 
                     # 拦截 HTML/前端模板被误当作 Python 代码的情况
                     # 只拒绝以 HTML 标签开头的代码（直接输出 HTML），允许包含 HTML 字符串的 Python 代码
