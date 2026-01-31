@@ -10,10 +10,12 @@ import socketserver
 import sqlite3
 import subprocess
 import sys
+import time
 import tempfile
 import textwrap
 import threading
 from collections import defaultdict
+from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -484,6 +486,8 @@ MODEL_PATH = "qwen3-4b-instruct"  # replace to your path to DeepAnalyze-8B
 MAX_ITERATIONS = 20
 ANSWER_MIN_EXEC_ROUNDS = 10  # 确保完成第 2-9 轮分析后才请求 Answer
 ANSWER_MIN_NON_SCHEMA_ROUNDS = 8  # 对应 8 轮非 schema 代码执行(第 2-9 轮)
+VLLM_HTTP_TIMEOUT_SECONDS = getattr(api_config, "VLLM_HTTP_TIMEOUT_SECONDS", 180)
+STREAM_STALL_RETRY_LIMIT = getattr(api_config, "STREAM_STALL_RETRY_LIMIT", 3)
 MAX_PROMPT_CHARS = getattr(api_config, "MAX_PROMPT_CHARS", 16000)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SQLITE_SEEDS = [
@@ -500,7 +504,9 @@ DEFAULT_SQLITE_SEEDS = [
 
 # Initialize OpenAI client
 client = openai.OpenAI(
-    base_url=API_BASE, api_key=getattr(api_config, "OPENAI_API_KEY", "dummy")
+    base_url=API_BASE,
+    api_key=getattr(api_config, "OPENAI_API_KEY", "dummy"),
+    timeout=VLLM_HTTP_TIMEOUT_SECONDS,
 )
 
 # Workspace directory
@@ -2023,6 +2029,7 @@ def bot_stream(messages, workspace, session_id="default"):
     empty_retry = 0
     forced_reason = ""
     stop_requested = False
+    stream_stall_retries = 0
 
     last_code_signature = None
     last_analyze_signature = None
@@ -2297,6 +2304,38 @@ def bot_stream(messages, workspace, session_id="default"):
                     )
                     break
         except Exception as stream_error:
+            # 流式阶段可能出现“长时间无 chunk 返回”的挂起，这通常会表现为 httpx/openai 超时。
+            # 这里不 hardcode 轮次：对任意轮次统一做有限次自动重试，并基于 round_io_rules 重新强调本轮任务。
+            error_type = type(stream_error).__name__
+            is_timeout = any(
+                key in error_type.lower()
+                for key in ("timeout", "readtimeout", "apitimeout", "connecttimeout")
+            )
+            if (
+                is_timeout
+                and stream_stall_retries < STREAM_STALL_RETRY_LIMIT
+                and not finished
+            ):
+                stream_stall_retries += 1
+                logger.warning(
+                    "[bot_stream] Stream stalled/timeout (%s), retry %s/%s",
+                    error_type,
+                    stream_stall_retries,
+                    STREAM_STALL_RETRY_LIMIT,
+                )
+                rule = get_round_rule(current_round)
+                desc = describe_round(rule) if rule else ""
+                guidance = guidance_for_rule(rule) if rule else ""
+                retry_prompt = (
+                    f"⚠️ 本轮流式输出超时/中断（{error_type}），系统将自动重试（{stream_stall_retries}/{STREAM_STALL_RETRY_LIMIT}）。\n\n"
+                    f"请继续完成第 {current_round} 轮任务：{desc or '（请遵循当前轮规则）'}\n\n"
+                    f"{guidance}\n\n"
+                    "请立即输出严格的 <Analyze> + <Code>（<Code> 内为可执行 Python）。"
+                )
+                append_user_prompt(retry_prompt)
+                refund_iteration()
+                continue
+
             error_block = (
                 "\n<Answer>\n"
                 "底层模型在流式输出过程中断或超时，当前对话被迫结束。"
@@ -2306,12 +2345,16 @@ def bot_stream(messages, workspace, session_id="default"):
             forced_reason = "模型流式输出失败"
             assistant_reply += error_block
             yield error_block
-            finished = True  # 标记为完成，继续执行后续的报告生成逻辑
+            finished = True
             break
 
         # 若流式阶段已经强制终止（超长/重复），直接结束本次请求，避免进入后置解析触发 refund_iteration 导致重复输出。
         if stream_forced_abort:
             return
+
+        # 成功完成一轮流式接收后，重置 stall 重试计数
+        if raw_res.strip():
+            stream_stall_retries = 0
 
         if premature_answer_detected and not finished:
             refund_iteration()
