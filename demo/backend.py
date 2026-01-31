@@ -3062,7 +3062,8 @@ def bot_stream(messages, workspace, session_id="default"):
                                 prompt = (
                                     f"第 {target_round} 轮必须写出 `{expected_html_name}`。"
                                     "请在代码中使用 `Path('generated') / '<文件名>'` 写入该 HTML 文件（必须与规则一致），"
-                                    "不要写成其它 HTML 文件名，也不要写 execute_round_*.txt（该日志由系统自动生成）。"
+                                    "不要写成其它 HTML 文件名。"
+                                    "（提示：`execute_round_*.txt` 会由系统自动写入为执行日志，你的代码无需也不应手动创建该日志文件。）"
                                 )
                                 messages.append({"role": "user", "content": prompt})
                                 refund_iteration()
@@ -3939,6 +3940,51 @@ def bot_stream(messages, workspace, session_id="default"):
                     logger.info(
                         f"[bot_stream] Code preview: {(effective_code or code_str)[:200]}..."
                     )
+
+                    mode_for_current = (
+                        round_mode(rule_for_current) if rule_for_current else ""
+                    )
+                    if mode_for_current in ("html_report", "html_report_phase2"):
+                        exec_code = effective_code or code_str
+                        # HTML 轮次最常见失败：把对话标签/Markdown 围栏粘进字符串，导致引号未闭合或语法错误。
+                        # 这里直接拦截并给出定向纠错提示，避免进入执行器后反复 SyntaxError。
+                        forbidden_markers = (
+                            "<Code>",
+                            "</Code>",
+                            "<Analyze>",
+                            "</Analyze>",
+                            "```",
+                        )
+                        hit = [m for m in forbidden_markers if m in exec_code]
+                        if hit:
+                            expected_html_files = (
+                                round_expected_filenames_by_type(
+                                    rule_for_current, "html"
+                                )
+                                if rule_for_current
+                                else []
+                            )
+                            expected_html_hint = (
+                                f"`generated/{expected_html_files[0]}`"
+                                if expected_html_files
+                                else "规则要求的 HTML 文件"
+                            )
+                            prompt = (
+                                "⚠️ 检测到你的 <Code> 脚本中混入了对话标签/Markdown 围栏："
+                                + ", ".join(hit)
+                                + "。这类文本如果被写进 Python 字符串，极易造成引号未闭合（SyntaxError），从而无法生成 HTML 文件。\n\n"
+                                "请修正：\n"
+                                "1) 在 Python 字符串/HTML 正文中只使用小写 `<code>...</code>`（不要使用大写 `<Code>`）\n"
+                                "2) 不要把 ``` 或 <Analyze>/<Code> 这类对话结构写入 html_lines/html_content\n"
+                                "3) 使用 `html_lines = []` 逐行 `append('...')` 构造 HTML，并确保每一行字符串都在同一行内闭合引号\n"
+                                "4) 最后必须写出 "
+                                + expected_html_hint
+                                + "（文件名必须与 round_io_rules 一致）"
+                            )
+                            append_user_prompt(prompt)
+                            refund_iteration()
+                            continue
+
                     try:
                         before_state = {
                             p.resolve(): (p.stat().st_size, p.stat().st_mtime_ns)
