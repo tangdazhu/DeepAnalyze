@@ -2755,9 +2755,13 @@ def bot_stream(messages, workspace, session_id="default"):
                             csv_abs_path = ""
                             if required_csv:
                                 csv_abs_path = str(
-                                    (Path(workspace_path) / "data" / required_csv).resolve()
+                                    (
+                                        Path(workspace_path) / "data" / required_csv
+                                    ).resolve()
                                 )
-                            expected_outputs = round_expected_filenames(rule_for_current)
+                            expected_outputs = round_expected_filenames(
+                                rule_for_current
+                            )
                             outputs_text = (
                                 "\n".join(
                                     f"- {name}" for name in expected_outputs if name
@@ -2785,11 +2789,11 @@ def bot_stream(messages, workspace, session_id="default"):
                                 "df = pd.read_csv(CSV_PATH)\n"
                                 "</Code>"
                             )
-                    else:
-                        code_prompt = (
-                            f"你的输出缺少 <Code> 段（已连续 {missing_code_rounds} 轮）。请在 <Analyze> 后立刻提供完整的 Python 代码（含 import/连接/EDA/plt 保存/conn.close()），"
-                            "以便系统执行。参考提示词中的代码模板，必须输出 <Code>...</Code> 标签。"
-                        )
+                        else:
+                            code_prompt = (
+                                f"你的输出缺少 <Code> 段（已连续 {missing_code_rounds} 轮）。请在 <Analyze> 后立刻提供完整的 Python 代码（含 import/连接/EDA/plt 保存/conn.close()），"
+                                "以便系统执行。参考提示词中的代码模板，必须输出 <Code>...</Code> 标签。"
+                            )
                     messages.append({"role": "user", "content": code_prompt})
                 refund_iteration()
                 continue
