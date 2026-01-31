@@ -2820,10 +2820,36 @@ def bot_stream(messages, workspace, session_id="default"):
                     # 修复21: 改进markdown代码块提取逻辑
                     # 如果代码以```python或```开头,去除markdown标记
                     if code_content.startswith("```"):
+                        # 兼容：模型可能输出 "```python import ..."（``` 与代码在同一行）
+                        # 这种情况下不能只按首个换行裁剪，否则会保留 ```python 前缀导致后续执行/校验异常。
+                        if re.match(
+                            r"^```\s*python\b\s*\S+", code_content, re.IGNORECASE
+                        ):
+                            messages.append({"role": "assistant", "content": cur_res})
+                            format_prompt = (
+                                "你的 <Code> 中把 ```python 和代码写在了同一行，系统无法稳定解析。\n\n"
+                                "请改为严格的 fenced code 格式：\n"
+                                "```python\n"
+                                "<从下一行开始写 import/代码>\n"
+                                "```\n\n"
+                                "并确保 <Code>...</Code> 内只包含纯 Python，不要夹带提示词原文。"
+                            )
+                            messages.append({"role": "user", "content": format_prompt})
+                            refund_iteration()
+                            continue
+
                         # 找到第一个换行符,去除```python或```行
                         first_newline = code_content.find("\n")
                         if first_newline != -1:
                             code_content = code_content[first_newline + 1 :]
+                        else:
+                            # 没有换行时，尽量移除开头的 ```python / ``` 前缀（保留可能存在的代码）
+                            code_content = re.sub(
+                                r"^```\s*(?:python)?\s*",
+                                "",
+                                code_content,
+                                flags=re.IGNORECASE,
+                            )
                         # 去除末尾可能带空白的```标记
                         code_content = re.sub(r"```[\t ]*$", "", code_content.rstrip())
                         code_str = code_content.strip()
