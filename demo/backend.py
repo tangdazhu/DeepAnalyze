@@ -4766,6 +4766,107 @@ def bot_stream(messages, workspace, session_id="default"):
                                 refund_iteration()
                                 refund_round_progress(is_schema_code)
                                 continue
+                            elif "filenotfounderror" in exe_output.lower() and (
+                                "html_report"
+                                in (
+                                    round_mode(rule_for_current)
+                                    if rule_for_current
+                                    else ""
+                                )
+                            ):
+                                # HTML 报告阶段常见失败：模型引用 generated/ 下不存在的数据文件（如 user_behavior.csv）导致执行失败。
+                                # 后端列出 generated 目录真实可用文件（以及 round_io_rules 声明的输入文件），并注入定向纠错提示要求只基于存在文件（尤其 multi_table_join_result.csv/README.md 等）生成目标 HTML。
+                                missing_path = ""
+                                try:
+                                    m = re.search(
+                                        r"FileNotFoundError:\s*(.*)", exe_output
+                                    )
+                                    if m:
+                                        missing_path = m.group(1).strip()
+                                except Exception:
+                                    missing_path = ""
+
+                                generated_dir = workspace_path / "generated"
+                                generated_files: list[str] = []
+                                if generated_dir.exists():
+                                    try:
+                                        generated_files = sorted(
+                                            [
+                                                p.name
+                                                for p in generated_dir.iterdir()
+                                                if p.is_file()
+                                            ]
+                                        )
+                                    except Exception:
+                                        generated_files = []
+
+                                required_inputs: list[str] = []
+                                try:
+                                    if rule_for_current:
+                                        required_inputs = [
+                                            fn
+                                            for fn in (
+                                                round_input_filenames(rule_for_current)
+                                                or []
+                                            )
+                                            if fn
+                                        ]
+                                except Exception:
+                                    required_inputs = []
+
+                                expected_html_files = (
+                                    round_expected_filenames_by_type(
+                                        rule_for_current, "html"
+                                    )
+                                    if rule_for_current
+                                    else []
+                                )
+                                expected_html_hint = (
+                                    f"`generated/{expected_html_files[0]}`"
+                                    if expected_html_files
+                                    else "规则要求的 HTML 文件"
+                                )
+
+                                files_preview = "\n".join(
+                                    f"- {name}" for name in generated_files[:80]
+                                )
+                                if len(generated_files) > 80:
+                                    files_preview += f"\n- ...（共 {len(generated_files)} 个文件，已截断）"
+
+                                inputs_preview = (
+                                    "\n".join(
+                                        f"- generated/{fn}" for fn in required_inputs
+                                    )
+                                    if required_inputs
+                                    else "- （规则未声明输入文件，或解析失败）"
+                                )
+
+                                error_warning = (
+                                    f"⚠️ FileNotFoundError：{error_hint}\n\n"
+                                    "错误原因：你的脚本在生成 HTML 时引用了不存在的数据文件，导致执行在写出 HTML 前就崩溃。\n\n"
+                                    f"- 缺失路径（来自报错）：{missing_path or '（未能解析）'}\n\n"
+                                    "请立即修正（必须全部满足）：\n"
+                                    "1) 只允许读取 **实际存在** 的文件（见下方 generated 目录列表），禁止假设 user_behavior.csv 等不存在文件\n"
+                                    "2) 优先基于 `generated/multi_table_join_result.csv` 以及本次生成的 summary.csv/png/readme 做汇总\n"
+                                    "3) 即使某个可选文件缺失，也必须降级处理（例如显示“未找到该文件”），但**仍然要生成目标 HTML**\n"
+                                    "4) 最后必须写出 "
+                                    + expected_html_hint
+                                    + "（文件名必须与 round_io_rules 一致）\n\n"
+                                    "规则声明的本轮输入文件：\n"
+                                    + inputs_preview
+                                    + "\n\n"
+                                    "当前 generated 目录实际文件：\n" + files_preview
+                                )
+
+                                messages.append(
+                                    {"role": "user", "content": error_warning}
+                                )
+                                last_analyze_signature = None
+                                last_code_signature = None
+                                allow_duplicate_analyze_retry()
+                                refund_iteration()
+                                refund_round_progress(is_schema_code)
+                                continue
                             elif "syntaxerror" in exe_output.lower() and (
                                 "unterminated string literal" in exe_output.lower()
                                 or "unterminated f-string literal" in exe_output.lower()
