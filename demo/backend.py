@@ -3031,43 +3031,62 @@ def bot_stream(messages, workspace, session_id="default"):
                             if rule_for_next
                             else []
                         )
-                        if (
-                            expected_html_files
-                            and "html_lines" in effective_code
-                            and "# AUTO_WRITE_HTML" not in effective_code
-                        ):
+                        if expected_html_files and expected_html_files[0]:
                             html_name = expected_html_files[0]
-                            auto_write_block = (
-                                "\n\n# AUTO_WRITE_HTML\n"
-                                "try:\n"
-                                '    output_dir = Path("generated")\n'
-                                "    output_dir.mkdir(parents=True, exist_ok=True)\n"
-                                f'    html_path = output_dir / "{html_name}"\n'
-                                '    html_path.write_text("\\n".join(html_lines), encoding="utf-8")\n'
-                                f'    print("✅ {html_name} 已写入")\n'
-                                "except Exception as err:\n"
-                                '    print(f"⚠️ 自动写入 HTML 失败: {err}")\n'
-                            )
-                            effective_code = f"{effective_code}{auto_write_block}"
+                            has_auto_write = "# AUTO_WRITE_HTML" in effective_code
+                            has_html_lines = "html_lines" in effective_code
+                            has_html_content = "html_content" in effective_code
+
+                            # 如果模型构造了 html_lines/html_content 但忘记写文件，这里自动补上写文件逻辑，避免无限重试。
+                            if (
+                                has_html_lines or has_html_content
+                            ) and not has_auto_write:
+                                write_expr = (
+                                    '"\\n".join(html_lines)'
+                                    if has_html_lines
+                                    else "html_content"
+                                )
+                                auto_write_block = (
+                                    "\n\n# AUTO_WRITE_HTML\n"
+                                    "try:\n"
+                                    '    output_dir = Path("generated")\n'
+                                    "    output_dir.mkdir(parents=True, exist_ok=True)\n"
+                                    f'    html_path = output_dir / "{html_name}"\n'
+                                    f'    html_path.write_text({write_expr}, encoding="utf-8")\n'
+                                    f'    print("✅ {html_name} 已写入")\n'
+                                    "except Exception as err:\n"
+                                    '    print(f"⚠️ 自动写入 HTML 失败: {err}")\n'
+                                )
+                                effective_code = f"{effective_code}{auto_write_block}"
 
                         # 规则驱动校验：需要生成 HTML 时，代码中必须显式写入预期文件名。
                         # 防止模型把第10轮写成 multi_table_analysis.html 或写成 execute_round_10.txt。
                         if expected_html_files and expected_html_files[0]:
                             expected_html_name = expected_html_files[0]
                             if expected_html_name.lower() not in effective_code.lower():
-                                logger.warning(
-                                    "[bot_stream] Code rejected: expected HTML filename not referenced: %s",
-                                    expected_html_name,
-                                )
-                                prompt = (
-                                    f"第 {target_round} 轮必须写出 `{expected_html_name}`。"
-                                    "请在代码中使用 `Path('generated') / '<文件名>'` 写入该 HTML 文件（必须与规则一致），"
-                                    "不要写成其它 HTML 文件名。"
-                                    "（提示：`execute_round_*.txt` 会由系统自动写入为执行日志，你的代码无需也不应手动创建该日志文件。）"
-                                )
-                                messages.append({"role": "user", "content": prompt})
-                                refund_iteration()
-                                continue
+                                # 若已检测到 html_lines/html_content，说明脚本具备生成 HTML 正文的能力，
+                                # 后端会自动注入写文件块，因此不再因为“未显式引用文件名”而退票。
+                                if ("html_lines" in effective_code) or (
+                                    "html_content" in effective_code
+                                ):
+                                    logger.info(
+                                        "[bot_stream] HTML filename not referenced but html content detected; auto-write injected for %s",
+                                        expected_html_name,
+                                    )
+                                else:
+                                    logger.warning(
+                                        "[bot_stream] Code rejected: expected HTML filename not referenced: %s",
+                                        expected_html_name,
+                                    )
+                                    prompt = (
+                                        f"第 {target_round} 轮必须写出 `{expected_html_name}`。"
+                                        "请在代码中使用 `Path('generated') / '<文件名>'` 写入该 HTML 文件（必须与规则一致），"
+                                        "不要写成其它 HTML 文件名。"
+                                        "（提示：`execute_round_*.txt` 会由系统自动写入为执行日志，你的代码无需也不应手动创建该日志文件。）"
+                                    )
+                                    messages.append({"role": "user", "content": prompt})
+                                    refund_iteration()
+                                    continue
 
                     # 拦截 HTML/前端模板被误当作 Python 代码的情况
                     # 只拒绝以 HTML 标签开头的代码（直接输出 HTML），允许包含 HTML 字符串的 Python 代码
