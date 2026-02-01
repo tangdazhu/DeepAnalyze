@@ -4658,6 +4658,114 @@ def bot_stream(messages, workspace, session_id="default"):
                                     "```\n\n"
                                     "请根据上述建议修正后重新提交。"
                                 )
+                            elif "keyerror" in exe_output.lower() and (
+                                "html_report"
+                                in (
+                                    round_mode(rule_for_current)
+                                    if rule_for_current
+                                    else ""
+                                )
+                            ):
+                                # HTML 报告阶段常见失败：模型臆造列名导致 df[...] / dropna(subset=...) KeyError。
+                                # 这里读取真实 join 结果列名并注入提示，强制模型仅基于 df.columns 做统计。
+                                missing_cols: list[str] = []
+                                try:
+                                    m = re.search(r"KeyError:\s*\[(.*)\]", exe_output)
+                                    if m:
+                                        raw = m.group(1)
+                                        # raw 形如 "'a', 'b'" 或 "\"a\", \"b\""
+                                        parts = [
+                                            p.strip()
+                                            for p in raw.split(",")
+                                            if p.strip()
+                                        ]
+                                        for p in parts:
+                                            p2 = p.strip().strip("'\"")
+                                            if p2:
+                                                missing_cols.append(p2)
+                                    else:
+                                        m2 = re.search(
+                                            r"KeyError:\s*'([^']+)'", exe_output
+                                        )
+                                        if m2:
+                                            missing_cols.append(m2.group(1).strip())
+                                except Exception:
+                                    missing_cols = []
+
+                                join_path = (
+                                    workspace_path
+                                    / "generated"
+                                    / "multi_table_join_result.csv"
+                                )
+                                df_cols: list[str] = []
+                                df_len: int | None = None
+                                dtypes_preview = ""
+                                if join_path.exists():
+                                    try:
+                                        df_join = pd.read_csv(join_path)
+                                        df_len = len(df_join)
+                                        df_cols = [
+                                            str(c) for c in df_join.columns.tolist()
+                                        ]
+                                        dtypes_preview = df_join.dtypes.astype(
+                                            str
+                                        ).to_string()
+                                    except Exception as err:
+                                        logger.warning(
+                                            "[bot_stream] Failed to read join csv for KeyError hint: %s",
+                                            err,
+                                        )
+
+                                missing_cols_text = (
+                                    ", ".join(missing_cols)
+                                    if missing_cols
+                                    else "（未能从错误信息中解析）"
+                                )
+                                cols_text = (
+                                    ", ".join(df_cols)
+                                    if df_cols
+                                    else "（未能读取到列名）"
+                                )
+                                size_text = str(df_len) if df_len is not None else "N/A"
+                                expected_html_files = (
+                                    round_expected_filenames_by_type(
+                                        rule_for_current, "html"
+                                    )
+                                    if rule_for_current
+                                    else []
+                                )
+                                expected_html_hint = (
+                                    f"`generated/{expected_html_files[0]}`"
+                                    if expected_html_files
+                                    else "规则要求的 HTML 文件"
+                                )
+                                error_warning = (
+                                    f"⚠️ pandas KeyError（缺失列）：{error_hint}\n\n"
+                                    "错误原因：代码引用了 join 结果中不存在的列名，属于臆造字段。\n\n"
+                                    f"- 触发缺失列：{missing_cols_text}\n"
+                                    f"- 实际文件：`generated/multi_table_join_result.csv`\n"
+                                    f"- 实际行数：{size_text}\n"
+                                    f"- 实际列名（df.columns）：{cols_text}\n\n"
+                                    "请立即修正：\n"
+                                    "1) 必须先 `df = pd.read_csv('generated/multi_table_join_result.csv')` 并使用 `df.columns` 决定可分析字段\n"
+                                    "2) 禁止使用任何不在 df.columns 中的字段名（例如 term_years/interest_rate/region/occupation 等，除非真实存在）\n"
+                                    "3) 若没有数值列：降级为缺失率、唯一值数量、TopK 类别分布等统计；依然要生成 HTML\n"
+                                    "4) 最后必须写出 "
+                                    + expected_html_hint
+                                    + "（文件名必须与 round_io_rules 一致）\n\n"
+                                    "（dtypes 预览如下，便于你区分数值列与类别列）\n"
+                                    + dtypes_preview
+                                )
+                                messages.append(
+                                    {"role": "user", "content": error_warning}
+                                )
+                                # 避免模型在纠错过程中被 duplicate signature 机制卡死
+                                last_analyze_signature = None
+                                last_code_signature = None
+                                allow_duplicate_analyze_retry()
+                                refund_iteration()
+                                refund_round_progress(is_schema_code)
+                                continue
                             elif "syntaxerror" in exe_output.lower() and (
                                 "unterminated string literal" in exe_output.lower()
                                 or "unterminated f-string literal" in exe_output.lower()
