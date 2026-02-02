@@ -3031,6 +3031,48 @@ def bot_stream(messages, workspace, session_id="default"):
                             if rule_for_next
                             else []
                         )
+
+                        # html_report_phase2 明确禁止访问原始 data/ 或执行 sqlite3.connect；
+                        # 只允许读取 generated/ 下的产物并生成综合 HTML。
+                        # 由于前端提示词可能被误改（例如要求在第10轮建库），这里提前拦截避免无限重试。
+                        if mode_for_next == "html_report_phase2":
+                            lower_code = effective_code.lower()
+                            uses_sqlite = (
+                                "import sqlite3" in lower_code
+                                or "sqlite3.connect" in lower_code
+                            )
+                            touches_data_dir = (
+                                "/data/" in lower_code
+                                or "\\data\\" in lower_code
+                                or "path('data'" in lower_code
+                                or 'path("data"' in lower_code
+                                or "pathlib.path('data'" in lower_code
+                                or 'pathlib.path("data"' in lower_code
+                            )
+                            if uses_sqlite or touches_data_dir:
+                                expected_html_name = (
+                                    expected_html_files[0]
+                                    if expected_html_files and expected_html_files[0]
+                                    else "comprehensive_analysis_report.html"
+                                )
+                                logger.warning(
+                                    "[bot_stream] Code rejected: html_report_phase2 must not use sqlite/data (sqlite=%s, data=%s)",
+                                    uses_sqlite,
+                                    touches_data_dir,
+                                )
+                                prompt = (
+                                    f"本轮模式为 html_report_phase2：必须生成 `generated/{expected_html_name}`。\n"
+                                    "本轮只允许读取 `generated/` 下的 CSV/PNG/README/HTML 等产物进行二次综合分析，\n"
+                                    "**禁止** 执行 `sqlite3.connect` 或读取 `data/` 目录。\n\n"
+                                    "请删除 sqlite3/data 相关代码，改为：\n"
+                                    "1) `from pathlib import Path`，`generated_dir = Path('generated')`\n"
+                                    "2) 只读取 `generated/` 下真实存在的文件（例如 multi_table_join_result.csv、*.png、README.md、multi_table_analysis.html）\n"
+                                    f"3) 最终写出 `generated/{expected_html_name}`。"
+                                )
+                                messages.append({"role": "user", "content": prompt})
+                                refund_iteration()
+                                continue
+
                         if expected_html_files and expected_html_files[0]:
                             html_name = expected_html_files[0]
                             has_auto_write = "# AUTO_WRITE_HTML" in effective_code
