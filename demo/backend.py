@@ -23,6 +23,7 @@ from urllib.parse import quote
 
 import httpx
 import openai
+import pandas as pd
 import requests
 import uvicorn
 from fastapi import Body, FastAPI, File, Form, HTTPException, Query, UploadFile
@@ -1419,8 +1420,12 @@ EMOJI_TAG_MAP = {
 }
 
 HEADING_TAG_PATTERN = re.compile(
-    r"^\s{0,3}#{2,3}\s*(Analyze|Code|Execute|File|Answer)\s*$",
+    r"^\s{0,3}#{2,6}\s*(Analyze|Code|Execute|File|Answer)\s*[:：]?\s*$",
     re.MULTILINE,
+)
+COLON_HEADING_TAG_PATTERN = re.compile(
+    r"(^|\n)\s*(Analyze|Code|Execute|File|Answer)\s*[:：]\s*(?=\n)",
+    re.IGNORECASE,
 )
 FILE_TAG_CAPTURE_PATTERN = re.compile(r"<File>(.*?)</File>", re.DOTALL)
 FILES_OPEN_PATTERN = re.compile(r"<\s*Files\s*>", re.IGNORECASE)
@@ -1682,6 +1687,10 @@ def normalize_model_tags(content: str) -> str:
     for emoji_tag, canonical in EMOJI_TAG_MAP.items():
         normalized = normalized.replace(emoji_tag, canonical)
     normalized = HEADING_TAG_PATTERN.sub(lambda m: f"<{m.group(1)}>", normalized)
+    normalized = COLON_HEADING_TAG_PATTERN.sub(
+        lambda m: f"{m.group(1)}<{m.group(2).capitalize()}>\n",
+        normalized,
+    )
     # 兼容 "Code\npython" / "Code\npython\n..." 这种非 fenced / 非 <Code> 的代码开头。
     # 只在尚未出现 <Code> 时进行替换，避免误伤正文中的普通单词。
     if "<Code>" not in normalized:
@@ -1710,6 +1719,20 @@ def normalize_model_tags(content: str) -> str:
     # 移除噪音词（如 assistant、unicorn、acer 等重复出现的无意义词）
     normalized = re.sub(r"\b(unicorn|acer)\b\s*", "", normalized, flags=re.IGNORECASE)
     return normalized
+
+
+def find_required_csv_path(workspace_path: Path, required_csv: str) -> Path | None:
+    """在当前 session workspace 中递归查找规则要求的 CSV 文件（返回第一个命中的绝对路径）。"""
+    if not required_csv:
+        return None
+    try:
+        matches = sorted(workspace_path.rglob(required_csv))
+    except Exception:
+        return None
+    for item in matches:
+        if item.is_file():
+            return item.resolve()
+    return None
 
 
 SQLITE_PATTERNS = ("*.sqlite", "*.db", "*.db3")
