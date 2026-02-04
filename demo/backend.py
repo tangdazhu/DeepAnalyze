@@ -3124,6 +3124,38 @@ def bot_stream(messages, workspace, session_id="default"):
                                 )
                                 effective_code = f"{effective_code}{auto_write_block}"
 
+                        # 拦截 HTML/前端模板被误当作 Python 代码的情况（优先于文件名校验）
+                        # 只拒绝以 HTML 标签开头的代码（直接输出 HTML），允许包含 HTML 字符串的 Python 代码
+                        first_line = (
+                            effective_code.strip().split("\n")[0]
+                            if effective_code.strip()
+                            else ""
+                        )
+                        if re.match(
+                            r"^\s*<!doctype html|^\s*<(html|head|body|section|div)\b",
+                            first_line,
+                            re.IGNORECASE,
+                        ):
+                            expected_html_name = (
+                                expected_html_files[0]
+                                if expected_html_files and expected_html_files[0]
+                                else "(规则要求的HTML文件)"
+                            )
+                            logger.warning(
+                                "[bot_stream] Code rejected: detected HTML content instead of Python script"
+                            )
+                            html_prompt = (
+                                "检测到你在 <Code> 中直接输出了 HTML 页面内容，但系统需要的是**可执行的 Python 脚本**来生成文件。\n\n"
+                                "请立即改为：\n"
+                                "1) `from pathlib import Path`，`generated_dir = Path('generated')`；\n"
+                                "2) 用 `html_lines = [...]` 逐行构造 HTML（不要用 `str.format` 套 CSS）；\n"
+                                f"3) 最后必须写盘：`(Path('generated') / '{expected_html_name}').write_text('\\n'.join(html_lines), encoding='utf-8')`。\n\n"
+                                "注意：不要在 <Code> 里再粘贴整段 HTML；必须输出 Python 代码。"
+                            )
+                            messages.append({"role": "user", "content": html_prompt})
+                            refund_iteration()
+                            continue
+
                         # 规则驱动校验：需要生成 HTML 时，代码中必须显式写入预期文件名。
                         # 防止模型把第10轮写成 multi_table_analysis.html 或写成 execute_round_10.txt。
                         if expected_html_files and expected_html_files[0]:
@@ -3146,35 +3178,13 @@ def bot_stream(messages, workspace, session_id="default"):
                                     prompt = (
                                         f"第 {target_round} 轮必须写出 `{expected_html_name}`。"
                                         "请在代码中使用 `Path('generated') / '<文件名>'` 写入该 HTML 文件（必须与规则一致），"
-                                        "不要写成其它 HTML 文件名。"
+                                        "不要写成其它 HTML 文件名，也不要在 <Code> 中直接粘贴 HTML 文本。"
+                                        "请用 `html_lines = [...]` 逐行构造 HTML，然后 write_text 写盘。"
                                         "（提示：`execute_round_*.txt` 会由系统自动写入为执行日志，你的代码无需也不应手动创建该日志文件。）"
                                     )
                                     messages.append({"role": "user", "content": prompt})
                                     refund_iteration()
                                     continue
-
-                    # 拦截 HTML/前端模板被误当作 Python 代码的情况
-                    # 只拒绝以 HTML 标签开头的代码（直接输出 HTML），允许包含 HTML 字符串的 Python 代码
-                    first_line = (
-                        effective_code.strip().split("\n")[0]
-                        if effective_code.strip()
-                        else ""
-                    )
-                    if re.match(
-                        r"^\s*<!doctype html|^\s*<(html|head|body|section|div)\b",
-                        first_line,
-                        re.IGNORECASE,
-                    ):
-                        logger.warning(
-                            "[bot_stream] Code rejected: detected HTML content instead of Python script"
-                        )
-                        html_prompt = (
-                            "检测到你在 <Code> 中输出了 HTML 模板，但系统需要的是 Python 脚本。"
-                            " 请提供可执行的 Python 代码（以生成 README.md/CSV/PNG 等文件），不要直接输出 HTML 页面内容。"
-                        )
-                        messages.append({"role": "user", "content": html_prompt})
-                        refund_iteration()
-                        continue
 
                     # 计算代码签名，用于重复检测
                     code_signature = "\n".join(
