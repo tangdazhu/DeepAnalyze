@@ -2919,12 +2919,48 @@ def bot_stream(messages, workspace, session_id="default"):
                         "content": strip_model_file_blocks(cur_res),
                     }
                 )
-                code_match = re.search(r"<Code>(.*?)</Code>", cur_res, re.DOTALL)
-                logger.info(f"[bot_stream] Code match result: {code_match is not None}")
-                if code_match:
-                    code_content = code_match.group(1).strip()
+                code_matches = list(
+                    re.finditer(r"<Code>(.*?)</Code>", cur_res, re.DOTALL)
+                )
+                logger.info(f"[bot_stream] Code match result: {len(code_matches) > 0}")
+                if code_matches:
+                    # 若模型输出了多个 <Code>...</Code>（常见于把提示词/对话回显混入 <Code>），
+                    # 这里选择“最像可执行 Python 脚本”的那一段，避免抽到长度极短的残片导致退票死循环。
+                    best_code_content = ""
+                    best_effective_code = ""
+                    best_score = -1
+
+                    for m in code_matches:
+                        candidate = (m.group(1) or "").strip()
+                        if not candidate:
+                            continue
+                        eff = extract_effective_code(candidate)
+                        if eff and "```" in eff:
+                            cleaned_lines: list[str] = []
+                            for line in eff.splitlines():
+                                stripped = line.strip()
+                                if stripped.startswith("```"):
+                                    continue
+                                cleaned_lines.append(line)
+                            eff = "\n".join(cleaned_lines).strip()
+
+                        lower_eff = eff.lower() if eff else ""
+                        looks_like_python = bool(
+                            re.search(
+                                r"(?m)^\s*(?:import\s+\w|from\s+\w+\s+import)",
+                                eff or "",
+                            )
+                        )
+                        # 评分：优先“像 Python”，其次看长度。
+                        score = (100000 if looks_like_python else 0) + len(eff or "")
+                        if score > best_score:
+                            best_score = score
+                            best_code_content = candidate
+                            best_effective_code = eff or ""
+
+                    code_content = best_code_content
                     logger.info(
-                        f"[bot_stream] Code content extracted, length={len(code_content)}"
+                        f"[bot_stream] Code content extracted, length={len(code_content)} (selected from {len(code_matches)} blocks)"
                     )
                     # 修复21: 改进markdown代码块提取逻辑
                     # 如果代码以```python或```开头,去除markdown标记
@@ -2967,7 +3003,13 @@ def bot_stream(messages, workspace, session_id="default"):
                         code_str = (
                             md_match.group(1).strip() if md_match else code_content
                         )
-                    effective_code = extract_effective_code(code_str)
+                    # 若上面已经选出了 best_effective_code（多 <Code> 情况），优先使用；
+                    # 否则再从 code_str 进行提取。
+                    if best_effective_code:
+                        effective_code = best_effective_code
+                    else:
+                        effective_code = extract_effective_code(code_str)
+
                     # 额外清理：模型有时会把 Markdown 代码围栏 ``` / ```python 夹进 <Code> 中
                     # 这会在执行阶段触发 SyntaxError: invalid syntax，导致反复重试/重复输出。
                     if effective_code and "```" in effective_code:
@@ -2981,6 +3023,43 @@ def bot_stream(messages, workspace, session_id="default"):
                     logger.info(
                         f"[bot_stream] Effective code extracted, length={len(effective_code) if effective_code else 0}"
                     )
+
+                    # html_report 轮次常见失败形态：<Code> 提取到了极短残片（例如 length=5），
+                    # 随后落入“文件名未引用”校验导致无限退票。
+                    # 这里提前拦截，强制模型输出一段完整可运行脚本。
+                    target_round = execute_rounds + 1
+                    rule_for_next = get_round_rule(target_round)
+                    mode_for_next = round_mode(rule_for_next)
+                    if (
+                        mode_for_next in ("html_report", "html_report_phase2")
+                        and effective_code
+                        and len(effective_code.strip()) < 120
+                    ):
+                        expected_html_files = (
+                            round_expected_filenames_by_type(rule_for_next, "html")
+                            if rule_for_next
+                            else []
+                        )
+                        expected_html_name = (
+                            expected_html_files[0]
+                            if expected_html_files and expected_html_files[0]
+                            else "(规则要求的HTML文件)"
+                        )
+                        logger.warning(
+                            "[bot_stream] Code rejected: extracted HTML report code too short (len=%s)",
+                            len(effective_code.strip()),
+                        )
+                        short_prompt = (
+                            "检测到你在 <Code> 中输出的脚本内容过短/不完整，系统无法执行并生成 HTML。"
+                            "请只输出一段完整可运行的 Python 脚本（从 import 开始），不得混入任何对话文本。\n\n"
+                            "要求：\n"
+                            "1) `generated_dir = Path('generated')`，若不存在则创建；\n"
+                            "2) 必须定义 `html_lines = [...]` 并逐行 append/extend；\n"
+                            f"3) 必须写盘到 `generated/{expected_html_name}`（使用 `Path('generated') / '{expected_html_name}'` + `write_text`）。"
+                        )
+                        messages.append({"role": "user", "content": short_prompt})
+                        refund_iteration()
+                        continue
 
                     # 防御：模型偶发把对话标签残片（如 </Analyze>）混入 <Code>，会导致执行阶段把标签当 Python 运行
                     # 这里仅拦截“看起来就是标签行”的情况，避免误伤正常的 HTML 字符串内容。
@@ -3043,10 +3122,6 @@ def bot_stream(messages, workspace, session_id="default"):
                         continue
                     else:
                         empty_code_rounds = 0  # 重置计数
-
-                    target_round = execute_rounds + 1
-                    rule_for_next = get_round_rule(target_round)
-                    mode_for_next = round_mode(rule_for_next)
 
                     if mode_for_next in ("html_report", "html_report_phase2"):
                         expected_html_files = (
@@ -3179,8 +3254,10 @@ def bot_stream(messages, workspace, session_id="default"):
                             if expected_html_name.lower() not in effective_code.lower():
                                 # 若已检测到 html_lines/html_content，说明脚本具备生成 HTML 正文的能力，
                                 # 后端会自动注入写文件块，因此不再因为“未显式引用文件名”而退票。
-                                if ("html_lines" in effective_code) or (
-                                    "html_content" in effective_code
+                                if re.search(
+                                    r"\bhtml_lines\b", effective_code, re.IGNORECASE
+                                ) or re.search(
+                                    r"\bhtml_content\b", effective_code, re.IGNORECASE
                                 ):
                                     logger.info(
                                         "[bot_stream] HTML filename not referenced but html content detected; auto-write injected for %s",
