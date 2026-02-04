@@ -2728,7 +2728,38 @@ def bot_stream(messages, workspace, session_id="default"):
             cur_res = normalized_res
 
             logger.info(f"[bot_stream] Checking for <Code> block in response")
-            has_code_block = "<Code>" in cur_res and "</Code>" in cur_res
+            # 容错：模型可能输出了 <Code> 但遗漏 </Code>（或输出被 stop/截断），
+            # 这会导致被误判为缺少 Code block 并触发退票，进而使本轮永远不执行。
+            # 这里先尝试构造一个“可提取的 Code 片段”并视为有 Code block。
+            has_code_open = "<Code>" in cur_res
+            has_code_close = "</Code>" in cur_res
+            if has_code_open and not has_code_close:
+                code_start = cur_res.find("<Code>")
+                scan_from = code_start + len("<Code>")
+                end_candidates: list[int] = []
+                for marker in (
+                    "<Analyze>",
+                    "<Execute>",
+                    "<Answer>",
+                    "<File>",
+                    "<Code>",
+                ):
+                    idx = cur_res.find(marker, scan_from)
+                    if idx != -1:
+                        end_candidates.append(idx)
+                user_idx = cur_res.find("\nuser\n", scan_from)
+                if user_idx != -1:
+                    end_candidates.append(user_idx)
+                code_end = min(end_candidates) if end_candidates else len(cur_res)
+
+                # 将缺失闭合的 Code 片段截断并补齐 </Code>，避免把后续提示词回显混入脚本。
+                cur_res = cur_res[:code_end].rstrip() + "\n</Code>\n"
+                has_code_close = True
+                logger.info(
+                    "[bot_stream] Auto-closed missing </Code> (truncated tail) before validation"
+                )
+
+            has_code_block = has_code_open and has_code_close
             logger.info(f"[bot_stream] has_code_block={has_code_block}")
 
             # 调试日志：检查 Code 标签检测
