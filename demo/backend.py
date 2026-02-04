@@ -3099,17 +3099,33 @@ def bot_stream(messages, workspace, session_id="default"):
                         if expected_html_files and expected_html_files[0]:
                             html_name = expected_html_files[0]
                             has_auto_write = "# AUTO_WRITE_HTML" in effective_code
-                            has_html_lines = "html_lines" in effective_code
-                            has_html_content = "html_content" in effective_code
+                            html_lines_match = re.search(
+                                r"\bhtml_lines\b", effective_code, re.IGNORECASE
+                            )
+                            html_content_match = re.search(
+                                r"\bhtml_content\b", effective_code, re.IGNORECASE
+                            )
+                            has_html_lines = bool(html_lines_match)
+                            has_html_content = bool(html_content_match)
 
                             # 如果模型构造了 html_lines/html_content 但忘记写文件，这里自动补上写文件逻辑，避免无限重试。
                             if (
                                 has_html_lines or has_html_content
                             ) and not has_auto_write:
-                                write_expr = (
-                                    '"\\n".join(html_lines)'
-                                    if has_html_lines
+                                html_lines_var = (
+                                    html_lines_match.group(0)
+                                    if html_lines_match
+                                    else "html_lines"
+                                )
+                                html_content_var = (
+                                    html_content_match.group(0)
+                                    if html_content_match
                                     else "html_content"
+                                )
+                                write_expr = (
+                                    f'"\\n".join({html_lines_var})'
+                                    if has_html_lines
+                                    else html_content_var
                                 )
                                 auto_write_block = (
                                     "\n\n# AUTO_WRITE_HTML\n"
