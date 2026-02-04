@@ -4742,6 +4742,57 @@ def bot_stream(messages, workspace, session_id="default"):
                                     "```\n\n"
                                     "请根据上述建议修正后重新提交。"
                                 )
+                            elif (
+                                "keyerror" in exe_output.lower()
+                                and "html_report"
+                                in (
+                                    round_mode(rule_for_current)
+                                    if rule_for_current
+                                    else ""
+                                )
+                                and (
+                                    "font-family" in exe_output.lower()
+                                    or "html_content.format" in exe_output.lower()
+                                    or (
+                                        ".format(" in exe_output
+                                        and "<style" in exe_output.lower()
+                                    )
+                                )
+                            ):
+                                expected_html_files = (
+                                    round_expected_filenames_by_type(
+                                        rule_for_current, "html"
+                                    )
+                                    if rule_for_current
+                                    else []
+                                )
+                                expected_html_hint = (
+                                    f"`generated/{expected_html_files[0]}`"
+                                    if expected_html_files
+                                    else "规则要求的 HTML 文件"
+                                )
+
+                                error_warning = (
+                                    f"⚠️ HTML 报告生成失败：{error_hint}\n\n"
+                                    "错误原因：你在 `html_content`（包含 CSS 的 HTML 字符串）上调用了 `str.format(...)`。"
+                                    "CSS 中大量 `{ ... }` 花括号会被 `format` 当成占位符，"
+                                    "从而触发 `KeyError: ' font-family'` 等错误，导致 HTML 文件无法写出。\n\n"
+                                    "修正要求（任选其一，但必须可运行且不写死整段 HTML 输出）：\n"
+                                    "1) 推荐：改用 `html_lines = [...]` 逐行构造 HTML（含 `<style>`），最后 `write_text('\\n'.join(html_lines))`；\n"
+                                    "2) 若必须用 `.format(...)`：请把 CSS 的花括号全部转义为 `{{` 和 `}}`，仅保留你要替换的少量占位符。\n\n"
+                                    "注意：\n"
+                                    f"- 输出文件必须写到 {expected_html_hint}（文件名必须与 round_io_rules 一致）；\n"
+                                    '- 禁止 `html_template = """..."""` 直接写死整段模板；必须通过 `html_lines` 或安全的占位符替换生成内容。'
+                                )
+                                messages.append(
+                                    {"role": "user", "content": error_warning}
+                                )
+                                last_analyze_signature = None
+                                last_code_signature = None
+                                allow_duplicate_analyze_retry()
+                                refund_iteration()
+                                refund_round_progress(is_schema_code)
+                                continue
                             elif "keyerror" in exe_output.lower() and (
                                 "html_report"
                                 in (
