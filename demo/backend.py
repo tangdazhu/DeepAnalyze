@@ -1547,6 +1547,61 @@ def has_filesystem_write_operations(code: str) -> bool:
     return any(token in lower_code for token in path_tokens)
 
 
+def _comment_out_suspicious_nl_lines(code: str) -> str:
+    """对模型生成的脚本做轻量清洗：将疑似自然语言说明行自动注释，降低 SyntaxError 概率。"""
+    if not code:
+        return code
+
+    safe_starters = (
+        "import ",
+        "from ",
+        "def ",
+        "class ",
+        "for ",
+        "while ",
+        "if ",
+        "elif ",
+        "else",
+        "try",
+        "except",
+        "finally",
+        "with ",
+        "return",
+        "yield",
+        "raise",
+        "assert",
+        "pass",
+        "break",
+        "continue",
+        "@",
+        "#",
+    )
+
+    out_lines: list[str] = []
+    for raw_line in code.splitlines():
+        line = raw_line.rstrip("\n")
+        stripped = line.strip()
+        if not stripped:
+            out_lines.append(line)
+            continue
+        if stripped.startswith(safe_starters):
+            out_lines.append(line)
+            continue
+
+        has_non_ascii = any(ord(ch) > 127 for ch in stripped)
+        looks_like_code = bool(
+            re.search(r"[=()\[\]{}:,./\\]", stripped)
+            or re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", stripped)
+        )
+        if has_non_ascii and (not looks_like_code) and (not stripped.startswith('"')):
+            out_lines.append("# " + stripped)
+            continue
+
+        out_lines.append(line)
+
+    return "\n".join(out_lines).strip() + "\n"
+
+
 HTML_SECTION_IDS = ("summary", "visual", "data", "readme")
 
 
