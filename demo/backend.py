@@ -4212,9 +4212,10 @@ def bot_stream(messages, workspace, session_id="default"):
                     except Exception:
                         before_state = {}
 
-                    exe_output = execute_code_safe(
-                        effective_code or code_str, str(workspace_path)
+                    exec_code = _comment_out_suspicious_nl_lines(
+                        effective_code or code_str
                     )
+                    exe_output = execute_code_safe(exec_code, str(workspace_path))
                     code_executed = True
 
                     # 将执行输出写入日志文件
@@ -4227,7 +4228,8 @@ def bot_stream(messages, workspace, session_id="default"):
                             f.write(f"Session: {session_id}\n")
                             f.write(f"Iteration: {iteration}\n\n")
                             f.write("=== Code ===\n")
-                            f.write(effective_code or code_str)
+                            # 记录实际执行的脚本（已做轻量清洗），确保可追溯。
+                            f.write(exec_code)
                             f.write("\n\n=== Output ===\n")
                             f.write(exe_output)
                         logger.info(f"[bot_stream] Wrote execution log to {log_file}")
