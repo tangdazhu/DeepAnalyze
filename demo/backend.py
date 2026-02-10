@@ -292,6 +292,22 @@ def round_expected_types(rule: dict[str, Any]) -> set[str]:
     }
 
 
+def round_expected_type_counts(rule: dict[str, Any]) -> dict[str, int]:
+    """按类型统计期望的输出数量，如 {"csv": 1, "png": 1}。"""
+    from collections import Counter
+
+    types = [
+        (out.get("type") or "").lower()
+        for out in (rule.get("outputs") or [])
+        if out.get("type")
+    ]
+    return dict(Counter(types))
+
+
+# 对于这些模式，outputs 中的 filename 仅作为建议，校验时只检查类型+数量
+_TYPE_ONLY_MODES = {"csv_analysis", "sqlite_join"}
+
+
 def round_requires_output_type(rule: dict[str, Any], type_name: str) -> bool:
     type_name = type_name.lower()
     return type_name in round_expected_types(rule)
@@ -2052,6 +2068,8 @@ def bot_stream(messages, workspace, session_id="default"):
     raw_iterations = 0
     max_raw_iterations = MAX_ITERATIONS * 2
     empty_retry = 0
+    missing_file_retries = 0  # 缺失文件重试计数器，防止无限循环
+    MAX_MISSING_FILE_RETRIES = 2  # 缺失文件最多重试 2 次
     forced_reason = ""
     stop_requested = False
     stream_stall_retries = 0
@@ -2652,12 +2670,8 @@ def bot_stream(messages, workspace, session_id="default"):
                     messages.append({"role": "assistant", "content": cur_res})
                     reject_msg = (
                         f"⚠️ 检测到提前终止：当前仅完成 {execute_rounds} 轮分析，但任务要求完成至少 {MIN_REQUIRED_ROUNDS} 轮。\n\n"
-                        "**必须继续执行以下轮次**：\n"
-                        "- 第 2-6 轮：单表分析（处理多个数据文件）\n"
-                        "- 第 7 轮：多表关联分析\n"
-                        "- 第 8 轮：生成 README.md 索引文件\n"
-                        "- 第 9 轮：生成 comprehensive_analysis_report.md 综合数据分析报告\n"
-                        "- 第 10 轮：输出最终 <Answer>\n\n"
+                        "**必须继续执行后续轮次**（包括单表分析、多表关联、文件索引、综合分析报告等），"
+                        "按照 round_io_rules 配置依次完成所有轮次后才能输出 <Answer>。\n\n"
                         f"**请立即继续第 {execute_rounds + 1} 轮分析，禁止输出 <Answer>。**"
                     )
                     messages.append({"role": "user", "content": reject_msg})
@@ -2800,7 +2814,8 @@ def bot_stream(messages, workspace, session_id="default"):
                         return
                     # 修复19: 当execute_rounds=1(Bootstrap后)且缺少代码时,明确指导开始第2轮分析
                     if execute_rounds == 1:
-                        rule_for_next = get_round_rule(execute_rounds + 1)
+                        target_round = execute_rounds + 1
+                        rule_for_next = get_round_rule(target_round)
                         required_csv = (
                             round_input_filename(rule_for_next)
                             if rule_for_next
@@ -2811,36 +2826,43 @@ def bot_stream(messages, workspace, session_id="default"):
                             csv_abs_path = str(
                                 (Path(workspace_path) / "data" / required_csv).resolve()
                             )
+                        desc = describe_round(rule_for_next) if rule_for_next else ""
+                        guidance = (
+                            guidance_for_rule(rule_for_next) if rule_for_next else ""
+                        )
+                        expected_types = (
+                            round_expected_type_counts(rule_for_next)
+                            if rule_for_next
+                            else {}
+                        )
+                        type_hint = (
+                            "、".join(
+                                f"{cnt} 个 {t}" for t, cnt in expected_types.items()
+                            )
+                            or "CSV 和 PNG"
+                        )
                         code_prompt = (
-                            "⚠️ Bootstrap已完成,禁止重复输出Bootstrap代码!\n\n"
-                            "🚨 立即开始第2轮分析 - enrolled.csv 🚨\n\n"
-                            "必须按照以下格式输出:\n\n"
+                            "⚠️ Bootstrap已完成，禁止重复输出Bootstrap代码!\n\n"
+                            f"🚨 立即开始第 {target_round} 轮分析 🚨\n\n"
+                            f"**任务**：{desc}\n"
+                            f"**输入文件**：{required_csv or '（见 round_io_rules）'}\n"
+                            f"**CSV 绝对路径**：{csv_abs_path or '（请从首轮 CSV 路径列表复制）'}\n"
+                            f"**期望产出**：{type_hint}\n\n"
+                            f"{guidance}\n\n"
+                            "请立即按如下结构输出（只允许 <Analyze> + <Code>）：\n\n"
                             "<Analyze>\n"
-                            "第2轮任务:分析enrolled.csv文件,统计学校分布和月份分布\n"
+                            f"第 {target_round} 轮任务：一句话说明本轮目标与依据。\n"
                             "</Analyze>\n\n"
                             "<Code>\n"
                             "import pandas as pd\n"
                             "import matplotlib.pyplot as plt\n"
-                            "import seaborn as sns\n"
                             "from pathlib import Path\n\n"
-                            "# 读取enrolled.csv\n"
-                            f"CSV_PATH = r'{csv_abs_path or '<请从首轮CSV路径列表复制>'}'\n"
-                            "df = pd.read_csv(CSV_PATH)\n\n"
-                            "# 生成enrolled_summary.csv\n"
+                            f"CSV_PATH = r\"{csv_abs_path or '<请从首轮CSV路径列表复制>'}\"\n"
                             "OUTPUT_DIR = Path('generated')\n"
-                            "OUTPUT_DIR.mkdir(parents=True, exist_ok=True)\n"
-                            "summary = df.describe(include='all').transpose().reset_index()\n"
-                            "summary.to_csv(OUTPUT_DIR / 'enrolled_summary.csv', index=False, encoding='utf-8')\n\n"
-                            "# 生成enrolled_school_dist.png\n"
-                            "plt.figure(figsize=(10, 6))\n"
-                            "sns.countplot(data=df, x='school')\n"
-                            "plt.title('School Distribution')\n"
-                            "plt.xticks(rotation=45)\n"
-                            "plt.tight_layout()\n"
-                            "plt.savefig(OUTPUT_DIR / 'enrolled_school_dist.png', dpi=120)\n"
-                            "plt.close()\n"
-                            "</Code>\n\n"
-                            "请立即按照上述格式输出第2轮分析!"
+                            "OUTPUT_DIR.mkdir(parents=True, exist_ok=True)\n\n"
+                            "df = pd.read_csv(CSV_PATH)\n"
+                            "# ... 统计分析并生成 CSV 和 PNG ...\n"
+                            "</Code>"
                         )
                     else:
                         # 对 csv_analysis 轮次做规则驱动的定向纠错：明确输入 CSV 与输出文件名
@@ -3275,6 +3297,7 @@ def bot_stream(messages, workspace, session_id="default"):
                                 f"第 {target_round} 轮属于 CSV 分析阶段，必须使用 `pd.read_csv` 读取配置中指定的 CSV 绝对路径，"
                                 "禁止跳过 CSV 读取或改用 SQLite。"
                             )
+                            messages.append({"role": "assistant", "content": cur_res})
                             messages.append({"role": "user", "content": csv_prompt})
                             refund_iteration()
                             continue
@@ -3286,6 +3309,7 @@ def bot_stream(messages, workspace, session_id="default"):
                                 f"第 {target_round} 轮仅允许 CSV 分析，禁止使用 `sqlite3.connect` 或 SQL 查询。"
                                 "请删除 SQLite 相关代码，仅通过 pandas 读取 CSV 并输出统计结果。"
                             )
+                            messages.append({"role": "assistant", "content": cur_res})
                             messages.append({"role": "user", "content": sqlite_prompt})
                             refund_iteration()
                             continue
@@ -3780,7 +3804,7 @@ def bot_stream(messages, workspace, session_id="default"):
                         continue
 
                     target_round = execute_rounds + 1
-                    if target_round == 7:
+                    if mode_for_next == "sqlite_join":
                         uses_sqlite_join = any(
                             key in normalized_code
                             for key in [
@@ -3792,52 +3816,77 @@ def bot_stream(messages, workspace, session_id="default"):
                         )
                         if not uses_sqlite_join:
                             logger.warning(
-                                "[bot_stream] Code rejected: round 7 must use SQLite join"
+                                "[bot_stream] Code rejected: round %s (sqlite_join) must use SQLite",
+                                target_round,
+                            )
+                            # 从 round_io_rules 动态获取表名
+                            input_cfg = (rule_for_next or {}).get("input") or {}
+                            tables = input_cfg.get("tables") or []
+                            tables_hint = (
+                                "/".join(tables)
+                                if tables
+                                else "（见 round_io_rules 配置）"
                             )
                             join_prompt = (
-                                "第 7 轮必须使用 SQLite 多表 JOIN：\n"
+                                f"第 {target_round} 轮为 sqlite_join 模式，必须使用 SQLite 多表 JOIN：\n"
                                 "1. 在 <Code> 开头通过 `sqlite3.connect(DB_PATH, timeout=30)` 建立连接\n"
-                                "2. 基于 `enrolled/no_payment_due/longest_absense_from_school/enlist/disabled` 等真实表执行 JOIN 查询\n"
-                                "3. 将 JOIN 结果写入 `generated/multi_table_join_result.csv`\n"
+                                f"2. 基于 `{tables_hint}` 等真实表执行 JOIN 查询\n"
+                                "3. 将 JOIN 结果写入 `generated/` 目录下的 CSV 文件\n"
                                 "4. 再对合并结果做统计与绘图\n\n"
-                                "请使用 SQLite 查询而不是直接使用 CSV/multi_table_join_result.csv。"
+                                "请使用 SQLite 查询而不是直接读取已有 CSV。"
                             )
                             messages.append({"role": "user", "content": join_prompt})
                             refund_iteration()
                             continue
 
-                        join_csv_path = generated_dir / "multi_table_join_result.csv"
-                        references_join_csv = (
-                            "multi_table_join_result" in normalized_code
-                            and "pd.read_csv" in normalized_code
+                        # 检查是否在读取尚未生成的 join CSV
+                        expected_join_csvs = (
+                            round_expected_filenames_by_type(rule_for_next, "csv")
+                            if rule_for_next
+                            else []
                         )
-                        writes_join_csv = (
-                            "multi_table_join_result" in normalized_code
-                            and ".to_csv" in normalized_code
-                        )
-                        if (
-                            references_join_csv
-                            and not join_csv_path.exists()
-                            and not writes_join_csv
-                        ):
-                            logger.warning(
-                                "[bot_stream] Code rejected: round 7 reading missing multi_table_join_result.csv"
+                        rejected_join_csv = False
+                        for join_csv_name in expected_join_csvs:
+                            join_csv_path = generated_dir / join_csv_name
+                            references_join_csv = (
+                                join_csv_name.replace(".csv", "") in normalized_code
+                                and "pd.read_csv" in normalized_code
                             )
-                            warn_join_file = (
-                                "检测到你尝试 `pd.read_csv('.../multi_table_join_result.csv')`，"
-                                "但该文件尚未生成。第 7 轮必须先通过 SQLite JOIN 生成该 CSV，"
-                                "再基于结果做分析。请在同一段代码中完成 SQL JOIN 并写入 `generated/multi_table_join_result.csv`。"
+                            writes_join_csv = (
+                                join_csv_name.replace(".csv", "") in normalized_code
+                                and ".to_csv" in normalized_code
                             )
-                            messages.append({"role": "user", "content": warn_join_file})
+                            if (
+                                references_join_csv
+                                and not join_csv_path.exists()
+                                and not writes_join_csv
+                            ):
+                                logger.warning(
+                                    "[bot_stream] Code rejected: round %s reading missing %s",
+                                    target_round,
+                                    join_csv_name,
+                                )
+                                warn_join_file = (
+                                    f"检测到你尝试读取 `{join_csv_name}`，"
+                                    f"但该文件尚未生成。第 {target_round} 轮必须先通过 SQLite JOIN 生成该 CSV，"
+                                    "再基于结果做分析。请在同一段代码中完成 SQL JOIN 并写入该文件。"
+                                )
+                                messages.append(
+                                    {"role": "user", "content": warn_join_file}
+                                )
+                                rejected_join_csv = True
+                                break
+                        if rejected_join_csv:
                             refund_iteration()
                             continue
 
                         if "pragma busy_timeout" not in normalized_code:
                             logger.warning(
-                                "[bot_stream] Code rejected: round 7 missing PRAGMA busy_timeout"
+                                "[bot_stream] Code rejected: round %s (sqlite_join) missing PRAGMA busy_timeout",
+                                target_round,
                             )
                             busy_prompt = (
-                                "第 7 轮必须在连接 SQLite 后执行 "
+                                f"第 {target_round} 轮（sqlite_join）必须在连接 SQLite 后执行 "
                                 '`conn.execute("PRAGMA busy_timeout = 30000;")` 以保证查询稳定。'
                                 "请补充该语句后重新提交。"
                             )
@@ -4132,56 +4181,102 @@ def bot_stream(messages, workspace, session_id="default"):
                     mode_for_current = round_mode(rule_for_current)
                     if rule_for_current:
                         produced_names = {Path(p).name for p in artifact_paths}
-                        # 重要：不能只用本轮 artifact_paths 判断“是否生成”。
-                        # 例如 README.md 可能在 generated/ 内被覆盖写入，但未被 modified_paths 捕获。
-                        # 因此这里也认可 generated/ 目录里已存在的期望文件。
-                        missing_files = [
-                            name
-                            for name in expected_files
-                            if name not in produced_names
-                            and not (generated_dir_path / name).exists()
-                        ]
-                        if missing_files:
-                            logger.warning(
-                                "[bot_stream] Round %s outputs missing required filenames: %s",
-                                current_round,
-                                ", ".join(missing_files),
+                        # 也认可 generated/ 目录里已存在的文件
+                        all_generated_names = (
+                            {
+                                f.name
+                                for f in generated_dir_path.iterdir()
+                                if f.is_file()
+                            }
+                            if generated_dir_path.exists()
+                            else set()
+                        )
+                        all_available = produced_names | all_generated_names
+
+                        # 根据模式选择校验策略：
+                        # - csv_analysis / sqlite_join：按类型+数量校验（文件名仅作建议）
+                        # - 其他模式（filesystem_summary / markdown_report）：按精确文件名校验
+                        missing_output_issue = False
+                        missing_description = ""
+                        if mode_for_current in _TYPE_ONLY_MODES:
+                            # 按类型+数量校验：统计实际产出的各类型文件数量
+                            type_ext_map = {"csv": ".csv", "png": ".png"}
+                            expected_counts = round_expected_type_counts(
+                                rule_for_current
                             )
-                            produced_hint = "，本轮检测到的文件：" + (
-                                ", ".join(sorted(produced_names))
-                                if produced_names
-                                else "无"
-                            )
-                            required_list = ", ".join(expected_files)
-                            missing_list = ", ".join(missing_files)
-                            unexpected_md_files = sorted(
-                                {
-                                    name
-                                    for name in produced_names
-                                    if name.lower().endswith(".md")
-                                    and name.lower() not in expected_files_lower
-                                }
-                            )
-                            extra_md_hint = ""
-                            if unexpected_md_files:
-                                extra_md_hint = (
-                                    "另外检测到未在本轮 outputs 中声明的 Markdown 文件："
-                                    + ", ".join(unexpected_md_files)
-                                    + "。请删除这些 .md 文件，严格按要求生成规则指定的文件。"
+                            missing_types = []
+                            for etype, ecount in expected_counts.items():
+                                ext = type_ext_map.get(etype)
+                                if not ext:
+                                    continue
+                                actual_count = sum(
+                                    1 for n in all_available if n.lower().endswith(ext)
                                 )
-                            prompt = (
-                                f"根据 round_io_rules 配置，第 {current_round} 轮必须生成："
-                                f"{required_list}。当前缺少：{missing_list}"
-                                + produced_hint
-                                + "。请在本轮同时生成所有要求文件（包含已生成的），不要遗漏任何必需产物。"
-                                + extra_md_hint
+                                if actual_count < ecount:
+                                    missing_types.append(
+                                        f"{etype}（期望 {ecount} 个，实际 {actual_count} 个）"
+                                    )
+                            if missing_types:
+                                missing_output_issue = True
+                                missing_description = (
+                                    f"第 {current_round} 轮按类型校验不通过："
+                                    + "；".join(missing_types)
+                                )
+                        else:
+                            # 精确文件名校验（filesystem_summary / markdown_report 等）
+                            missing_files = [
+                                name
+                                for name in expected_files
+                                if name not in produced_names
+                                and not (generated_dir_path / name).exists()
+                            ]
+                            if missing_files:
+                                missing_output_issue = True
+                                missing_description = (
+                                    f"第 {current_round} 轮必须生成：{', '.join(expected_files)}。"
+                                    f"当前缺少：{', '.join(missing_files)}"
+                                )
+
+                        if missing_output_issue:
+                            missing_file_retries += 1
+                            logger.warning(
+                                "[bot_stream] Round %s output check failed (retry %s/%s): %s",
+                                current_round,
+                                missing_file_retries,
+                                MAX_MISSING_FILE_RETRIES,
+                                missing_description,
                             )
-                            append_user_prompt(prompt)
-                            # 缺少必需产物时，允许模型在下一次重试中保持相同的总体结构，但必须补齐缺失文件。
-                            # 若不重置签名，模型可能因为“duplicate code”被拒绝，从而漂移输出无关代码导致死循环。
-                            last_code_signature = None
-                            refund_iteration()
-                            continue
+                            if missing_file_retries > MAX_MISSING_FILE_RETRIES:
+                                logger.warning(
+                                    "[bot_stream] Output retries exhausted (%s/%s), skipping to next round",
+                                    missing_file_retries,
+                                    MAX_MISSING_FILE_RETRIES,
+                                )
+                                missing_file_retries = 0
+                            else:
+                                produced_hint = "，本轮检测到的文件：" + (
+                                    ", ".join(sorted(produced_names))
+                                    if produced_names
+                                    else "无"
+                                )
+                                prompt = (
+                                    missing_description
+                                    + produced_hint
+                                    + "。请补齐缺少的产物。"
+                                )
+                                # 先把模型响应和执行结果加入消息历史，避免连续 user 消息导致模型回声
+                                messages.append(
+                                    {"role": "assistant", "content": cur_res}
+                                )
+                                messages.append(
+                                    {"role": "execute", "content": f"{exe_output}"}
+                                )
+                                append_user_prompt(prompt)
+                                last_code_signature = None
+                                refund_iteration()
+                                continue
+                        else:
+                            missing_file_retries = 0
 
                     # markdown_report 生成成功后，更新 README.md 包含新生成的报告文件
                     if mode_for_current == "markdown_report":
@@ -4219,6 +4314,11 @@ def bot_stream(messages, workspace, session_id="default"):
                                 f"检测到多余的 Markdown 文件：{', '.join(extra_md_files)}。"
                                 "请删除这些文件并仅生成 README.md。"
                             )
+                            # 先把模型响应和执行结果加入消息历史，避免连续 user 消息
+                            messages.append({"role": "assistant", "content": cur_res})
+                            messages.append(
+                                {"role": "execute", "content": f"{exe_output}"}
+                            )
                             messages.append({"role": "user", "content": extra_prompt})
                             refund_iteration()
                             continue
@@ -4238,6 +4338,9 @@ def bot_stream(messages, workspace, session_id="default"):
                             "本轮仅允许输出 round_io_rules 中指定的 CSV/PNG/README/MD 产物。"
                             "请删除这些多余文件后重新提交。"
                         )
+                        # 先把模型响应和执行结果加入消息历史，避免连续 user 消息
+                        messages.append({"role": "assistant", "content": cur_res})
+                        messages.append({"role": "execute", "content": f"{exe_output}"})
                         messages.append({"role": "user", "content": prompt})
                         refund_iteration()
                         continue
@@ -4280,45 +4383,18 @@ def bot_stream(messages, workspace, session_id="default"):
                                     + "\n- ".join(readme_issues)
                                     + "\n请按照模板遍历 generated/ 目录并重新写入 README.md。"
                                 )
+                                # 先把模型响应和执行结果加入消息历史，避免连续 user 消息
+                                messages.append(
+                                    {"role": "assistant", "content": cur_res}
+                                )
+                                messages.append(
+                                    {"role": "execute", "content": f"{exe_output}"}
+                                )
                                 messages.append(
                                     {"role": "user", "content": detail_prompt}
                                 )
                                 # 允许下一轮重复 Analyze（因为是同一任务的纠错重试）
                                 allow_duplicate_analyze_retry()
-                                refund_iteration()
-                                continue
-
-                    if current_round == 6:
-                        disabled_csv_path = next(
-                            (
-                                Path(p)
-                                for p in artifact_paths
-                                if Path(p).name == "disabled_count.csv"
-                            ),
-                            None,
-                        )
-                        if disabled_csv_path:
-                            try:
-                                csv_text = disabled_csv_path.read_text(encoding="utf-8")
-                            except Exception as err:
-                                logger.warning(
-                                    "[bot_stream] Failed to read disabled_count.csv: %s",
-                                    err,
-                                )
-                                csv_text = ""
-                            lower_csv_text = csv_text.lower()
-                            if (
-                                "disabled" not in lower_csv_text
-                                or "total" not in lower_csv_text
-                            ):
-                                logger.warning(
-                                    "[bot_stream] disabled_count.csv missing Disabled/Total rows"
-                                )
-                                prompt = (
-                                    "disabled_count.csv 必须同时记录残疾学生数量与总人数，并在 CSV 中出现"
-                                    " 'Disabled' 与 'Total'（或相应中文描述）。请重新计算总人数并更新 CSV/PNG。"
-                                )
-                                messages.append({"role": "user", "content": prompt})
                                 refund_iteration()
                                 continue
 
@@ -4434,8 +4510,8 @@ def bot_stream(messages, workspace, session_id="default"):
                                     "2. 若只需条目数，请用两列统计表，例如：\n"
                                     "```python\n"
                                     "count_summary = pd.DataFrame({\n"
-                                    "    'metric': ['disabled_count'],\n"
-                                    "    'value': [len(df_disabled)],\n"
+                                    "    'metric': ['item_count'],\n"
+                                    "    'value': [len(df)],\n"
                                     "})\n"
                                     "```\n\n"
                                     "请根据上述建议修正后重新提交。"
