@@ -110,7 +110,7 @@
       "round": 10,
       "mode": "final_answer",
       "input": {"type": "summary", "source_rounds": [2, 3, 4, 5, 6, 7, 8, 9]},
-      "guidance": "仅输出一个 <Answer>，总结第 2-9 轮的分析过程、生成的关键文件以及整体结论/下一步建议，禁止再出现 <Analyze>/<Code>。引用文件必须来自 generated/ 目录。",
+      "guidance": "仅输出一个 <Answer>，基于下方自动注入的【第 9 轮综合分析报告摘要】内容，总结第 2-9 轮的分析过程、生成的关键文件以及整体结论/下一步建议。结论和数据必须与报告摘要一致，禁止自行编造数据或结论。禁止再出现 <Analyze>/<Code>。引用文件必须来自 generated/ 目录。",
       "outputs": [
         {"type": "answer", "filename": "<Answer>"}
       ],

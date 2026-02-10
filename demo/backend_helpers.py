@@ -97,10 +97,12 @@ def build_markdown_report_template(md_filename):
 
 ```python
 import re
+import time
 from pathlib import Path
 from datetime import datetime
 import pandas as pd
 
+_round9_start = time.time()
 generated_dir = Path("generated")
 if not generated_dir.exists():
     raise FileNotFoundError(f"目录不存在：{{generated_dir.resolve()}}")
@@ -281,23 +283,34 @@ for png in sorted(png_files):
     if csv_key in csv_summaries:
         md.append(f"**数据概要**：{{csv_summaries[csv_key]}}")
         md.append("")
-    # 通用解读：读取同名 CSV 的基础统计
-    interp = f"该图展示了 {{png.stem}} 的可视化分析结果。"
+    # 通用解读：读取同名 CSV 做数值统计 + 分类分布
+    interp_parts = []
     csv_path = generated_dir / f"{{png.stem}}.csv"
     if csv_path.exists():
         try:
             _tmp = pd.read_csv(csv_path)
-            _nc = [c for c in _tmp.columns if pd.api.types.is_numeric_dtype(_tmp[c])]
-            if _nc:
-                c0 = _nc[0]
-                interp += f" {{c0}} 均值={{float(_tmp[c0].mean()):.2f}}，中位数={{float(_tmp[c0].median()):.2f}}。"
-            _cc = [c for c in _tmp.columns if _tmp[c].dtype == "object"]
-            if _cc:
-                top_val = _tmp[_cc[0]].value_counts().index[0]
-                interp += f" {{_cc[0]}} 最常见取值为 {{top_val}}。"
+            _nr, _ncol = _tmp.shape
+            interp_parts.append(f"数据源 `{{csv_path.name}}`（{{_nr}} 行 {{_ncol}} 列）。")
+            for _c in _tmp.columns:
+                if pd.api.types.is_numeric_dtype(_tmp[_c]):
+                    _mean = float(_tmp[_c].mean())
+                    _med = float(_tmp[_c].median())
+                    _min = float(_tmp[_c].min())
+                    _max = float(_tmp[_c].max())
+                    interp_parts.append(
+                        f"数值列 `{{_c}}`：均值={{_mean:.2f}}，中位数={{_med:.2f}}，"
+                        f"范围 [{{_min:.2f}}, {{_max:.2f}}]。"
+                    )
+            for _c in _tmp.columns:
+                if _tmp[_c].dtype == "object":
+                    _vc = _tmp[_c].value_counts()
+                    _top3 = "; ".join(f"{{k}}({{int(v)}}人, {{v/_nr*100:.0f}}%)" for k, v in _vc.head(3).items())
+                    interp_parts.append(f"分类列 `{{_c}}` 共 {{len(_vc)}} 个取值，Top3：{{_top3}}。")
         except Exception:
             pass
-    md.append(f"**解读**：{{interp}}")
+    if not interp_parts:
+        interp_parts.append(f"该图展示了 {{png.stem}} 的可视化分析结果。")
+    md.append(f"**解读**：{{' '.join(interp_parts)}}")
     md.append("")
 
 # 6. 结论与建议
@@ -305,24 +318,42 @@ md.append("## 6. 结论与建议")
 md.append("")
 md.append("### 6.1 核心发现")
 findings = []
+# 数据质量
 high_missing = [(c, miss_pct) for c, _, missing, miss_pct in col_stats if missing > 0]
 if high_missing:
     for c, pct in high_missing:
-        findings.append(f"字段 **{{c}}** 存在缺失（缺失率 {{pct}}）")
+        findings.append(f"字段 **{{c}}** 存在缺失（缺失率 {{pct}}），建议进行缺失值处理")
 else:
     findings.append("所有字段均无缺失值，数据质量良好")
+# 分类字段分布
 for c in cat_cols:
     vc = df[c].value_counts()
     if len(vc) == 1:
-        findings.append(f"字段 **{{c}}** 仅有 1 个取值（{{vc.index[0]}}），无区分度")
+        findings.append(f"字段 **{{c}}** 仅有 1 个取值（{{vc.index[0]}}），无区分度，可考虑剔除")
     elif vc.iloc[0] / total > 0.7:
-        findings.append(f"字段 **{{c}}** 中 **{{vc.index[0]}}** 占比超 70%，分布偏斜")
+        findings.append(f"字段 **{{c}}** 中 **{{vc.index[0]}}** 占比 {{vc.iloc[0]/total*100:.1f}}%，分布严重偏斜")
+# 数值字段统计
 for c in num_cols:
+    _mean = float(df[c].mean())
+    _med = float(df[c].median())
     q1, q3 = float(df[c].quantile(0.25)), float(df[c].quantile(0.75))
     iqr = q3 - q1
     outliers = int(((df[c] < q1 - 1.5 * iqr) | (df[c] > q3 + 1.5 * iqr)).sum())
-    if outliers > 0:
-        findings.append(f"字段 **{{c}}** 存在 {{outliers}} 个离群值（IQR 方法）")
+    findings.append(f"数值字段 **{{c}}**：均值={{_mean:.2f}}，中位数={{_med:.2f}}，Q25={{q1:.2f}}，Q75={{q3:.2f}}"
+                    + (f"，存在 {{outliers}} 个离群值" if outliers > 0 else ""))
+# 交叉分析发现
+if not cross_school_pay.empty:
+    if "neg" in cross_school_pay.columns and "All" in cross_school_pay.columns:
+        rates = (cross_school_pay["neg"] / cross_school_pay["All"]).drop("All", errors="ignore")
+        top_s = rates.idxmax()
+        findings.append(f"交叉分析显示欠费率最高的学校为 **{{top_s}}**（{{rates.max()*100:.1f}}%），需重点关注")
+    else:
+        findings.append(f"学校×缴费状态交叉表中所有学生缴费状态一致，当前样本无差异")
+if not organ_absense.empty:
+    _top_org = organ_absense.index[0]
+    _top_mean = organ_absense.iloc[0]["mean"]
+    _top_cnt = int(organ_absense.iloc[0]["count"])
+    findings.append(f"参军机构中 **{{_top_org}}** 平均缺勤 {{_top_mean:.1f}} 个月（{{_top_cnt}} 人），缺勤风险最高")
 if not findings:
     findings.append("数据整体分布均匀，未发现显著异常")
 for i, f_item in enumerate(findings, 1):
@@ -332,12 +363,38 @@ md.append("")
 md.append("### 6.2 建议措施")
 suggestions = []
 if high_missing:
-    suggestions.append("**数据清洗**：对缺失字段进行填充或删除处理")
-suggestions.append("**持续监控**：建议定期更新数据并重新运行分析流程")
-suggestions.append("**深入分析**：对分布异常或离群值较多的字段做进一步业务调研")
+    suggestions.append("**数据清洗**：对缺失字段进行填充（均值/众数）或删除处理")
+if not cross_school_pay.empty and "neg" in cross_school_pay.columns:
+    suggestions.append("**差异化管理**：针对欠费率较高的学校深入分析原因，制定针对性催收或帮扶策略")
+if not organ_absense.empty:
+    suggestions.append("**缺勤预警**：对平均缺勤月数较高的机构人员建立预警机制，关注其学业连续性")
+for c in num_cols:
+    q1, q3 = float(df[c].quantile(0.25)), float(df[c].quantile(0.75))
+    iqr = q3 - q1
+    outliers = int(((df[c] < q1 - 1.5 * iqr) | (df[c] > q3 + 1.5 * iqr)).sum())
+    if outliers > 0:
+        suggestions.append(f"**离群值排查**：字段 **{{c}}** 存在 {{outliers}} 个离群值，建议核实数据准确性")
+suggestions.append("**持续监控**：建议定期更新数据并重新运行分析流程，跟踪关键指标变化趋势")
+suggestions.append("**深入分析**：对分布异常的字段结合业务背景做进一步调研")
 for s in suggestions:
     md.append(f"- {{s}}")
 md.append("")
+
+# 追加 Round 9 自身耗时到耗时统计表
+_round9_elapsed = time.time() - _round9_start
+_round9_line = f"| Round 9 | - | - | {{_round9_elapsed:.1f}} |"
+for _idx, _line in enumerate(md):
+    if _line.startswith("- **最慢轮次**"):
+        md.insert(_idx, _round9_line)
+        # 更新总耗时
+        for _j in range(len(md)):
+            if md[_j].startswith("**总耗时**"):
+                _new_total = total_elapsed + _round9_elapsed
+                _new_min = _new_total / 60
+                _new_rounds = len(round_times) + 1
+                md[_j] = f"**总耗时**：{{_new_total:.1f}} 秒（{{_new_min:.1f}} 分钟），共 {{_new_rounds}} 轮"
+                break
+        break
 
 report_path = generated_dir / "{md_filename}"
 report_path.write_text("\\n".join(md), encoding="utf-8")

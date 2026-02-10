@@ -5044,6 +5044,80 @@ def bot_stream(messages, workspace, session_id="default"):
                                         f'DB_PATH = r"{expected_sqlite_path}"\n'
                                         "```\n"
                                     )
+                            # final_answer 模式：注入第 9 轮报告摘要
+                            if (
+                                rule_for_continue
+                                and round_mode(rule_for_continue) == "final_answer"
+                            ):
+                                try:
+                                    _report_dir = Path(workspace_path) / "generated"
+                                    _report_candidates = list(
+                                        _report_dir.glob(
+                                            "comprehensive_analysis_report*.md"
+                                        )
+                                    )
+                                    if not _report_candidates:
+                                        _report_candidates = [
+                                            p
+                                            for p in _report_dir.glob("*.md")
+                                            if p.name.lower() != "readme.md"
+                                        ]
+                                    if _report_candidates:
+                                        _report_path = _report_candidates[0]
+                                        _report_text = _report_path.read_text(
+                                            encoding="utf-8"
+                                        )
+                                        # 提取核心章节（交叉分析、统计发现、核心发现、建议措施）
+                                        _sections_to_extract = [
+                                            "## 3. 交叉分析",
+                                            "## 4. 统计发现",
+                                            "## 5. 可视化图表解读",
+                                            "## 6. 结论与建议",
+                                        ]
+                                        _extracted = []
+                                        for _sec in _sections_to_extract:
+                                            _start = _report_text.find(_sec)
+                                            if _start == -1:
+                                                continue
+                                            _end = len(_report_text)
+                                            for _other_sec in [
+                                                "## 1.",
+                                                "## 2.",
+                                                "## 3.",
+                                                "## 4.",
+                                                "## 5.",
+                                                "## 6.",
+                                                "## 7.",
+                                            ]:
+                                                _pos = _report_text.find(
+                                                    _other_sec, _start + len(_sec)
+                                                )
+                                                if _pos != -1 and _pos < _end:
+                                                    _end = _pos
+                                            _extracted.append(
+                                                _report_text[_start:_end].strip()
+                                            )
+                                        if _extracted:
+                                            _summary = "\n\n".join(_extracted)
+                                            # 限制长度避免超出 token 限制
+                                            if len(_summary) > 4000:
+                                                _summary = (
+                                                    _summary[:4000] + "\n\n…（已截断）"
+                                                )
+                                            continue_prompt += (
+                                                "\n\n**【第 9 轮综合分析报告摘要（自动注入）】请基于以下报告内容生成 Answer，确保结论与报告一致：**\n\n"
+                                                + _summary
+                                            )
+                                            logger.info(
+                                                "[bot_stream] Injected report summary for final_answer round (%d chars)",
+                                                len(_summary),
+                                            )
+                                except Exception as _e:
+                                    logger.warning(
+                                        "[bot_stream] Failed to inject report summary: %s",
+                                        _e,
+                                    )
+
                             logger.info(
                                 f"[bot_stream] Injecting continue prompt for round {next_round}: {continue_prompt[:120]}"
                             )
