@@ -2215,22 +2215,7 @@ def bot_stream(messages, workspace, session_id="default"):
         _extra_body = {
             "add_generation_prompt": False,
             "stop_token_ids": [151676, 151645],
-            "max_new_tokens": 4096,
         }
-        if not ENABLE_THINKING:
-            # 方案 1：chat_template_kwargs（vLLM ≥0.8 支持）
-            _extra_body["chat_template_kwargs"] = {"enable_thinking": False}
-            # 方案 2：在最后一条 user 消息末尾注入 /no_think（Qwen3 chat template 原生支持，兼容所有 vLLM 版本）
-            for _m in reversed(safe_messages):
-                if _m.get("role") == "user":
-                    _content = str(_m.get("content") or "")
-                    if "/no_think" not in _content:
-                        _m["content"] = _content + "\n/no_think"
-                    break
-        logger.info(
-            "[bot_stream] extra_body=%s",
-            {k: v for k, v in _extra_body.items() if k != "stop_token_ids"},
-        )
         response = client.chat.completions.create(
             model=MODEL_PATH,
             messages=safe_messages,
