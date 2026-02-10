@@ -444,6 +444,74 @@ def validate_readme_document(readme_text, generated_dir):
     return (not issues), issues
 
 
+def fix_report_unresolved_placeholders(generated_dir):
+    """检测并修复 generated/ 下 .md 报告中未展开的模板变量（如 {png.name}）。
+
+    模型有时不严格遵循 f-string 模板，导致 Markdown 中出现字面量
+    ``{png.name}``、``{png.stem}`` 等，前端渲染时会 404。
+    本函数扫描所有非 README 的 .md 文件，将这些占位符替换为实际的
+    PNG 文件列表。
+
+    Returns:
+        修复过的文件名列表（空列表表示无需修复）。
+    """
+    from pathlib import Path
+
+    generated_path = Path(generated_dir)
+    if not generated_path.exists():
+        return []
+
+    png_files = sorted(generated_path.glob("*.png"))
+    if not png_files:
+        return []
+
+    fixed_files = []
+    placeholder_patterns = [
+        "{png.name}",
+        "{png.stem}",
+        "{png}",
+        "{p.name}",
+        "{p.stem}",
+    ]
+
+    for md_file in generated_path.glob("*.md"):
+        if md_file.name.lower() == "readme.md":
+            continue
+        try:
+            content = md_file.read_text(encoding="utf-8")
+        except Exception:
+            continue
+
+        has_placeholder = any(ph in content for ph in placeholder_patterns)
+        if not has_placeholder:
+            continue
+
+        # 替换策略：找到包含占位符的图片引用行，替换为实际 PNG 列表
+        lines = content.splitlines()
+        new_lines = []
+        placeholder_section_replaced = False
+
+        for line in lines:
+            if any(ph in line for ph in placeholder_patterns):
+                if not placeholder_section_replaced:
+                    # 第一次遇到占位符行，替换为所有 PNG 的图片引用
+                    for png in png_files:
+                        new_lines.append(f"### {png.stem}")
+                        new_lines.append(f"![{png.stem}]({png.name})")
+                        new_lines.append("")
+                    placeholder_section_replaced = True
+                # 跳过原始占位符行
+            else:
+                new_lines.append(line)
+
+        new_content = "\n".join(new_lines)
+        if new_content != content:
+            md_file.write_text(new_content, encoding="utf-8")
+            fixed_files.append(md_file.name)
+
+    return fixed_files
+
+
 def update_readme_after_report(generated_dir):
     """在 Markdown 报告生成后更新 README.md，包含报告文件"""
     from pathlib import Path

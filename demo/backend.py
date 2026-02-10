@@ -4304,11 +4304,20 @@ def bot_stream(messages, workspace, session_id="default"):
                         else:
                             missing_file_retries = 0
 
-                    # markdown_report 生成成功后，更新 README.md 包含新生成的报告文件
+                    # markdown_report 生成成功后，修复未展开的模板变量并更新 README
                     if mode_for_current == "markdown_report":
                         try:
-                            from backend_helpers import update_readme_after_report
+                            from backend_helpers import (
+                                update_readme_after_report,
+                                fix_report_unresolved_placeholders,
+                            )
 
+                            fixed = fix_report_unresolved_placeholders(generated_dir)
+                            if fixed:
+                                logger.info(
+                                    "[bot_stream] Fixed unresolved placeholders in report: %s",
+                                    ", ".join(fixed),
+                                )
                             update_readme_after_report(generated_dir)
                             logger.info(
                                 "[bot_stream] README.md updated after markdown report generation"
