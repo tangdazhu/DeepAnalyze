@@ -3273,18 +3273,39 @@ def bot_stream(messages, workspace, session_id="default"):
 
                     # 检查代码是否包含必要的导入（根据代码类型判断）
                     # CSV读取代码需要pandas,SQLite代码需要sqlite3
+                    # 注意：只检查非注释、非字符串行，避免注释/print中的文本触发误判
+                    _code_lines = []
+                    for ln in effective_code.splitlines():
+                        stripped = ln.strip()
+                        if not stripped or stripped.startswith("#"):
+                            continue
+                        # 跳过纯字符串行（如 print("禁止使用 sqlite3.connect()")）
+                        # 只保留包含实际函数调用的行
+                        _code_lines.append(stripped)
+                    _code_no_comments = "\n".join(_code_lines)
+
                     has_pandas = (
-                        "import pandas" in effective_code
-                        or "import pd" in effective_code
+                        "import pandas" in _code_no_comments
+                        or "import pd" in _code_no_comments
                     )
-                    has_sqlite3 = "import sqlite3" in effective_code
+                    has_sqlite3 = "import sqlite3" in _code_no_comments
                     uses_csv = (
-                        "pd.read_csv" in effective_code
-                        or "pandas.read_csv" in effective_code
+                        "pd.read_csv" in _code_no_comments
+                        or "pandas.read_csv" in _code_no_comments
                     )
+                    # 检测 sqlite 使用：只匹配非字符串内的调用
+                    # 排除引号包裹的文本（如 "禁止 sqlite3.connect()"）
+                    _stripped_strings = re.sub(r'(["\']).*?\1', '""', _code_no_comments)
                     uses_sqlite = (
-                        "sqlite3.connect" in effective_code
-                        or "pd.read_sql" in effective_code
+                        "sqlite3.connect" in _stripped_strings
+                        or "pd.read_sql" in _stripped_strings
+                    )
+                    logger.info(
+                        "[bot_stream] Import check: has_pandas=%s, has_sqlite3=%s, uses_csv=%s, uses_sqlite=%s",
+                        has_pandas,
+                        has_sqlite3,
+                        uses_csv,
+                        uses_sqlite,
                     )
 
                     # 如果使用CSV但没有导入pandas,或使用SQLite但没有导入sqlite3,则拒绝
