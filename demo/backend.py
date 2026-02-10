@@ -42,7 +42,7 @@ from backend_helpers import (
     README_SECTION_HEADERS,
     README_BULLET_PATTERN,
     build_filesystem_summary_template,
-    build_html_report_template,
+    build_markdown_report_template,
     validate_readme_document,
 )
 
@@ -228,9 +228,9 @@ def describe_round(rule: dict[str, Any]) -> str:
     if mode == "filesystem_summary":
         path = input_cfg.get("path", "generated/ 目录")
         return f"遍历 {path} → 生成 {output_names}"
-    if mode == "html_report":
+    if mode == "markdown_report":
         path = input_cfg.get("path", "generated/ 目录")
-        return f"遍历 {path} → 生成 HTML 报告（{output_names}）"
+        return f"遍历 {path} → 生成 Markdown 报告（{output_names}）"
     return f"{mode or '该'} 轮任务 → 生成 {output_names}"
 
 
@@ -240,12 +240,10 @@ def guidance_for_rule(rule: dict[str, Any]) -> str:
     if custom:
         if mode == "filesystem_summary":
             return custom + "\n\n" + build_filesystem_summary_template()
-        if mode == "html_report":
-            html_name = "multi_table_analysis.html"
-            html_files = round_expected_filenames_by_type(rule, "html")
-            if html_files:
-                html_name = html_files[0]
-            return custom + "\n\n" + build_html_report_template(html_name)
+        if mode == "markdown_report":
+            md_files = round_expected_filenames_by_type(rule, "markdown")
+            md_name = md_files[0] if md_files else "report.md"
+            return custom + "\n\n" + build_markdown_report_template(md_name)
         return custom
     if mode == "csv_analysis":
         return (
@@ -262,14 +260,12 @@ def guidance_for_rule(rule: dict[str, Any]) -> str:
             "直接输出 <Analyze> 和 <Code>，仅遍历 generated/ 目录并生成 Markdown 索引，不得执行 SQL。\n\n"
             + build_filesystem_summary_template()
         )
-    if mode == "html_report":
-        html_name = "multi_table_analysis.html"
-        html_files = round_expected_filenames_by_type(rule, "html")
-        if html_files:
-            html_name = html_files[0]
+    if mode == "markdown_report":
+        md_files = round_expected_filenames_by_type(rule, "markdown")
+        md_name = md_files[0] if md_files else "report.md"
         return (
-            "直接输出 <Analyze> 和 <Code>，遍历 generated/ 目录并使用 pathlib 写入 HTML 报告，禁止直接粘贴 HTML。\n\n"
-            + build_html_report_template(html_name)
+            "直接输出 <Analyze> 和 <Code>，遍历 generated/ 目录并使用 pathlib 写入 Markdown 报告，禁止直接粘贴 Markdown。\n\n"
+            + build_markdown_report_template(md_name)
         )
     return "直接输出 <Analyze> 和 <Code> 完成本轮任务。"
 
@@ -1602,55 +1598,6 @@ def _comment_out_suspicious_nl_lines(code: str) -> str:
     return "\n".join(out_lines).strip() + "\n"
 
 
-HTML_SECTION_IDS = ("summary", "visual", "data", "readme")
-
-
-def html_report_has_required_structure(text: str) -> tuple[bool, list[str]]:
-    """检测 multi_table_analysis.html 是否包含基础结构与必备 section。"""
-    if not text:
-        return False, ["HTML 内容为空"]
-    lower = text.lower()
-    missing: list[str] = []
-    if "<html" not in lower:
-        missing.append("缺少 <html> 标签")
-    if "<head" not in lower:
-        missing.append("缺少 <head> 段")
-    if "<body" not in lower:
-        missing.append("缺少 <body> 段")
-    for section_id in HTML_SECTION_IDS:
-        if f'id="{section_id}"' not in lower and f"id='{section_id}'" not in lower:
-            missing.append(f"缺少 id='{section_id}' 段落")
-    if "readme" not in lower:
-        missing.append("正文未提及 README")
-    return (not missing), missing
-
-
-HTML_PLACEHOLDER_PATTERN = re.compile(r"\{\s*(rows|cols)\s*\}", re.IGNORECASE)
-
-
-def html_report_has_placeholders(text: str) -> bool:
-    if not text:
-        return False
-    return bool(HTML_PLACEHOLDER_PATTERN.search(text))
-
-
-def html_report_has_unfriendly_numpy_repr(text: str) -> bool:
-    if not text:
-        return False
-    lower = text.lower()
-    return "np.int" in lower or "np.float" in lower or "numpy." in lower
-
-
-def html_report_references_any_columns(text: str, columns: list[str]) -> bool:
-    if not text or not columns:
-        return False
-    # 仅做简单子串匹配：列名来源于真实 df.columns，不 hardcode 业务字段。
-    for col in columns:
-        if col and str(col) in text:
-            return True
-    return False
-
-
 def normalize_filename(name: str) -> str:
     """统一文件名对比：去除 (n)/_modified 等后缀并转小写。"""
     if not name:
@@ -2655,8 +2602,7 @@ def bot_stream(messages, workspace, session_id="default"):
                 "csv_analysis",
                 "sqlite_join",
                 "filesystem_summary",
-                "html_report",
-                "html_report_phase2",
+                "markdown_report",
             )
 
             logger.info(
@@ -2712,8 +2658,9 @@ def bot_stream(messages, workspace, session_id="default"):
                         "- 第 2-6 轮：单表分析（处理多个数据文件）\n"
                         "- 第 7 轮：多表关联分析\n"
                         "- 第 8 轮：生成 README.md 索引文件\n"
-                        "- 第 9 轮：生成 multi_table_analysis.html 汇总报告\n"
-                        "- 第 10 轮：输出最终 <Answer>\n\n"
+                        "- 第 9 轮：生成 multi_table_analysis.md 汇总报告\n"
+                        "- 第 10 轮：生成 comprehensive_analysis_report.md 综合报告\n"
+                        "- 第 11 轮：输出最终 <Answer>\n\n"
                         f"**请立即继续第 {execute_rounds + 1} 轮分析，禁止输出 <Answer>。**"
                     )
                     messages.append({"role": "user", "content": reject_msg})
@@ -3012,9 +2959,24 @@ def bot_stream(messages, workspace, session_id="default"):
                 if code_matches:
                     # 若模型输出了多个 <Code>...</Code>（常见于把提示词/对话回显混入 <Code>），
                     # 这里选择“最像可执行 Python 脚本”的那一段，避免抽到长度极短的残片导致退票死循环。
+                    # 对 markdown_report 轮次：优先选择"包含规则期望输出文件名"的代码块，
+                    # 否则容易抽到模板/解释块导致 `expected filename not referenced` 无限退票。
                     best_code_content = ""
                     best_effective_code = ""
                     best_score = -1
+
+                    target_round = execute_rounds + 1
+                    rule_for_next = get_round_rule(target_round)
+                    mode_for_next = round_mode(rule_for_next)
+                    expected_output_name_for_score = ""
+                    if mode_for_next == "markdown_report":
+                        expected_md_files = (
+                            round_expected_filenames_by_type(rule_for_next, "markdown")
+                            if rule_for_next
+                            else []
+                        )
+                        if expected_md_files and expected_md_files[0]:
+                            expected_output_name_for_score = expected_md_files[0]
 
                     for m in code_matches:
                         candidate = (m.group(1) or "").strip()
@@ -3037,8 +2999,13 @@ def bot_stream(messages, workspace, session_id="default"):
                                 eff or "",
                             )
                         )
-                        # 评分：优先“像 Python”，其次看长度。
+                        # 评分：优先“像 Python”，其次看长度；若是报告轮次，额外优先包含期望输出文件名的脚本。
                         score = (100000 if looks_like_python else 0) + len(eff or "")
+                        if (
+                            expected_output_name_for_score
+                            and expected_output_name_for_score.lower() in lower_eff
+                        ):
+                            score += 200000
                         if score > best_score:
                             best_score = score
                             best_code_content = candidate
@@ -3110,38 +3077,38 @@ def bot_stream(messages, workspace, session_id="default"):
                         f"[bot_stream] Effective code extracted, length={len(effective_code) if effective_code else 0}"
                     )
 
-                    # html_report 轮次常见失败形态：<Code> 提取到了极短残片（例如 length=5），
-                    # 随后落入“文件名未引用”校验导致无限退票。
+                    # 报告轮次常见失败形态：<Code> 提取到了极短残片（例如 length=5），
+                    # 随后落入"文件名未引用"校验导致无限退票。
                     # 这里提前拦截，强制模型输出一段完整可运行脚本。
                     target_round = execute_rounds + 1
                     rule_for_next = get_round_rule(target_round)
                     mode_for_next = round_mode(rule_for_next)
                     if (
-                        mode_for_next in ("html_report", "html_report_phase2")
+                        mode_for_next == "markdown_report"
                         and effective_code
                         and len(effective_code.strip()) < 120
                     ):
-                        expected_html_files = (
-                            round_expected_filenames_by_type(rule_for_next, "html")
+                        expected_md_files = (
+                            round_expected_filenames_by_type(rule_for_next, "markdown")
                             if rule_for_next
                             else []
                         )
-                        expected_html_name = (
-                            expected_html_files[0]
-                            if expected_html_files and expected_html_files[0]
-                            else "(规则要求的HTML文件)"
+                        expected_md_name = (
+                            expected_md_files[0]
+                            if expected_md_files and expected_md_files[0]
+                            else "(规则要求的Markdown文件)"
                         )
                         logger.warning(
-                            "[bot_stream] Code rejected: extracted HTML report code too short (len=%s)",
+                            "[bot_stream] Code rejected: extracted markdown report code too short (len=%s)",
                             len(effective_code.strip()),
                         )
                         short_prompt = (
-                            "检测到你在 <Code> 中输出的脚本内容过短/不完整，系统无法执行并生成 HTML。"
+                            "检测到你在 <Code> 中输出的脚本内容过短/不完整，系统无法执行并生成 Markdown 报告。"
                             "请只输出一段完整可运行的 Python 脚本（从 import 开始），不得混入任何对话文本。\n\n"
                             "要求：\n"
                             "1) `generated_dir = Path('generated')`，若不存在则创建；\n"
-                            "2) 必须定义 `html_lines = [...]` 并逐行 append/extend；\n"
-                            f"3) 必须写盘到 `generated/{expected_html_name}`（使用 `Path('generated') / '{expected_html_name}'` + `write_text`）。"
+                            "2) 必须定义 `markdown_lines = [...]` 并逐行 append；\n"
+                            f"3) 必须写盘到 `generated/{expected_md_name}`（使用 `Path('generated') / '{expected_md_name}'` + `write_text`）。"
                         )
                         messages.append({"role": "user", "content": short_prompt})
                         refund_iteration()
@@ -3209,161 +3176,35 @@ def bot_stream(messages, workspace, session_id="default"):
                     else:
                         empty_code_rounds = 0  # 重置计数
 
-                    if mode_for_next in ("html_report", "html_report_phase2"):
-                        expected_html_files = (
-                            round_expected_filenames_by_type(rule_for_next, "html")
+                    if mode_for_next == "markdown_report":
+                        expected_md_files = (
+                            round_expected_filenames_by_type(rule_for_next, "markdown")
                             if rule_for_next
                             else []
                         )
-
-                        # html_report_phase2 明确禁止访问原始 data/ 或执行 sqlite3.connect；
-                        # 只允许读取 generated/ 下的产物并生成综合 HTML。
-                        # 由于前端提示词可能被误改（例如要求在第10轮建库），这里提前拦截避免无限重试。
-                        if mode_for_next == "html_report_phase2":
-                            lower_code = effective_code.lower()
-                            uses_sqlite = (
-                                "import sqlite3" in lower_code
-                                or "sqlite3.connect" in lower_code
-                            )
-                            touches_data_dir = (
-                                "/data/" in lower_code
-                                or "\\data\\" in lower_code
-                                or "path('data'" in lower_code
-                                or 'path("data"' in lower_code
-                                or "pathlib.path('data'" in lower_code
-                                or 'pathlib.path("data"' in lower_code
-                            )
-                            if uses_sqlite or touches_data_dir:
-                                expected_html_name = (
-                                    expected_html_files[0]
-                                    if expected_html_files and expected_html_files[0]
-                                    else "comprehensive_analysis_report.html"
-                                )
-                                logger.warning(
-                                    "[bot_stream] Code rejected: html_report_phase2 must not use sqlite/data (sqlite=%s, data=%s)",
-                                    uses_sqlite,
-                                    touches_data_dir,
-                                )
-                                prompt = (
-                                    f"本轮模式为 html_report_phase2：必须生成 `generated/{expected_html_name}`。\n"
-                                    "本轮只允许读取 `generated/` 下的 CSV/PNG/README/HTML 等产物进行二次综合分析，\n"
-                                    "**禁止** 执行 `sqlite3.connect` 或读取 `data/` 目录。\n\n"
-                                    "请删除 sqlite3/data 相关代码，改为：\n"
-                                    "1) `from pathlib import Path`，`generated_dir = Path('generated')`\n"
-                                    "2) 只读取 `generated/` 下真实存在的文件（例如 multi_table_join_result.csv、*.png、README.md、multi_table_analysis.html）\n"
-                                    f"3) 最终写出 `generated/{expected_html_name}`。"
-                                )
-                                messages.append({"role": "user", "content": prompt})
-                                refund_iteration()
-                                continue
-
-                        if expected_html_files and expected_html_files[0]:
-                            html_name = expected_html_files[0]
-                            has_auto_write = "# AUTO_WRITE_HTML" in effective_code
-                            html_lines_match = re.search(
-                                r"\bhtml_lines\b", effective_code, re.IGNORECASE
-                            )
-                            html_content_match = re.search(
-                                r"\bhtml_content\b", effective_code, re.IGNORECASE
-                            )
-                            has_html_lines = bool(html_lines_match)
-                            has_html_content = bool(html_content_match)
-
-                            # 如果模型构造了 html_lines/html_content 但忘记写文件，这里自动补上写文件逻辑，避免无限重试。
-                            if (
-                                has_html_lines or has_html_content
-                            ) and not has_auto_write:
-                                html_lines_var = (
-                                    html_lines_match.group(0)
-                                    if html_lines_match
-                                    else "html_lines"
-                                )
-                                html_content_var = (
-                                    html_content_match.group(0)
-                                    if html_content_match
-                                    else "html_content"
-                                )
-                                write_expr = (
-                                    f'"\\n".join({html_lines_var})'
-                                    if has_html_lines
-                                    else html_content_var
-                                )
-                                auto_write_block = (
-                                    "\n\n# AUTO_WRITE_HTML\n"
-                                    "try:\n"
-                                    '    output_dir = Path("generated")\n'
-                                    "    output_dir.mkdir(parents=True, exist_ok=True)\n"
-                                    f'    html_path = output_dir / "{html_name}"\n'
-                                    f'    html_path.write_text({write_expr}, encoding="utf-8")\n'
-                                    f'    print("✅ {html_name} 已写入")\n'
-                                    "except Exception as err:\n"
-                                    '    print(f"⚠️ 自动写入 HTML 失败: {err}")\n'
-                                )
-                                effective_code = f"{effective_code}{auto_write_block}"
-
-                        # 拦截 HTML/前端模板被误当作 Python 代码的情况（优先于文件名校验）
-                        # 只拒绝以 HTML 标签开头的代码（直接输出 HTML），允许包含 HTML 字符串的 Python 代码
-                        first_line = (
-                            effective_code.strip().split("\n")[0]
-                            if effective_code.strip()
-                            else ""
+                        expected_md_name = (
+                            expected_md_files[0]
+                            if expected_md_files and expected_md_files[0]
+                            else None
                         )
-                        if re.match(
-                            r"^\s*<!doctype html|^\s*<(html|head|body|section|div)\b",
-                            first_line,
-                            re.IGNORECASE,
+
+                        # 规则驱动校验：代码中必须显式引用预期的 Markdown 文件名
+                        if (
+                            expected_md_name
+                            and expected_md_name.lower() not in effective_code.lower()
                         ):
-                            expected_html_name = (
-                                expected_html_files[0]
-                                if expected_html_files and expected_html_files[0]
-                                else "(规则要求的HTML文件)"
-                            )
                             logger.warning(
-                                "[bot_stream] Code rejected: detected HTML content instead of Python script"
+                                "[bot_stream] Code rejected: expected Markdown filename not referenced: %s",
+                                expected_md_name,
                             )
-                            html_prompt = (
-                                "检测到你在 <Code> 中直接输出了 HTML 页面内容，但系统需要的是**可执行的 Python 脚本**来生成文件。\n\n"
-                                "请立即改为：\n"
-                                "1) `from pathlib import Path`，`generated_dir = Path('generated')`；\n"
-                                "2) 用 `html_lines = [...]` 逐行构造 HTML（不要用 `str.format` 套 CSS）；\n"
-                                f"3) 最后必须写盘：`(Path('generated') / '{expected_html_name}').write_text('\\n'.join(html_lines), encoding='utf-8')`。\n\n"
-                                "注意：不要在 <Code> 里再粘贴整段 HTML；必须输出 Python 代码。"
+                            prompt = (
+                                f"第 {target_round} 轮必须写出 `{expected_md_name}`。"
+                                f"请在代码中使用 `Path('generated') / '{expected_md_name}'` 写入该 Markdown 文件（必须与规则一致），"
+                                "请用 `markdown_lines = [...]` 逐行构造 Markdown，然后 write_text 写盘。"
                             )
-                            messages.append({"role": "user", "content": html_prompt})
+                            messages.append({"role": "user", "content": prompt})
                             refund_iteration()
                             continue
-
-                        # 规则驱动校验：需要生成 HTML 时，代码中必须显式写入预期文件名。
-                        # 防止模型把第10轮写成 multi_table_analysis.html 或写成 execute_round_10.txt。
-                        if expected_html_files and expected_html_files[0]:
-                            expected_html_name = expected_html_files[0]
-                            if expected_html_name.lower() not in effective_code.lower():
-                                # 若已检测到 html_lines/html_content，说明脚本具备生成 HTML 正文的能力，
-                                # 后端会自动注入写文件块，因此不再因为“未显式引用文件名”而退票。
-                                if re.search(
-                                    r"\bhtml_lines\b", effective_code, re.IGNORECASE
-                                ) or re.search(
-                                    r"\bhtml_content\b", effective_code, re.IGNORECASE
-                                ):
-                                    logger.info(
-                                        "[bot_stream] HTML filename not referenced but html content detected; auto-write injected for %s",
-                                        expected_html_name,
-                                    )
-                                else:
-                                    logger.warning(
-                                        "[bot_stream] Code rejected: expected HTML filename not referenced: %s",
-                                        expected_html_name,
-                                    )
-                                    prompt = (
-                                        f"第 {target_round} 轮必须写出 `{expected_html_name}`。"
-                                        "请在代码中使用 `Path('generated') / '<文件名>'` 写入该 HTML 文件（必须与规则一致），"
-                                        "不要写成其它 HTML 文件名，也不要在 <Code> 中直接粘贴 HTML 文本。"
-                                        "请用 `html_lines = [...]` 逐行构造 HTML，然后 write_text 写盘。"
-                                        "（提示：`execute_round_*.txt` 会由系统自动写入为执行日志，你的代码无需也不应手动创建该日志文件。）"
-                                    )
-                                    messages.append({"role": "user", "content": prompt})
-                                    refund_iteration()
-                                    continue
 
                     # 计算代码签名，用于重复检测
                     code_signature = "\n".join(
@@ -3427,131 +3268,6 @@ def bot_stream(messages, workspace, session_id="default"):
                         )
                         refund_iteration()
                         continue
-
-                    if mode_for_next == "html_report_phase2":
-                        uses_sqlite_master = "sqlite_master" in normalized_code
-                        if uses_sqlite or uses_sqlite_master:
-                            logger.warning(
-                                "[bot_stream] Code rejected: html_report_phase2 should not execute SQLite"
-                            )
-                            sqlite_block_prompt = (
-                                f"第 {target_round} 轮仅允许读取 generated/ 目录下的 CSV/PNG/README/HTML，"
-                                "禁止使用 sqlite3.connect()/pd.read_sql() 访问 SQLite，也禁止查询 sqlite_master。"
-                                "请改为用 pd.read_csv() 读取 generated/ 下真实存在的 CSV（至少包含 multi_table_join_result.csv），"
-                                "再生成综合 HTML 报告写入 generated/。"
-                            )
-                            append_user_prompt(sqlite_block_prompt)
-                            refund_iteration()
-                            continue
-
-                        if not uses_csv:
-                            logger.warning(
-                                "[bot_stream] Code rejected: html_report_phase2 must read generated CSV"
-                            )
-                            csv_prompt = (
-                                f"第 {target_round} 轮必须用 pd.read_csv() 读取 generated/ 下真实存在的 CSV（至少 multi_table_join_result.csv），"
-                                "禁止跳过读盘或只读取 execute_round_*.txt。请先读取 CSV 获取真实列名与统计，再生成综合 HTML 报告。"
-                            )
-                            append_user_prompt(csv_prompt)
-                            refund_iteration()
-                            continue
-
-                        # 规则驱动约束：综合报告必须以 join 结果为主（提示词要求至少读取 multi_table_join_result.csv）。
-                        # 避免模型错误地把所有 CSV 混合在一起导致列名臆测、类型冲突或报错并陷入循环。
-                        if "multi_table_join_result.csv" not in effective_code.lower():
-                            logger.warning(
-                                "[bot_stream] Code rejected: html_report_phase2 must read multi_table_join_result.csv"
-                            )
-                            join_prompt = (
-                                f"第 {target_round} 轮生成综合报告时，必须显式读取 `generated/multi_table_join_result.csv`（join 结果是综合分析的主数据）。"
-                                "请先 `df = pd.read_csv(generated_dir / 'multi_table_join_result.csv')`，"
-                                "基于 df 的真实列名/类型/行数/缺失情况与分布生成洞察，再写入 `generated/comprehensive_analysis_report.html`。"
-                                "\n\n注意：不建议把 generated/ 下所有 CSV 直接 concat 混合分析（summary/join/count 等文件结构不同，会导致错误与不一致）。"
-                            )
-                            append_user_prompt(join_prompt)
-                            refund_iteration()
-                            continue
-
-                        if "html_lines" not in normalized_code:
-                            logger.warning(
-                                "[bot_stream] Code rejected: html_report_phase2 must build html_lines"
-                            )
-                            html_lines_prompt = (
-                                f"第 {target_round} 轮生成 HTML 时必须用 Python 构造 html_lines 列表逐行拼接，"
-                                "并写入 generated/ 下规则要求的 HTML 文件；禁止直接 print 整段 HTML。"
-                            )
-                            append_user_prompt(html_lines_prompt)
-                            refund_iteration()
-                            continue
-
-                        if '"""' in effective_code and "<html" in normalized_code:
-                            logger.warning(
-                                "[bot_stream] Code rejected: html_report_phase2 should not embed full HTML via triple quotes"
-                            )
-                            template_prompt = (
-                                f'第 {target_round} 轮禁止使用三引号把整段 HTML 模板写死（例如 html = """<html>..."""）。'
-                                "请改为使用 html_lines 列表逐行构造 HTML，再 write_text 写入 generated/。"
-                            )
-                            append_user_prompt(template_prompt)
-                            refund_iteration()
-                            continue
-
-                        # 通用可追溯性约束：必须显式输出真实列名/类型证据，避免“编造字段/默认 0”导致结论不可复现。
-                        # 不 hardcode 任何业务列名，仅要求代码必须读取 CSV 后引用 df.columns/dtypes。
-                        mentions_columns = (
-                            "df.columns" in normalized_code
-                            or "columns.tolist" in normalized_code
-                            or "dtypes" in normalized_code
-                        )
-                        if not mentions_columns:
-                            logger.warning(
-                                "[bot_stream] Code rejected: html_report_phase2 missing schema evidence (df.columns/dtypes)"
-                            )
-                            evidence_prompt = (
-                                f"第 {target_round} 轮综合 HTML 报告必须基于 generated/ 下真实 CSV 计算，并在代码中显式输出/写入可追溯证据："
-                                "至少包含 `df.columns.tolist()`（真实列名）、`df.dtypes`（真实类型）和 `len(df)`（行数）。"
-                                "\n\n注意：\n"
-                                "- 只能对 `df.select_dtypes(include='number')` 的列做均值/标准差等数值统计，或使用 `mean(numeric_only=True)`；"
-                                "- 若没有可用数值列或某项无法解析，请在报告中输出 `N/A`，不要用 0 作为默认值；"
-                                "- 任何洞察/指标都必须能对应到真实列名（来自 df.columns），禁止臆造字段名。"
-                            )
-                            append_user_prompt(evidence_prompt)
-                            refund_iteration()
-                            continue
-
-                        # 通用“分析型结论”约束：必须做出可追溯的统计计算，避免只做文件罗列导致报告缺少结论。
-                        # 不 hardcode 任何具体列名，只要求用真实列名生成至少若干条洞察（TopK/占比/缺失率/唯一值数/数值摘要等）。
-                        has_any_stats = any(
-                            kw in normalized_code
-                            for kw in [
-                                "value_counts",
-                                "nunique",
-                                "isnull",
-                                "notnull",
-                                "describe(",
-                                "select_dtypes",
-                                "mean(",
-                                "median(",
-                                "quantile",
-                            ]
-                        )
-                        if not has_any_stats:
-                            logger.warning(
-                                "[bot_stream] Code rejected: html_report_phase2 missing any analysis stats (value_counts/nunique/isnull/describe)"
-                            )
-                            analysis_prompt = (
-                                f"第 {target_round} 轮综合报告必须是**分析型**的：请基于你读取的真实 CSV 计算并写入至少 3 条可追溯洞察（不要泛泛而谈）。"
-                                "\n\n要求（通用，不依赖特定列名）：\n"
-                                "- 每条洞察必须明确引用真实列名（来自 `df.columns`），并附带你计算出的数值证据；\n"
-                                "- 若存在类别列：用 `value_counts().head(k)` 给出 TopK 类别及占比；\n"
-                                "- 若存在数值列：对 `df.select_dtypes(include='number')` 做 mean/median/quantile 等摘要；\n"
-                                "- 必须给出缺失情况：例如每列缺失数/缺失率（`df.isnull().sum()`）；\n"
-                                "- 建议在 HTML 中新增 `<section id='insights'>`，用 `<ul><li>...` 写出这些洞察，并确保所有数字来自代码计算结果；\n"
-                                "- 若没有任何数值列，也必须输出基于类别列/缺失率/唯一值数量（`nunique()`）的结论。"
-                            )
-                            append_user_prompt(analysis_prompt)
-                            refund_iteration()
-                            continue
 
                     elif mode_for_next == "csv_analysis":
                         if not uses_csv:
@@ -3738,7 +3454,7 @@ def bot_stream(messages, workspace, session_id="default"):
                         and has_sqlite_master_query
                         and not has_real_table_query
                         and "pragma" not in normalized_code
-                        and mode_for_next != "html_report_phase2"
+                        and mode_for_next != "markdown_report"
                     ):
                         logger.warning(
                             f"[bot_stream] Code rejected: only sqlite_master query after schema confirmed"
@@ -4217,41 +3933,36 @@ def bot_stream(messages, workspace, session_id="default"):
                     mode_for_current = (
                         round_mode(rule_for_current) if rule_for_current else ""
                     )
-                    if mode_for_current in ("html_report", "html_report_phase2"):
+                    if mode_for_current == "markdown_report":
                         exec_code = effective_code or code_str
-                        # HTML 轮次最常见失败：把对话标签/Markdown 围栏粘进字符串，导致引号未闭合或语法错误。
-                        # 这里直接拦截并给出定向纠错提示，避免进入执行器后反复 SyntaxError。
+                        # 报告轮次常见失败：把对话标签/Markdown 围栏粘进代码，导致 SyntaxError。
                         forbidden_markers = (
                             "<Code>",
                             "</Code>",
                             "<Analyze>",
                             "</Analyze>",
-                            "```",
                         )
                         hit = [m for m in forbidden_markers if m in exec_code]
                         if hit:
-                            expected_html_files = (
+                            expected_md_files = (
                                 round_expected_filenames_by_type(
-                                    rule_for_current, "html"
+                                    rule_for_current, "markdown"
                                 )
                                 if rule_for_current
                                 else []
                             )
-                            expected_html_hint = (
-                                f"`generated/{expected_html_files[0]}`"
-                                if expected_html_files
-                                else "规则要求的 HTML 文件"
+                            expected_md_hint = (
+                                f"`generated/{expected_md_files[0]}`"
+                                if expected_md_files
+                                else "规则要求的 Markdown 文件"
                             )
                             prompt = (
-                                "⚠️ 检测到你的 <Code> 脚本中混入了对话标签/Markdown 围栏："
+                                "⚠️ 检测到你的 <Code> 脚本中混入了对话标签："
                                 + ", ".join(hit)
-                                + "。这类文本如果被写进 Python 字符串，极易造成引号未闭合（SyntaxError），从而无法生成 HTML 文件。\n\n"
-                                "请修正：\n"
-                                "1) 在 Python 字符串/HTML 正文中只使用小写 `<code>...</code>`（不要使用大写 `<Code>`）\n"
-                                "2) 不要把 ``` 或 <Analyze>/<Code> 这类对话结构写入 html_lines/html_content\n"
-                                "3) 使用 `html_lines = []` 逐行 `append('...')` 构造 HTML，并确保每一行字符串都在同一行内闭合引号\n"
-                                "4) 最后必须写出 "
-                                + expected_html_hint
+                                + "。这会导致 SyntaxError。\n\n"
+                                "请修正：只在 <Code> 中输出纯 Python 脚本，不要包含 <Analyze>/<Code> 标签。\n"
+                                "最后必须写出 "
+                                + expected_md_hint
                                 + "（文件名必须与 round_io_rules 一致）"
                             )
                             append_user_prompt(prompt)
@@ -4459,7 +4170,7 @@ def bot_stream(messages, workspace, session_id="default"):
                                 extra_md_hint = (
                                     "另外检测到未在本轮 outputs 中声明的 Markdown 文件："
                                     + ", ".join(unexpected_md_files)
-                                    + "。请删除这些 .md 文件，严格按要求生成 HTML 文件。"
+                                    + "。请删除这些 .md 文件，严格按要求生成规则指定的文件。"
                                 )
                             prompt = (
                                 f"根据 round_io_rules 配置，第 {current_round} 轮必须生成："
@@ -4475,40 +4186,19 @@ def bot_stream(messages, workspace, session_id="default"):
                             refund_iteration()
                             continue
 
-                    if rule_for_current and mode_for_current in (
-                        "html_report",
-                        "html_report_phase2",
-                    ):
-                        unexpected_md_files = sorted(
-                            {
-                                Path(p).name
-                                for p in artifact_paths
-                                if Path(p).suffix.lower() == ".md"
-                                and Path(p).name.lower() not in expected_files_lower
-                            }
-                        )
-                        if unexpected_md_files:
+                    # markdown_report 生成成功后，更新 README.md 包含新生成的报告文件
+                    if mode_for_current == "markdown_report":
+                        try:
+                            from backend_helpers import update_readme_after_report
+
+                            update_readme_after_report(generated_dir)
+                            logger.info(
+                                "[bot_stream] README.md updated after markdown report generation"
+                            )
+                        except Exception as err:
                             logger.warning(
-                                "[bot_stream] Round %s produced unexpected markdown files: %s",
-                                current_round,
-                                ", ".join(unexpected_md_files),
+                                "[bot_stream] Failed to update README: %s", err
                             )
-                            expected_list = (
-                                ", ".join(expected_files)
-                                if expected_files
-                                else "（无）"
-                            )
-                            prompt = (
-                                f"第 {current_round} 轮属于 HTML 报告阶段（{mode_for_current}），"
-                                f"根据 round_io_rules 本轮只允许生成：{expected_list}。"
-                                f"检测到多余的 Markdown 文件：{', '.join(unexpected_md_files)}。"
-                                "请删除这些 .md 文件，并改为生成规则要求的 HTML 文件："
-                                "必须使用 Python 构造 html_lines 列表并写入 generated/ 目录，"
-                                "禁止生成 Markdown 报告替代 HTML。"
-                            )
-                            append_user_prompt(prompt)
-                            refund_iteration()
-                            continue
                     if (
                         mode_for_current == "filesystem_summary"
                         and "readme.md" in expected_files_lower
@@ -4548,7 +4238,7 @@ def bot_stream(messages, workspace, session_id="default"):
                         )
                         prompt = (
                             "请不要在任何轮次额外生成 `*_field_types.txt` 这类辅助文件。"
-                            "本轮仅允许输出 round_io_rules 中指定的 CSV/PNG/README/HTML 产物。"
+                            "本轮仅允许输出 round_io_rules 中指定的 CSV/PNG/README/MD 产物。"
                             "请删除这些多余文件后重新提交。"
                         )
                         messages.append({"role": "user", "content": prompt})
@@ -4600,186 +4290,6 @@ def bot_stream(messages, workspace, session_id="default"):
                                 allow_duplicate_analyze_retry()
                                 refund_iteration()
                                 continue
-
-                    if (
-                        mode_for_current == "html_report"
-                        and rule_for_current
-                        and round_expected_filenames_by_type(rule_for_current, "html")
-                    ):
-                        html_filename = round_expected_filenames_by_type(
-                            rule_for_current, "html"
-                        )[0]
-                        html_path = next(
-                            (
-                                Path(p)
-                                for p in artifact_paths
-                                if Path(p).name == html_filename
-                            ),
-                            None,
-                        )
-                        if html_path:
-                            try:
-                                html_text = html_path.read_text(encoding="utf-8")
-                            except Exception as err:
-                                logger.warning(
-                                    "[bot_stream] Failed to read %s: %s",
-                                    html_filename,
-                                    err,
-                                )
-                                html_text = ""
-                            valid_html, html_missing = (
-                                html_report_has_required_structure(html_text)
-                            )
-                            if not valid_html:
-                                logger.warning(
-                                    "[bot_stream] HTML report validation failed: %s",
-                                    ", ".join(html_missing),
-                                )
-                                prompt = (
-                                    f"{html_filename} 结构不符合要求："
-                                    + "；".join(html_missing)
-                                    + "。请按照提示模板补全 <html>/<head>/<body> 以及 summary/visual/data/readme 四个 section，"
-                                    "并重新生成 HTML。"
-                                )
-                                messages.append({"role": "user", "content": prompt})
-                                refund_iteration()
-                                continue
-
-                            if html_report_has_placeholders(html_text):
-                                logger.warning(
-                                    "[bot_stream] HTML report contains unresolved placeholders"
-                                )
-                                prompt = (
-                                    "检测到 HTML 报告中存在未替换的占位符（例如 {rows}/{cols}）。"
-                                    "这通常意味着你把模板直接粘贴进了 html_lines，未用真实数据渲染。"
-                                    "请确保所有行数/列数/统计值均由 Python 计算后写入 HTML，再重新生成。"
-                                )
-                                messages.append({"role": "user", "content": prompt})
-                                refund_iteration()
-                                continue
-
-                            if html_report_has_unfriendly_numpy_repr(html_text):
-                                logger.warning(
-                                    "[bot_stream] HTML report contains numpy scalar repr"
-                                )
-                                prompt = (
-                                    "检测到 HTML 报告中出现 np.int64/np.float64/numpy.* 等不可读对象表示。"
-                                    "请在写入 HTML 前把 pandas/numpy 标量转换为普通 Python 数值（例如 val.item() 或 int(val)/float(val)），"
-                                    "避免报告不可读且两次运行表现不一致。"
-                                )
-                                messages.append({"role": "user", "content": prompt})
-                                refund_iteration()
-                                continue
-
-                            join_path = generated_dir / "multi_table_join_result.csv"
-                            if join_path.exists():
-                                try:
-                                    join_df = pd.read_csv(join_path)
-                                    join_cols = [
-                                        str(c) for c in join_df.columns.tolist()
-                                    ]
-                                except Exception as err:
-                                    logger.warning(
-                                        "[bot_stream] Failed to read join CSV for HTML validation: %s",
-                                        err,
-                                    )
-                                    join_cols = []
-
-                                if (
-                                    join_cols
-                                    and not html_report_references_any_columns(
-                                        html_text, join_cols
-                                    )
-                                ):
-                                    logger.warning(
-                                        "[bot_stream] HTML report missing any join column references"
-                                    )
-                                    prompt = (
-                                        "multi_table_analysis.html 需要包含基于 join 主数据（multi_table_join_result.csv）的分析型结论，"
-                                        "但当前 HTML 未引用任何真实列名。请先读取 join CSV，"
-                                        "并在‘数据洞察/关键发现’中引用 df.columns 的真实列名与计算出的数值证据（至少 3 条）。"
-                                    )
-                                    messages.append({"role": "user", "content": prompt})
-                                    refund_iteration()
-                                    continue
-
-                            li_count = html_text.lower().count("<li")
-                            if li_count < 3:
-                                logger.warning(
-                                    "[bot_stream] HTML report contains too few <li> items: %s",
-                                    li_count,
-                                )
-                                prompt = (
-                                    "multi_table_analysis.html 缺少足够的分析型要点。"
-                                    "请在报告中加入至少 3 条可追溯的要点（<li>）：每条需引用真实列名并给出计算出的数值依据。"
-                                )
-                                messages.append({"role": "user", "content": prompt})
-                                refund_iteration()
-                                continue
-
-                            generated_files = [
-                                f
-                                for f in generated_dir.iterdir()
-                                if f.is_file()
-                                and f.name.lower()
-                                not in {html_filename.lower(), "readme.md"}
-                            ]
-                            csv_missing_refs = [
-                                f.name
-                                for f in generated_files
-                                if f.suffix.lower() == ".csv"
-                                and f.name not in html_text
-                            ]
-                            png_missing_refs = [
-                                f.name
-                                for f in generated_files
-                                if f.suffix.lower() == ".png"
-                                and f.name not in html_text
-                            ]
-                            readme_missing = (
-                                generated_dir / "README.md"
-                            ).exists() and "README.md" not in html_text
-                            if csv_missing_refs or png_missing_refs or readme_missing:
-                                logger.warning(
-                                    "[bot_stream] HTML report missing file references: csv=%s, png=%s, readme_missing=%s",
-                                    csv_missing_refs,
-                                    png_missing_refs,
-                                    readme_missing,
-                                )
-                                missing_msgs = []
-                                if csv_missing_refs:
-                                    missing_msgs.append(
-                                        "CSV：" + ", ".join(sorted(csv_missing_refs))
-                                    )
-                                if png_missing_refs:
-                                    missing_msgs.append(
-                                        "PNG：" + ", ".join(sorted(png_missing_refs))
-                                    )
-                                if readme_missing:
-                                    missing_msgs.append("README.md")
-                                prompt = (
-                                    "multi_table_analysis.html 需完整列出 generated/ 下的 CSV/PNG/README，"
-                                    "但当前缺少："
-                                    + "；".join(missing_msgs)
-                                    + "。请遍历目录并将文件名写入 HTML 列表后重新生成。"
-                                )
-                                messages.append({"role": "user", "content": prompt})
-                                refund_iteration()
-                                continue
-
-                        # Round 9 HTML 生成成功后，更新 README.md 包含 HTML 文件
-                        if mode_for_current == "html_report":
-                            try:
-                                from backend_helpers import update_readme_after_html
-
-                                update_readme_after_html(generated_dir)
-                                logger.info(
-                                    "[bot_stream] README.md updated with HTML file"
-                                )
-                            except Exception as err:
-                                logger.warning(
-                                    "[bot_stream] Failed to update README: %s", err
-                                )
 
                     if current_round == 6:
                         disabled_csv_path = next(
@@ -4933,66 +4443,15 @@ def bot_stream(messages, workspace, session_id="default"):
                                     "```\n\n"
                                     "请根据上述建议修正后重新提交。"
                                 )
-                            elif (
-                                "keyerror" in exe_output.lower()
-                                and "html_report"
-                                in (
-                                    round_mode(rule_for_current)
-                                    if rule_for_current
-                                    else ""
-                                )
-                                and (
-                                    "font-family" in exe_output.lower()
-                                    or "html_content.format" in exe_output.lower()
-                                    or (
-                                        ".format(" in exe_output
-                                        and "<style" in exe_output.lower()
-                                    )
-                                )
-                            ):
-                                expected_html_files = (
-                                    round_expected_filenames_by_type(
-                                        rule_for_current, "html"
-                                    )
-                                    if rule_for_current
-                                    else []
-                                )
-                                expected_html_hint = (
-                                    f"`generated/{expected_html_files[0]}`"
-                                    if expected_html_files
-                                    else "规则要求的 HTML 文件"
-                                )
-
-                                error_warning = (
-                                    f"⚠️ HTML 报告生成失败：{error_hint}\n\n"
-                                    "错误原因：你在 `html_content`（包含 CSS 的 HTML 字符串）上调用了 `str.format(...)`。"
-                                    "CSS 中大量 `{ ... }` 花括号会被 `format` 当成占位符，"
-                                    "从而触发 `KeyError: ' font-family'` 等错误，导致 HTML 文件无法写出。\n\n"
-                                    "修正要求（任选其一，但必须可运行且不写死整段 HTML 输出）：\n"
-                                    "1) 推荐：改用 `html_lines = [...]` 逐行构造 HTML（含 `<style>`），最后 `write_text('\\n'.join(html_lines))`；\n"
-                                    "2) 若必须用 `.format(...)`：请把 CSS 的花括号全部转义为 `{{` 和 `}}`，仅保留你要替换的少量占位符。\n\n"
-                                    "注意：\n"
-                                    f"- 输出文件必须写到 {expected_html_hint}（文件名必须与 round_io_rules 一致）；\n"
-                                    '- 禁止 `html_template = """..."""` 直接写死整段模板；必须通过 `html_lines` 或安全的占位符替换生成内容。'
-                                )
-                                messages.append(
-                                    {"role": "user", "content": error_warning}
-                                )
-                                last_analyze_signature = None
-                                last_code_signature = None
-                                allow_duplicate_analyze_retry()
-                                refund_iteration()
-                                refund_round_progress(is_schema_code)
-                                continue
                             elif "keyerror" in exe_output.lower() and (
-                                "html_report"
-                                in (
+                                "markdown_report"
+                                == (
                                     round_mode(rule_for_current)
                                     if rule_for_current
                                     else ""
                                 )
                             ):
-                                # HTML 报告阶段常见失败：模型臆造列名导致 df[...] / dropna(subset=...) KeyError。
+                                # 报告阶段常见失败：模型臆造列名导致 df[...] / dropna(subset=...) KeyError。
                                 # 这里读取真实 join 结果列名并注入提示，强制模型仅基于 df.columns 做统计。
                                 missing_cols: list[str] = []
                                 try:
@@ -5053,17 +4512,17 @@ def bot_stream(messages, workspace, session_id="default"):
                                     else "（未能读取到列名）"
                                 )
                                 size_text = str(df_len) if df_len is not None else "N/A"
-                                expected_html_files = (
+                                expected_md_files = (
                                     round_expected_filenames_by_type(
-                                        rule_for_current, "html"
+                                        rule_for_current, "markdown"
                                     )
                                     if rule_for_current
                                     else []
                                 )
-                                expected_html_hint = (
-                                    f"`generated/{expected_html_files[0]}`"
-                                    if expected_html_files
-                                    else "规则要求的 HTML 文件"
+                                expected_md_hint = (
+                                    f"`generated/{expected_md_files[0]}`"
+                                    if expected_md_files
+                                    else "规则要求的 Markdown 文件"
                                 )
                                 error_warning = (
                                     f"⚠️ pandas KeyError（缺失列）：{error_hint}\n\n"
@@ -5074,10 +4533,10 @@ def bot_stream(messages, workspace, session_id="default"):
                                     f"- 实际列名（df.columns）：{cols_text}\n\n"
                                     "请立即修正：\n"
                                     "1) 必须先 `df = pd.read_csv('generated/multi_table_join_result.csv')` 并使用 `df.columns` 决定可分析字段\n"
-                                    "2) 禁止使用任何不在 df.columns 中的字段名（例如 term_years/interest_rate/region/occupation 等，除非真实存在）\n"
-                                    "3) 若没有数值列：降级为缺失率、唯一值数量、TopK 类别分布等统计；依然要生成 HTML\n"
+                                    "2) 禁止使用任何不在 df.columns 中的字段名\n"
+                                    "3) 若没有数值列：降级为缺失率、唯一值数量、TopK 类别分布等统计；依然要生成 Markdown 报告\n"
                                     "4) 最后必须写出 "
-                                    + expected_html_hint
+                                    + expected_md_hint
                                     + "（文件名必须与 round_io_rules 一致）\n\n"
                                     "（dtypes 预览如下，便于你区分数值列与类别列）\n"
                                     + dtypes_preview
@@ -5093,15 +4552,15 @@ def bot_stream(messages, workspace, session_id="default"):
                                 refund_round_progress(is_schema_code)
                                 continue
                             elif "filenotfounderror" in exe_output.lower() and (
-                                "html_report"
-                                in (
+                                "markdown_report"
+                                == (
                                     round_mode(rule_for_current)
                                     if rule_for_current
                                     else ""
                                 )
                             ):
-                                # HTML 报告阶段常见失败：模型引用 generated/ 下不存在的数据文件（如 user_behavior.csv）导致执行失败。
-                                # 后端列出 generated 目录真实可用文件（以及 round_io_rules 声明的输入文件），并注入定向纠错提示要求只基于存在文件（尤其 multi_table_join_result.csv/README.md 等）生成目标 HTML。
+                                # 报告阶段常见失败：模型引用 generated/ 下不存在的数据文件导致执行失败。
+                                # 后端列出 generated 目录真实可用文件并注入定向纠错提示。
                                 missing_path = ""
                                 try:
                                     m = re.search(
@@ -5140,17 +4599,17 @@ def bot_stream(messages, workspace, session_id="default"):
                                 except Exception:
                                     required_inputs = []
 
-                                expected_html_files = (
+                                expected_md_files = (
                                     round_expected_filenames_by_type(
-                                        rule_for_current, "html"
+                                        rule_for_current, "markdown"
                                     )
                                     if rule_for_current
                                     else []
                                 )
-                                expected_html_hint = (
-                                    f"`generated/{expected_html_files[0]}`"
-                                    if expected_html_files
-                                    else "规则要求的 HTML 文件"
+                                expected_md_hint = (
+                                    f"`generated/{expected_md_files[0]}`"
+                                    if expected_md_files
+                                    else "规则要求的 Markdown 文件"
                                 )
 
                                 files_preview = "\n".join(
@@ -5169,14 +4628,14 @@ def bot_stream(messages, workspace, session_id="default"):
 
                                 error_warning = (
                                     f"⚠️ FileNotFoundError：{error_hint}\n\n"
-                                    "错误原因：你的脚本在生成 HTML 时引用了不存在的数据文件，导致执行在写出 HTML 前就崩溃。\n\n"
+                                    "错误原因：你的脚本引用了不存在的数据文件，导致执行崩溃。\n\n"
                                     f"- 缺失路径（来自报错）：{missing_path or '（未能解析）'}\n\n"
                                     "请立即修正（必须全部满足）：\n"
-                                    "1) 只允许读取 **实际存在** 的文件（见下方 generated 目录列表），禁止假设 user_behavior.csv 等不存在文件\n"
+                                    "1) 只允许读取 **实际存在** 的文件（见下方 generated 目录列表）\n"
                                     "2) 优先基于 `generated/multi_table_join_result.csv` 以及本次生成的 summary.csv/png/readme 做汇总\n"
-                                    "3) 即使某个可选文件缺失，也必须降级处理（例如显示“未找到该文件”），但**仍然要生成目标 HTML**\n"
+                                    "3) 即使某个可选文件缺失，也必须降级处理，但**仍然要生成目标 Markdown 报告**\n"
                                     "4) 最后必须写出 "
-                                    + expected_html_hint
+                                    + expected_md_hint
                                     + "（文件名必须与 round_io_rules 一致）\n\n"
                                     "规则声明的本轮输入文件：\n"
                                     + inputs_preview
@@ -5203,42 +4662,15 @@ def bot_stream(messages, workspace, session_id="default"):
                                     else ""
                                 )
                                 extra_hint = ""
-                                if mode_for_current in (
-                                    "html_report",
-                                    "html_report_phase2",
-                                ):
-                                    expected_html_files = (
-                                        round_expected_filenames_by_type(
-                                            rule_for_current, "html"
-                                        )
-                                        if rule_for_current
-                                        else []
-                                    )
-                                    expected_html_name = (
-                                        expected_html_files[0]
-                                        if expected_html_files
-                                        else ""
-                                    )
-                                    expected_html_hint = (
-                                        f"`generated/{expected_html_name}`"
-                                        if expected_html_name
-                                        else "规则要求的 HTML 文件"
-                                    )
+                                if mode_for_current == "markdown_report":
                                     extra_hint = (
-                                        "\n\n**纠错提示（HTML 构造字符串未闭合）**：\n"
-                                        '- 你在构造 `html_lines = [...]` 时，有某一行字符串没有正确闭合引号，或字符串意外跨行（例如写成了 `"...` 后换行）。\n'
-                                        "- 常见诱因：把 `<Code>`/``` 之类的标签或示例文本误粘贴进了 `html_lines` 的字符串里，导致引号不成对。\n"
-                                        "- 修正方法：\n"
-                                        "  1) 确保 `html_lines` 里每个元素都是一行完整的 Python 字符串（用 `\"...\"` 或 `'...'`），不要跨行。\n"
-                                        '  2) 字符串内部若包含引号，要么换用另一种引号包裹，要么用 `\\"` 转义。\n'
-                                        "  3) HTML 正文里请使用 `<code>...</code>`，不要使用 `<Code>`（大写 C 的是对话标签，容易引发混淆）。\n"
-                                        "  4) 最后必须写出 "
-                                        + expected_html_hint
-                                        + "（例如 `Path('generated') / '<文件名>'`），否则系统会继续判定缺文件。"
+                                        "\n\n**纠错提示（字符串未闭合）**：\n"
+                                        "- 你在构造 `markdown_lines = [...]` 时，有某一行字符串没有正确闭合引号。\n"
+                                        "- 修正方法：确保每个元素都是一行完整的 Python 字符串，不要跨行。"
                                     )
                                 error_warning = (
                                     f"⚠️ Python 语法错误：{error_hint}\n\n"
-                                    "错误原因：字符串字面量未闭合，代码无法运行，因此不会写出 HTML 文件。"
+                                    "错误原因：字符串字面量未闭合，代码无法运行。"
                                     + extra_hint
                                 )
                             elif (
@@ -5251,25 +4683,12 @@ def bot_stream(messages, workspace, session_id="default"):
                                     else ""
                                 )
                                 extra_hint = ""
-                                if mode_for_current == "html_report_phase2":
+                                if mode_for_current == "markdown_report":
                                     extra_hint = (
                                         "\n\n**纠错提示（数值/字符串格式化）**：\n"
-                                        "- 你很可能写了类似 `f\"{avg_age:.1f}\"`，但 avg_age 实际是字符串（例如你设成了 'N/A'）。\n"
-                                        "- 解决方法：在写入 html_lines 前做安全格式化，例如：\n"
-                                        "```python\n"
-                                        "def fmt_num(x, digits=1):\n"
-                                        "    try:\n"
-                                        '        return f"{float(x):.{digits}f}"\n'
-                                        "    except Exception:\n"
-                                        "        return str(x)\n"
-                                        "\n"
-                                        "avg_age_str = fmt_num(avg_age, 1)\n"
-                                        "avg_income_str = fmt_num(avg_income, 2)\n"
-                                        "avg_loan_amount_str = fmt_num(avg_loan_amount, 2)\n"
-                                        "default_rate_str = fmt_num(default_rate, 1)\n"
-                                        "```\n"
-                                        "- 然后在 HTML 中用 `{avg_age_str}` 等字符串变量，避免任何 `:.1f` 直接作用在可能为字符串的值上。\n"
-                                        "- 修正后仍必须把规则要求的 HTML 文件写入 `generated/`（例如 `generated/comprehensive_analysis_report.html`），否则会继续被判定缺文件。"
+                                        '- 你很可能写了类似 `f"{avg_age:.1f}"`，但 avg_age 实际是字符串。\n'
+                                        "- 解决方法：在写入 markdown_lines 前做安全格式化，例如 `str(val)` 或 `try: float(val) except: 'N/A'`。\n"
+                                        "- 修正后仍必须把规则要求的 Markdown 文件写入 `generated/`。"
                                     )
                                 error_warning = (
                                     f"⚠️ Python 格式化错误：{error_hint}\n\n"
@@ -5286,14 +4705,12 @@ def bot_stream(messages, workspace, session_id="default"):
                                     else ""
                                 )
                                 extra_hint = ""
-                                if mode_for_current == "html_report_phase2":
+                                if mode_for_current == "markdown_report":
                                     extra_hint = (
                                         "\n\n**纠错提示（集合/去重统计）**：\n"
-                                        "- 你很可能写了类似 `set([df['source'] for df in dfs])`，其中 `df['source']` 是一个 Series，无法放进 set。\n"
-                                        "- 如果你想统计数据源数量：\n"
-                                        "  - ✅ 用 `len(csv_files)`（每个 CSV 一个数据源），或\n"
-                                        "  - ✅ 用 `combined_df['source'].nunique()`（合并后按列去重）。\n"
-                                        "- 修正后仍必须把规则要求的 HTML 文件写入 `generated/` 目录，否则会继续被判定缺文件。"
+                                        "- 你很可能把 pandas Series 放进了 set()，导致不可哈希。\n"
+                                        "- 请用 `.nunique()` 等方法替代。\n"
+                                        "- 修正后仍必须把规则要求的 Markdown 文件写入 `generated/` 目录。"
                                     )
                                 error_warning = (
                                     f"⚠️ Python 类型错误：{error_hint}\n\n"
@@ -5307,15 +4724,13 @@ def bot_stream(messages, workspace, session_id="default"):
                                     if rule_for_current
                                     else ""
                                 )
-                                html_phase2_hint = ""
-                                if mode_for_current == "html_report_phase2":
-                                    html_phase2_hint = (
-                                        "\n\n**第 10 轮（综合 HTML 报告）纠错提示**：\n"
-                                        "- 只允许读取 `generated/` 下真实存在的 CSV/PNG/README/HTML；禁止访问 `data/` 或 SQLite。\n"
-                                        "- 不要对整张 DataFrame 直接 `mean()/std()`：CSV 往往混有字符串列，会触发 TypeError。\n"
-                                        "- 需要数值统计时请先筛选数值列，例如：`num_df = df.select_dtypes(include='number')`，或使用 `df.mean(numeric_only=True)`。\n"
-                                        "- 任何列名/字段都必须来自 `df.columns` 的真实值；先 `print(df.columns.tolist())` 再决定做哪些统计/图表，禁止假设 `loan_amount/income/region/default_rate` 等列。\n"
-                                        "- 如果发现没有可用数值列：请降级为“文件清单 + 行数/缺失值 + 分类计数”等不依赖数值列的统计，并仍然生成 `comprehensive_analysis_report.html`。"
+                                md_report_hint = ""
+                                if mode_for_current == "markdown_report":
+                                    md_report_hint = (
+                                        "\n\n**Markdown 报告纠错提示**：\n"
+                                        "- 只允许读取 `generated/` 下真实存在的 CSV/PNG/README/MD；禁止访问 `data/` 或 SQLite。\n"
+                                        "- 需要数值统计时请先筛选数值列：`df.select_dtypes(include='number')` 或 `df.mean(numeric_only=True)`。\n"
+                                        "- 任何列名必须来自 `df.columns` 的真实值，禁止臆造字段名。"
                                     )
                                 error_warning = (
                                     f"代码执行过程中出现错误：{error_hint}\n\n"
@@ -5324,8 +4739,7 @@ def bot_stream(messages, workspace, session_id="default"):
                                     "2. 使用不存在的字段名或表名\n"
                                     "3. 数据类型不匹配\n"
                                     "4. 缺少必要的数据预处理步骤\n\n"
-                                    "请修正代码后重新提交。如果部分代码已成功执行，可以基于已生成的文件继续分析。"
-                                    + html_phase2_hint
+                                    "请修正代码后重新提交。" + md_report_hint
                                 )
                             messages.append({"role": "user", "content": error_warning})
                             allow_duplicate_analyze_retry()

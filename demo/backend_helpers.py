@@ -90,15 +90,13 @@ print(f"✅ README.md 已写入，列出了 {total_files} 个文件。")
     return textwrap.dedent(template).strip()
 
 
-def build_html_report_template(html_filename):
-    """返回生成 HTML 报告的通用代码骨架"""
+def build_markdown_report_template(md_filename):
+    """返回生成 Markdown 分析报告的通用代码骨架"""
     template = f'''
-**请使用以下 Python 框架构建 HTML（仅可微调变量/样式，不得删除核心语句）：**
+**请使用以下 Python 框架构建 Markdown（仅可微调变量/样式，不得删除核心语句）：**
 
 ```python
 from pathlib import Path
-import re
-
 import pandas as pd
 
 generated_dir = Path("generated")
@@ -109,10 +107,11 @@ files = sorted([p for p in generated_dir.iterdir() if p.is_file()])
 csv_files = [f for f in files if f.suffix.lower() == ".csv"]
 png_files = [f for f in files if f.suffix.lower() == ".png"]
 log_files = [f for f in files if f.name.startswith("execute_round_") and f.suffix == ".txt"]
+md_files = [f for f in files if f.suffix.lower() == ".md"]
 readme_path = generated_dir / "README.md"
 
 def to_plain_number(val):
-    """将 numpy/pandas 标量转为普通 Python 数值，避免 HTML 出现 np.int64 等不可读内容。"""
+    """将 numpy/pandas 标量转为普通 Python 数值，避免出现 np.int64 等不可读内容。"""
     try:
         if pd.isna(val):
             return None
@@ -125,38 +124,34 @@ def to_plain_number(val):
         pass
     return val
 
-def build_list(items, empty_text):
+def build_file_list(items, empty_text):
     if not items:
-        return [f"<li>{{empty_text}}</li>"]
-    entries = []
-    for item in items:
-        entries.append(
-            f"<li><a href='{{item.name}}' target='_blank'>{{item.name}}</a> ({{item.stat().st_size}} bytes)</li>"
-        )
-    return entries
+        return [f"- {{empty_text}}"]
+    return [f"- `{{f.name}}` ({{f.stat().st_size}} bytes)" for f in items]
 
-# 构建分析过程总结
-analysis_summary = []
-analysis_summary.append("<h2>分析过程总结</h2>")
-analysis_summary.append("<ul>")
-analysis_summary.append("<li><strong>Round 2-6</strong>: CSV 数据分析阶段，对多个数据文件进行了单表分析并生成汇总结果</li>")
-analysis_summary.append("<li><strong>Round 7</strong>: SQLite 多表关联阶段，将五个表通过 name 字段进行 JOIN，生成综合分析结果</li>")
-analysis_summary.append("<li><strong>Round 8</strong>: 文件系统总结阶段，遍历 generated 目录生成 README.md 索引文件</li>")
-analysis_summary.append("<li><strong>Round 9</strong>: HTML 报告生成阶段，创建本可视化报告</li>")
-analysis_summary.append("</ul>")
+markdown_lines = []
+markdown_lines.append("# 多表分析总结报告")
+markdown_lines.append("")
 
-# 构建关键发现总结
-key_findings = []
-key_findings.append("<h2>关键发现</h2>")
-key_findings.append("<ul>")
-key_findings.append(f"<li>共处理 {{len([f for f in csv_files if 'summary' not in f.name and 'join' not in f.name])}} 个原始数据文件</li>")
-key_findings.append(f"<li>生成 {{len([f for f in csv_files if 'summary' in f.name or 'join' in f.name])}} 个统计汇总文件</li>")
-key_findings.append(f"<li>创建 {{len(png_files)}} 个数据可视化图表</li>")
-key_findings.append(f"<li>记录 {{len(log_files)}} 个执行日志文件</li>")
-key_findings.append("</ul>")
+markdown_lines.append("## 文件概览")
+markdown_lines.append(f"本次分析共生成 {{len(files)}} 个文件，全部存放于 `generated/` 目录。")
+markdown_lines.append("")
+
+markdown_lines.append("## 分析过程总结")
+markdown_lines.append("- **Round 2-6**: CSV 数据分析阶段，对多个数据文件进行了单表分析并生成汇总结果")
+markdown_lines.append("- **Round 7**: SQLite 多表关联阶段，将五个表通过 name 字段进行 JOIN，生成综合分析结果")
+markdown_lines.append("- **Round 8**: 文件系统总结阶段，遍历 generated 目录生成 README.md 索引文件")
+markdown_lines.append("- **Round 9**: 报告生成阶段，创建本分析总结报告")
+markdown_lines.append("")
+
+markdown_lines.append("## 关键发现")
+markdown_lines.append(f"- 共处理 {{len([f for f in csv_files if 'summary' not in f.name and 'join' not in f.name])}} 个原始数据文件")
+markdown_lines.append(f"- 生成 {{len([f for f in csv_files if 'summary' in f.name or 'join' in f.name])}} 个统计汇总文件")
+markdown_lines.append(f"- 创建 {{len(png_files)}} 个数据可视化图表")
+markdown_lines.append(f"- 记录 {{len(log_files)}} 个执行日志文件")
+markdown_lines.append("")
 
 # 构建数据洞察（若 join 结果存在）
-insights = []
 join_path = generated_dir / "multi_table_join_result.csv"
 if join_path.exists():
     try:
@@ -165,38 +160,24 @@ if join_path.exists():
         df_join = pd.DataFrame()
 
     if not df_join.empty:
-        insights.append("<h2>数据洞察（基于 multi_table_join_result.csv）</h2>")
-        insights.append("<ul>")
-        insights.append(
-            f"<li><strong>样本规模</strong>：{{len(df_join)}} 行，{{len(df_join.columns)}} 列；列名={{', '.join(map(str, df_join.columns.tolist()))}}</li>"
-        )
+        markdown_lines.append("## 数据洞察（基于 multi_table_join_result.csv）")
+        markdown_lines.append(f"- **样本规模**：{{len(df_join)}} 行，{{len(df_join.columns)}} 列")
+        markdown_lines.append(f"- **列名**：{{', '.join(map(str, df_join.columns.tolist()))}}")
 
         missing_rate = df_join.isna().mean().sort_values(ascending=False)
         top_missing = missing_rate.head(3)
-        top_missing_items = []
-        for col, rate in top_missing.items():
-            top_missing_items.append(f"{{col}}={{rate:.2%}}")
-        insights.append(
-            "<li><strong>缺失率Top</strong>：" + ", ".join(top_missing_items) + "</li>"
-        )
+        top_items = [f"{{col}}={{rate:.2%}}" for col, rate in top_missing.items()]
+        markdown_lines.append(f"- **缺失率 Top3**：{{', '.join(top_items)}}")
 
-        cat_cols = (
-            df_join.select_dtypes(exclude="number").columns.tolist()
-            if not df_join.empty
-            else []
-        )
+        cat_cols = df_join.select_dtypes(exclude="number").columns.tolist()
         num_cols = df_join.select_dtypes(include="number").columns.tolist()
 
         if cat_cols:
             col = cat_cols[0]
             vc = df_join[col].astype(str).value_counts(dropna=False)
             topk = vc.head(3)
-            parts = []
-            for k, v in topk.items():
-                parts.append(f"{{k}}={{int(to_plain_number(v) or 0)}}")
-            insights.append(
-                f"<li><strong>类别分布示例</strong>：字段 <code>{{col}}</code> Top3={{'; '.join(parts)}}（共{{len(vc)}}类）</li>"
-            )
+            parts = [f"{{k}}={{int(to_plain_number(v) or 0)}}" for k, v in topk.items()]
+            markdown_lines.append(f"- **类别分布示例**：字段 `{{col}}` Top3={{'; '.join(parts)}}（共{{len(vc)}}类）")
 
         if num_cols:
             col = num_cols[0]
@@ -205,81 +186,33 @@ if join_path.exists():
             median_val = to_plain_number(s.median())
             q25 = to_plain_number(s.quantile(0.25))
             q75 = to_plain_number(s.quantile(0.75))
-            insights.append(
-                f"<li><strong>数值分布示例</strong>：字段 <code>{{col}}</code> mean={{mean_val}}, median={{median_val}}, p25={{q25}}, p75={{q75}}</li>"
-            )
+            markdown_lines.append(f"- **数值分布示例**：字段 `{{col}}` mean={{mean_val}}, median={{median_val}}, p25={{q25}}, p75={{q75}}")
 
-        insights.append("</ul>")
+        markdown_lines.append("")
 
-html_lines = [
-    "<html>",
-    "<head>",
-    "  <meta charset='utf-8' />",
-    "  <title>Student Loan Analysis Summary</title>",
-    "  <style>",
-    "    body {{ font-family: Arial, sans-serif; margin: 20px; background-color: #f5f5f5; }}",
-    "    h1 {{ color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 10px; }}",
-    "    h2 {{ color: #34495e; margin-top: 30px; border-bottom: 2px solid #95a5a6; padding-bottom: 5px; }}",
-    "    h3 {{ color: #555; margin-top: 20px; font-size: 1.1em; }}",
-    "    section {{ background: white; padding: 20px; margin: 20px 0; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }}",
-    "    ul {{ line-height: 1.8; }}",
-    "    li {{ margin: 5px 0; }}",
-    "    a {{ color: #3498db; text-decoration: none; }}",
-    "    a:hover {{ text-decoration: underline; }}",
-    "    .timestamp {{ color: #7f8c8d; font-size: 0.9em; }}",
-    "    .time-stat {{ color: #27ae60; font-weight: bold; }}",
-    "    table {{ width: 100%; border-collapse: collapse; margin: 15px 0; }}",
-    "    th {{ background-color: #3498db; color: white; border: 1px solid #2980b9; padding: 10px; text-align: left; }}",
-    "    td {{ border: 1px solid #ddd; padding: 8px; }}",
-    "    tr:nth-child(even) {{ background-color: #f9f9f9; }}",
-    "    tr:hover {{ background-color: #f0f0f0; }}",
-    "  </style>",
-    "</head>",
-    "<body>",
-    "  <h1>Student Loan 多表分析总结报告</h1>",
-    "  <p class='timestamp'>注：为保证可复现，本报告不写入实时生成时间。</p>",
-    "",
-    "  <section id='summary'>",
-    "    <h2>文件概览</h2>",
-    f"    <p>本次分析共生成 {{len(files)}} 个文件，包括数据文件、可视化图表、执行日志和索引文档。</p>",
-]
-html_lines.extend(analysis_summary)
-html_lines.extend(key_findings)
-html_lines.extend(insights)
-html_lines.append("  </section>")
+markdown_lines.append("## 可视化图表")
+markdown_lines += build_file_list(png_files, "（无 PNG 文件）")
+markdown_lines.append("")
 
-html_lines.append("  <section id='visual'>")
-html_lines.append("    <h2>PNG 可视化图表</h2>")
-html_lines.append("    <ul>")
-html_lines += build_list(png_files, "（无 PNG 文件）")
-html_lines.append("    </ul>")
-html_lines.append("  </section>")
+markdown_lines.append("## 数据文件")
+markdown_lines += build_file_list(csv_files, "（无 CSV 文件）")
+markdown_lines.append("")
 
-html_lines.append("  <section id='data'>")
-html_lines.append("    <h2>CSV 数据文件</h2>")
-html_lines.append("    <ul>")
-html_lines += build_list(csv_files, "（无 CSV 文件）")
-html_lines.append("    </ul>")
-html_lines.append("  </section>")
-
-html_lines.append("  <section id='readme'>")
-html_lines.append("    <h2>README 索引</h2>")
+markdown_lines.append("## README 索引")
 if readme_path.exists():
-    html_lines.append(f"    <p><a href='{{readme_path.name}}'>{{readme_path.name}}</a> - 完整文件列表索引</p>")
+    markdown_lines.append(f"- `{{readme_path.name}}` - 完整文件列表索引")
 else:
-    html_lines.append("    <p>（未找到 README.md）</p>")
-html_lines.append("  </section>")
-html_lines.append("</body>")
-html_lines.append("</html>")
+    markdown_lines.append("- （未找到 README.md）")
+markdown_lines.append("")
 
-html_path = generated_dir / "{html_filename}"
-html_path.write_text("\\n".join(html_lines), encoding="utf-8")
-print(f"✅ HTML 报告已写入：{{html_path.name}}")
+report_path = generated_dir / "{md_filename}"
+report_path.write_text("\\n".join(markdown_lines), encoding="utf-8")
+print(f"✅ Markdown 报告已写入：{{report_path.name}}")
 ```
 
-- ❗ HTML 必须通过 `html_lines` 逐行构建，禁止 `html_template = \\"""...\\"""` 或 `print("<html>")` 写死整段 HTML。
-- ❗ 需遍历 generated/ 下真实存在的 CSV/PNG/README 文件，并写入 `<li>` 列表。
-- ❗ 必须包含 id='summary'、id='visual'、id='data'、id='readme' 四个 section。
+- ❗ Markdown 必须通过 `markdown_lines` 逐行构建，禁止 `md_template = \\"""...\\"""` 或 `print("#")` 写死整段 Markdown。
+- ❗ 需遍历 generated/ 下真实存在的 CSV/PNG/README 文件，并写入列表。
+- ❗ 必须包含 ## 文件概览、## 分析过程总结、## 关键发现、## 数据洞察、## 可视化图表、## 数据文件、## README 索引 等段落。
 '''
     return textwrap.dedent(template).strip()
 
@@ -367,8 +300,8 @@ def validate_readme_document(readme_text, generated_dir):
     return (not issues), issues
 
 
-def update_readme_after_html(generated_dir):
-    """在 Round 9 HTML 生成后更新 README.md，包含 HTML 文件"""
+def update_readme_after_report(generated_dir):
+    """在 Markdown 报告生成后更新 README.md，包含报告文件"""
     from pathlib import Path
     from datetime import datetime
 
@@ -379,14 +312,18 @@ def update_readme_after_html(generated_dir):
     files = sorted([p for p in generated_path.iterdir() if p.is_file()])
     total_files = len(files)
 
-    html_files = [f for f in files if f.suffix.lower() in {".html", ".htm"}]
+    md_report_files = [
+        f for f in files if f.suffix.lower() == ".md" and f.name.lower() != "readme.md"
+    ]
     csv_files = [f for f in files if f.suffix.lower() == ".csv"]
     png_files = [f for f in files if f.suffix.lower() == ".png"]
     log_files = [f for f in files if f.name.startswith("execute_round_")]
     other_files = [
         f
         for f in files
-        if f not in html_files + csv_files + png_files and f not in log_files
+        if f not in md_report_files + csv_files + png_files
+        and f not in log_files
+        and f.name.lower() != "readme.md"
     ]
 
     def format_items(items, placeholder):
@@ -399,9 +336,9 @@ def update_readme_after_html(generated_dir):
         f"共生成 {total_files} 个文件，全部存放于 `generated/` 目录。",
         f"生成时间：{datetime.now():%Y-%m-%d %H:%M:%S}",
         "",
-        "## HTML 报告",
+        "## Markdown 报告",
     ]
-    lines += format_items(html_files, "- （无 HTML 报告）")
+    lines += format_items(md_report_files, "- （无 Markdown 报告）")
 
     lines.append("")
     lines.append("## CSV 数据文件")

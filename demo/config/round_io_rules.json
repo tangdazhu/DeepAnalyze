@@ -92,29 +92,29 @@
     },
     {
       "round": 9,
-      "mode": "html_report",
+      "mode": "markdown_report",
       "input": {"type": "directory", "path": "generated"},
-      "guidance": "仅输出 <Analyze> + <Code> 两段；<Analyze> 只写一句话目标（不超过30字），禁止复述提示词/代码骨架；<Code> 必须是可执行 Python 脚本，必须通过 html_lines 列表构造 HTML，禁止直接粘贴完整 HTML 文本；输出文件必须写入 generated/ 目录（例如 OUTPUT_DIR = Path('generated')，并使用 OUTPUT_DIR / 'multi_table_analysis.html'），禁止写到 session 根目录。",
+      "guidance": "仅输出 <Analyze> + <Code> 两段；<Analyze> 只写一句话目标（不超过30字），禁止复述提示词/代码骨架；<Code> 必须是可执行 Python 脚本，必须通过 markdown_lines 列表构造 Markdown，禁止直接粘贴完整 Markdown 文本；输出文件必须写入 generated/ 目录（例如 OUTPUT_DIR = Path('generated')，并使用 OUTPUT_DIR / 'multi_table_analysis.md'），禁止写到 session 根目录。",
       "outputs": [
-        {"type": "html", "filename": "multi_table_analysis.html"}
+        {"type": "markdown", "filename": "multi_table_analysis.md"}
       ],
       "requirements": [
-        "HTML 必须包含 <html>、<head>、<body>、#summary/#visual/#data/#readme 等段落",
+        "Markdown 必须包含 ## 文件概览、## 分析过程总结、## 关键发现、## 数据洞察、## 可视化图表、## 数据文件、## README 索引 等段落",
         "需遍历 generated/ 下的 CSV/PNG/README 并生成对应列表",
         "必须包含分析过程总结和关键发现"
       ]
     },
     {
       "round": 10,
-      "mode": "html_report_phase2",
+      "mode": "markdown_report",
       "input": {"type": "directory", "path": "generated"},
-      "guidance": "基于 generated/ 目录下已生成的 CSV/PNG/README/multi_table_analysis.html 等成果，进行二次综合分析并输出 comprehensive_analysis_report.html。禁止访问原始 data/ 目录或 SQLite，允许使用 pandas/matplotlib 处理 generated 目录中的文件；输出文件必须写入 generated/ 目录（例如 OUTPUT_DIR = Path('generated')，并使用 OUTPUT_DIR / 'comprehensive_analysis_report.html'），禁止写到 session 根目录。",
+      "guidance": "基于 generated/ 目录下已生成的 CSV/PNG/README/multi_table_analysis.md 等成果，进行二次综合分析并输出 comprehensive_analysis_report.md。禁止访问原始 data/ 目录或 SQLite，允许使用 pandas 处理 generated 目录中的 CSV 文件；输出文件必须写入 generated/ 目录（例如 OUTPUT_DIR = Path('generated')，并使用 OUTPUT_DIR / 'comprehensive_analysis_report.md'），禁止写到 session 根目录。",
       "outputs": [
-        {"type": "html", "filename": "comprehensive_analysis_report.html"}
+        {"type": "markdown", "filename": "comprehensive_analysis_report.md"}
       ],
       "requirements": [
         "只允许读取 generated/ 目录下的文件",
-        "HTML 需包含综合洞察、趋势/异常、群体特征等段落，可嵌入 PNG 图表",
+        "Markdown 需包含综合洞察、趋势/异常、群体特征等段落，可引用 PNG 图表文件名",
         "禁止在本轮执行 sqlite3.connect 或读取 data/ 下的原始 CSV 文件"
       ]
     },
@@ -128,7 +128,7 @@
       ],
       "requirements": [
         "只能输出单个 <Answer> 块",
-        "必须引用实际存在的文件（如 README.md、summary_analysis.html、multi_table_join_result.png、comprehensive_analysis_report.html 等）"
+        "必须引用实际存在的文件（如 README.md、multi_table_analysis.md、multi_table_join_result.png、comprehensive_analysis_report.md 等）"
       ]
     }
   ]
