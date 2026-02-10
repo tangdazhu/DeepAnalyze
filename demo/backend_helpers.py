@@ -272,137 +272,6 @@ md.append("")
 md.append("## 5. 可视化图表解读")
 md.append("")
 
-# ── 为每张图表生成基于实际数据的业务解读 ──
-def _build_chart_interpretation(png_stem, csv_files_map, df_main):
-    """根据同名 CSV 的实际数据生成结合学生贷款业务含义的解读"""
-    stem_lower = png_stem.lower()
-    interp_parts = []
-    # 尝试读取同名 CSV 获取真实数据
-    csv_path = generated_dir / f"{{png_stem}}.csv"
-    local_df = None
-    if csv_path.exists():
-        try:
-            local_df = pd.read_csv(csv_path)
-        except Exception:
-            pass
-
-    # ── 缺勤月数分布 ──
-    if "absense" in stem_lower and "month" in stem_lower:
-        if local_df is not None and len(local_df) > 0:
-            num_col = [c for c in local_df.columns if pd.api.types.is_numeric_dtype(local_df[c])]
-            if num_col:
-                nc = num_col[0]
-                avg_val = float(local_df[nc].mean())
-                med_val = float(local_df[nc].median())
-                interp_parts.append(
-                    f"该图展示了学生贷款借款人的离校缺勤月数分布。"
-                    f"平均缺勤 {{avg_val:.1f}} 个月（中位数 {{med_val:.1f}}）。"
-                )
-                long_absence = int((local_df[nc] >= 6).sum())
-                if long_absence > 0:
-                    interp_parts.append(
-                        f"其中 {{long_absence}} 人缺勤 6 个月及以上，属于长期离校群体，"
-                        f"其还款能力和贷款违约风险需重点关注。"
-                    )
-            else:
-                interp_parts.append("该图展示了借款人离校缺勤月数的分布，缺勤时间越长通常意味着学业中断风险越高，可能影响还款能力。")
-        else:
-            interp_parts.append("该图展示了借款人离校缺勤月数的分布，缺勤时间越长通常意味着学业中断风险越高，可能影响还款能力。")
-
-    # ── 残障 vs 总人数 ──
-    elif "disabled" in stem_lower:
-        if local_df is not None and len(local_df) > 0:
-            num_cols_l = [c for c in local_df.columns if pd.api.types.is_numeric_dtype(local_df[c])]
-            if len(num_cols_l) >= 2:
-                vals = [int(local_df[c].sum()) for c in num_cols_l[:2]]
-                interp_parts.append(
-                    f"该图对比了残障借款人与总借款人数量。"
-                    f"残障借款人在学生贷款群体中占一定比例，"
-                    f"该群体可能面临更大的就业困难和还款压力，建议纳入贷款减免或延期还款政策的优先考虑范围。"
-                )
-            else:
-                interp_parts.append("该图对比了残障借款人与总借款人数量，残障群体的还款能力可能受限，需关注其贷款违约风险。")
-        else:
-            interp_parts.append("该图对比了残障借款人与总借款人数量，残障群体的还款能力可能受限，需关注其贷款违约风险。")
-
-    # ── 参军机构分布 ──
-    elif "enlist" in stem_lower or "organ" in stem_lower:
-        if local_df is not None and len(local_df) > 0:
-            cat_col = [c for c in local_df.columns if local_df[c].dtype == "object"]
-            cnt_col = [c for c in local_df.columns if pd.api.types.is_numeric_dtype(local_df[c])]
-            if cat_col and cnt_col:
-                top_row = local_df.sort_values(cnt_col[0], ascending=False).iloc[0]
-                interp_parts.append(
-                    f"该图展示了借款人参军/服役机构的分布情况。"
-                    f"人数最多的机构为 **{{top_row[cat_col[0]]}}**（{{int(top_row[cnt_col[0]])}} 人）。"
-                    f"不同服役机构的借款人可能享有不同的贷款减免政策（如军人学生贷款豁免），"
-                    f"机构分布有助于评估政策覆盖面和受益人群规模。"
-                )
-            else:
-                interp_parts.append("该图展示了借款人参军/服役机构的分布，不同机构的借款人可能适用不同的贷款减免政策。")
-        else:
-            interp_parts.append("该图展示了借款人参军/服役机构的分布，不同机构的借款人可能适用不同的贷款减免政策。")
-
-    # ── 入学月份分布 ──
-    elif "enrolled" in stem_lower and "month" in stem_lower:
-        if local_df is not None and len(local_df) > 0:
-            num_col = [c for c in local_df.columns if pd.api.types.is_numeric_dtype(local_df[c])]
-            if num_col:
-                nc = num_col[0]
-                peak_month = int(local_df[nc].mode().iloc[0]) if len(local_df[nc].mode()) > 0 else 0
-                interp_parts.append(
-                    f"该图展示了借款人的入学月份分布。"
-                    f"入学时间的集中程度反映了学生贷款发放的季节性特征，"
-                    f"有助于贷款机构合理安排资金拨付和催收计划。"
-                )
-            else:
-                interp_parts.append("该图展示了借款人的入学月份分布，反映学生贷款发放的季节性规律。")
-        else:
-            interp_parts.append("该图展示了借款人的入学月份分布，反映学生贷款发放的季节性规律。")
-
-    # ── 入学学校分布 ──
-    elif "enrolled" in stem_lower and "school" in stem_lower:
-        if local_df is not None and len(local_df) > 0:
-            cat_col = [c for c in local_df.columns if local_df[c].dtype == "object"]
-            cnt_col = [c for c in local_df.columns if pd.api.types.is_numeric_dtype(local_df[c])]
-            if cat_col and cnt_col:
-                top_row = local_df.sort_values(cnt_col[0], ascending=False).iloc[0]
-                interp_parts.append(
-                    f"该图展示了借款人就读学校的分布。"
-                    f"学生数量最多的学校为 **{{top_row[cat_col[0]]}}**（{{int(top_row[cnt_col[0]])}} 人）。"
-                    f"不同学校的学费水平和就业前景差异较大，"
-                    f"学校分布有助于评估贷款额度集中度和潜在的区域性违约风险。"
-                )
-            else:
-                interp_parts.append("该图展示了借款人就读学校的分布，不同学校的贷款规模和违约风险可能存在显著差异。")
-        else:
-            interp_parts.append("该图展示了借款人就读学校的分布，不同学校的贷款规模和违约风险可能存在显著差异。")
-
-    # ── 缴费状态分布 ──
-    elif "payment" in stem_lower:
-        if local_df is not None and len(local_df) > 0:
-            interp_parts.append(
-                f"该图展示了借款人的缴费状态分布。"
-                f"缴费状态直接反映贷款还款情况："
-                f"'无需缴费'（no_payment_due）可能表示在校生或已获减免，"
-                f"'欠费'（neg）群体是催收和风险管理的重点对象。"
-            )
-        else:
-            interp_parts.append("该图展示了借款人的缴费状态分布，是评估贷款组合健康度的核心指标。")
-
-    # ── 多表关联结果 ──
-    elif "join" in stem_lower or "multi" in stem_lower:
-        interp_parts.append(
-            f"该图基于多表关联结果，整合了借款人的学校、缴费状态、缺勤月数、服役机构等多维信息。"
-            f"通过交叉分析可发现高风险借款人的共同特征，如长期缺勤且欠费的群体。"
-        )
-
-    # ── 通用兜底 ──
-    else:
-        interp_parts.append("该图展示了学生贷款相关数据的可视化分析结果，请结合上下文统计数据进行业务解读。")
-
-    return " ".join(interp_parts)
-
 for png in sorted(png_files):
     md.append(f"### {{png.stem}}")
     md.append(f"![{{png.stem}}]({{png.name}})")
@@ -412,9 +281,23 @@ for png in sorted(png_files):
     if csv_key in csv_summaries:
         md.append(f"**数据概要**：{{csv_summaries[csv_key]}}")
         md.append("")
-    # 基于实际数据生成业务解读
-    chart_interp = _build_chart_interpretation(png.stem, csv_summaries, df)
-    md.append(f"**解读**：{{chart_interp}}")
+    # 通用解读：读取同名 CSV 的基础统计
+    interp = f"该图展示了 {{png.stem}} 的可视化分析结果。"
+    csv_path = generated_dir / f"{{png.stem}}.csv"
+    if csv_path.exists():
+        try:
+            _tmp = pd.read_csv(csv_path)
+            _nc = [c for c in _tmp.columns if pd.api.types.is_numeric_dtype(_tmp[c])]
+            if _nc:
+                c0 = _nc[0]
+                interp += f" {{c0}} 均值={{float(_tmp[c0].mean()):.2f}}，中位数={{float(_tmp[c0].median()):.2f}}。"
+            _cc = [c for c in _tmp.columns if _tmp[c].dtype == "object"]
+            if _cc:
+                top_val = _tmp[_cc[0]].value_counts().index[0]
+                interp += f" {{_cc[0]}} 最常见取值为 {{top_val}}。"
+        except Exception:
+            pass
+    md.append(f"**解读**：{{interp}}")
     md.append("")
 
 # 6. 结论与建议
