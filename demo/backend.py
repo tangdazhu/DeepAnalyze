@@ -2227,6 +2227,10 @@ def bot_stream(messages, workspace, session_id="default"):
                     if "/no_think" not in _content:
                         _m["content"] = _content + "\n/no_think"
                     break
+        logger.info(
+            "[bot_stream] extra_body=%s",
+            {k: v for k, v in _extra_body.items() if k != "stop_token_ids"},
+        )
         response = client.chat.completions.create(
             model=MODEL_PATH,
             messages=safe_messages,
@@ -2246,6 +2250,7 @@ def bot_stream(messages, workspace, session_id="default"):
         stream_forced_abort = False  # 流式阶段强制终止后，避免进入后置解析导致重复重试
         try:
             chunk_index = 0
+            _reasoning_detected = False
             for chunk in response:
                 if chunk.choices and chunk.choices[0].delta.content is not None:
                     delta = chunk.choices[0].delta.content
@@ -2254,6 +2259,16 @@ def bot_stream(messages, workspace, session_id="default"):
                     if chunk_index <= 5:
                         logger.info(
                             f"[bot_stream] Received chunk #{chunk_index}, delta_len={len(delta)}, raw_total={len(raw_res)}"
+                        )
+                # 诊断：检测 reasoning_content（thinking tokens）
+                if not _reasoning_detected and chunk.choices:
+                    _delta = chunk.choices[0].delta
+                    _rc = getattr(_delta, "reasoning_content", None)
+                    if _rc:
+                        _reasoning_detected = True
+                        logger.warning(
+                            "[bot_stream] ⚠️ reasoning_content detected! Thinking NOT disabled. First reasoning: %.100s",
+                            _rc,
                         )
 
                     # 检测流式输出长度是否超限
