@@ -38,6 +38,11 @@ VALID_FILE_PURPOSES = ["fine-tune", "answers", "file-extract", "assistants"]
 DEFAULT_TEMPERATURE = 0.4
 DEFAULT_MODEL = "DeepAnalyze-8B"
 
+# Thinking 模式开关（适用于 Qwen3 等支持 thinking 的模型）
+# True  = 启用深度推理（更慢但推理能力更强，适合复杂数学/逻辑任务）
+# False = 禁用 thinking（更快，适合代码生成和数据分析任务）
+ENABLE_THINKING = False
+
 # Stop token IDs for DeepAnalyze model
 STOP_TOKEN_IDS = [151676, 151645]
 

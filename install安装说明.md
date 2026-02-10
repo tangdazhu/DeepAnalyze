@@ -54,7 +54,7 @@ pip install -r requirements.txt
    python backend.py
    ```
 
-1. **前端 WebUI**
+3. **前端 WebUI**
 
    ```bash
    conda activate deepanalyze
@@ -65,6 +65,17 @@ pip install -r requirements.txt
  然后从浏览器访问WebUI： <http://172.23.6.173:4000/>
 
 此模式下无需再启动 `API/start_server.py`，避免 8200/8100 端口冲突。若后续改用官方 API，可将 `/workspace/*` 路由迁移或继续并行运行 `backend.py`。
+
+## 关键配置项（`API/config.py`）
+
+| 配置项 | 默认值 | 说明 |
+|--------|--------|------|
+| `ENABLE_THINKING` | `False` | Qwen3 等模型的 thinking 模式开关。`True` 启用深度推理（更慢，适合复杂数学/逻辑任务）；`False` 禁用（更快，适合代码生成和数据分析） |
+| `MAX_PROMPT_CHARS` | `16000` | 发送给模型的最大提示词字符数，超出会截断早期对话 |
+| `VLLM_HTTP_TIMEOUT_SECONDS` | `180` | vLLM API 请求超时时间（秒） |
+| `STREAM_STALL_RETRY_LIMIT` | `3` | 流式输出超时后的自动重试次数 |
+
+修改后重启后端服务即可生效。
 
 ## 3. 部署推理模型（vLLM）
 

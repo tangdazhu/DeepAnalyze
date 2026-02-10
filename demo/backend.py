@@ -502,6 +502,7 @@ ANSWER_MIN_NON_SCHEMA_ROUNDS = 8  # 对应 8 轮非 schema 代码执行(第 2-9 
 VLLM_HTTP_TIMEOUT_SECONDS = getattr(api_config, "VLLM_HTTP_TIMEOUT_SECONDS", 180)
 STREAM_STALL_RETRY_LIMIT = getattr(api_config, "STREAM_STALL_RETRY_LIMIT", 3)
 MAX_PROMPT_CHARS = getattr(api_config, "MAX_PROMPT_CHARS", 16000)
+ENABLE_THINKING = getattr(api_config, "ENABLE_THINKING", False)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SQLITE_SEEDS = [
     (
@@ -2204,16 +2205,19 @@ def bot_stream(messages, workspace, session_id="default"):
         )
         safe_messages = trim_messages(messages)
 
+        _extra_body = {
+            "add_generation_prompt": False,
+            "stop_token_ids": [151676, 151645],
+            "max_new_tokens": 4096,
+        }
+        if not ENABLE_THINKING:
+            _extra_body["chat_template_kwargs"] = {"enable_thinking": False}
         response = client.chat.completions.create(
             model=MODEL_PATH,
             messages=safe_messages,
             temperature=0.3,
             stream=True,
-            extra_body={
-                "add_generation_prompt": False,
-                "stop_token_ids": [151676, 151645],
-                "max_new_tokens": 4096,
-            },
+            extra_body=_extra_body,
         )
         raw_res = ""
         sanitized_stream = ""
