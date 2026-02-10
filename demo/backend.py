@@ -502,7 +502,7 @@ ANSWER_MIN_EXEC_ROUNDS = 10  # 确保完成第 2-9 轮分析后才请求 Answer
 ANSWER_MIN_NON_SCHEMA_ROUNDS = 8  # 对应 8 轮非 schema 代码执行(第 2-9 轮)
 VLLM_HTTP_TIMEOUT_SECONDS = getattr(api_config, "VLLM_HTTP_TIMEOUT_SECONDS", 180)
 STREAM_STALL_RETRY_LIMIT = getattr(api_config, "STREAM_STALL_RETRY_LIMIT", 3)
-MAX_PROMPT_CHARS = getattr(api_config, "MAX_PROMPT_CHARS", 16000)
+MAX_PROMPT_CHARS = getattr(api_config, "MAX_PROMPT_CHARS", 64000)
 ENABLE_THINKING = getattr(api_config, "ENABLE_THINKING", False)
 logger.info(
     "[config] ENABLE_THINKING=%s (from config: %s)",
