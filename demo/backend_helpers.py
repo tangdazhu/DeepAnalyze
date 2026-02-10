@@ -271,29 +271,150 @@ md.append("")
 # 5. 可视化图表解读
 md.append("## 5. 可视化图表解读")
 md.append("")
+
+# ── 为每张图表生成基于实际数据的业务解读 ──
+def _build_chart_interpretation(png_stem, csv_files_map, df_main):
+    """根据同名 CSV 的实际数据生成结合学生贷款业务含义的解读"""
+    stem_lower = png_stem.lower()
+    interp_parts = []
+    # 尝试读取同名 CSV 获取真实数据
+    csv_path = generated_dir / f"{{png_stem}}.csv"
+    local_df = None
+    if csv_path.exists():
+        try:
+            local_df = pd.read_csv(csv_path)
+        except Exception:
+            pass
+
+    # ── 缺勤月数分布 ──
+    if "absense" in stem_lower and "month" in stem_lower:
+        if local_df is not None and len(local_df) > 0:
+            num_col = [c for c in local_df.columns if pd.api.types.is_numeric_dtype(local_df[c])]
+            if num_col:
+                nc = num_col[0]
+                avg_val = float(local_df[nc].mean())
+                med_val = float(local_df[nc].median())
+                interp_parts.append(
+                    f"该图展示了学生贷款借款人的离校缺勤月数分布。"
+                    f"平均缺勤 {{avg_val:.1f}} 个月（中位数 {{med_val:.1f}}）。"
+                )
+                long_absence = int((local_df[nc] >= 6).sum())
+                if long_absence > 0:
+                    interp_parts.append(
+                        f"其中 {{long_absence}} 人缺勤 6 个月及以上，属于长期离校群体，"
+                        f"其还款能力和贷款违约风险需重点关注。"
+                    )
+            else:
+                interp_parts.append("该图展示了借款人离校缺勤月数的分布，缺勤时间越长通常意味着学业中断风险越高，可能影响还款能力。")
+        else:
+            interp_parts.append("该图展示了借款人离校缺勤月数的分布，缺勤时间越长通常意味着学业中断风险越高，可能影响还款能力。")
+
+    # ── 残障 vs 总人数 ──
+    elif "disabled" in stem_lower:
+        if local_df is not None and len(local_df) > 0:
+            num_cols_l = [c for c in local_df.columns if pd.api.types.is_numeric_dtype(local_df[c])]
+            if len(num_cols_l) >= 2:
+                vals = [int(local_df[c].sum()) for c in num_cols_l[:2]]
+                interp_parts.append(
+                    f"该图对比了残障借款人与总借款人数量。"
+                    f"残障借款人在学生贷款群体中占一定比例，"
+                    f"该群体可能面临更大的就业困难和还款压力，建议纳入贷款减免或延期还款政策的优先考虑范围。"
+                )
+            else:
+                interp_parts.append("该图对比了残障借款人与总借款人数量，残障群体的还款能力可能受限，需关注其贷款违约风险。")
+        else:
+            interp_parts.append("该图对比了残障借款人与总借款人数量，残障群体的还款能力可能受限，需关注其贷款违约风险。")
+
+    # ── 参军机构分布 ──
+    elif "enlist" in stem_lower or "organ" in stem_lower:
+        if local_df is not None and len(local_df) > 0:
+            cat_col = [c for c in local_df.columns if local_df[c].dtype == "object"]
+            cnt_col = [c for c in local_df.columns if pd.api.types.is_numeric_dtype(local_df[c])]
+            if cat_col and cnt_col:
+                top_row = local_df.sort_values(cnt_col[0], ascending=False).iloc[0]
+                interp_parts.append(
+                    f"该图展示了借款人参军/服役机构的分布情况。"
+                    f"人数最多的机构为 **{{top_row[cat_col[0]]}}**（{{int(top_row[cnt_col[0]])}} 人）。"
+                    f"不同服役机构的借款人可能享有不同的贷款减免政策（如军人学生贷款豁免），"
+                    f"机构分布有助于评估政策覆盖面和受益人群规模。"
+                )
+            else:
+                interp_parts.append("该图展示了借款人参军/服役机构的分布，不同机构的借款人可能适用不同的贷款减免政策。")
+        else:
+            interp_parts.append("该图展示了借款人参军/服役机构的分布，不同机构的借款人可能适用不同的贷款减免政策。")
+
+    # ── 入学月份分布 ──
+    elif "enrolled" in stem_lower and "month" in stem_lower:
+        if local_df is not None and len(local_df) > 0:
+            num_col = [c for c in local_df.columns if pd.api.types.is_numeric_dtype(local_df[c])]
+            if num_col:
+                nc = num_col[0]
+                peak_month = int(local_df[nc].mode().iloc[0]) if len(local_df[nc].mode()) > 0 else 0
+                interp_parts.append(
+                    f"该图展示了借款人的入学月份分布。"
+                    f"入学时间的集中程度反映了学生贷款发放的季节性特征，"
+                    f"有助于贷款机构合理安排资金拨付和催收计划。"
+                )
+            else:
+                interp_parts.append("该图展示了借款人的入学月份分布，反映学生贷款发放的季节性规律。")
+        else:
+            interp_parts.append("该图展示了借款人的入学月份分布，反映学生贷款发放的季节性规律。")
+
+    # ── 入学学校分布 ──
+    elif "enrolled" in stem_lower and "school" in stem_lower:
+        if local_df is not None and len(local_df) > 0:
+            cat_col = [c for c in local_df.columns if local_df[c].dtype == "object"]
+            cnt_col = [c for c in local_df.columns if pd.api.types.is_numeric_dtype(local_df[c])]
+            if cat_col and cnt_col:
+                top_row = local_df.sort_values(cnt_col[0], ascending=False).iloc[0]
+                interp_parts.append(
+                    f"该图展示了借款人就读学校的分布。"
+                    f"学生数量最多的学校为 **{{top_row[cat_col[0]]}}**（{{int(top_row[cnt_col[0]])}} 人）。"
+                    f"不同学校的学费水平和就业前景差异较大，"
+                    f"学校分布有助于评估贷款额度集中度和潜在的区域性违约风险。"
+                )
+            else:
+                interp_parts.append("该图展示了借款人就读学校的分布，不同学校的贷款规模和违约风险可能存在显著差异。")
+        else:
+            interp_parts.append("该图展示了借款人就读学校的分布，不同学校的贷款规模和违约风险可能存在显著差异。")
+
+    # ── 缴费状态分布 ──
+    elif "payment" in stem_lower:
+        if local_df is not None and len(local_df) > 0:
+            interp_parts.append(
+                f"该图展示了借款人的缴费状态分布。"
+                f"缴费状态直接反映贷款还款情况："
+                f"'无需缴费'（no_payment_due）可能表示在校生或已获减免，"
+                f"'欠费'（neg）群体是催收和风险管理的重点对象。"
+            )
+        else:
+            interp_parts.append("该图展示了借款人的缴费状态分布，是评估贷款组合健康度的核心指标。")
+
+    # ── 多表关联结果 ──
+    elif "join" in stem_lower or "multi" in stem_lower:
+        interp_parts.append(
+            f"该图基于多表关联结果，整合了借款人的学校、缴费状态、缺勤月数、服役机构等多维信息。"
+            f"通过交叉分析可发现高风险借款人的共同特征，如长期缺勤且欠费的群体。"
+        )
+
+    # ── 通用兜底 ──
+    else:
+        interp_parts.append("该图展示了学生贷款相关数据的可视化分析结果，请结合上下文统计数据进行业务解读。")
+
+    return " ".join(interp_parts)
+
 for png in sorted(png_files):
     md.append(f"### {{png.stem}}")
     md.append(f"![{{png.stem}}]({{png.name}})")
     md.append("")
-    # 尝试找到同名 CSV 并生成数据解读
+    # 尝试找到同名 CSV 并生成数据概要
     csv_key = png.stem
     if csv_key in csv_summaries:
         md.append(f"**数据概要**：{{csv_summaries[csv_key]}}")
         md.append("")
-    # 根据图表名称中的关键词生成解读
-    stem_lower = png.stem.lower()
-    if "dist" in stem_lower or "distribution" in stem_lower:
-        md.append("**解读**：该图展示了数据的分布特征，可观察各类别的频次差异和集中趋势。"
-                  "频次较高的类别代表数据中的主要群体，应重点关注。")
-    elif "join" in stem_lower or "multi" in stem_lower:
-        md.append("**解读**：该图基于多表关联结果，展示了跨数据源的综合视图。"
-                  "可用于发现不同维度之间的关联模式。")
-    elif "count" in stem_lower or "total" in stem_lower:
-        md.append("**解读**：该图展示了计数/汇总统计结果，可直观比较各分组的数量差异。")
-    elif "trend" in stem_lower or "time" in stem_lower:
-        md.append("**解读**：该图展示了时间序列趋势，可观察数据随时间的变化规律。")
-    else:
-        md.append("**解读**：该图展示了数据的可视化分析结果，请结合上下文统计数据进行解读。")
+    # 基于实际数据生成业务解读
+    chart_interp = _build_chart_interpretation(png.stem, csv_summaries, df)
+    md.append(f"**解读**：{{chart_interp}}")
     md.append("")
 
 # 6. 结论与建议
@@ -323,6 +444,41 @@ for c in num_cols:
     outliers = int(((df[c] < q1 - 1.5 * iqr) | (df[c] > q3 + 1.5 * iqr)).sum())
     if outliers > 0:
         findings.append(f"字段 **{{c}}** 存在 {{outliers}} 个离群值（IQR 方法），建议进一步排查")
+
+# ── 学生贷款业务相关发现 ──
+# 欠费人群特征
+if {{"school", "bool"}}.issubset(df.columns) and not cross_school_pay.empty:
+    if "neg" in cross_school_pay.columns and "All" in cross_school_pay.columns:
+        rates = (cross_school_pay["neg"] / cross_school_pay["All"]).drop("All", errors="ignore")
+        top_school = rates.idxmax()
+        top_rate = f"{{rates.max() * 100:.1f}}%"
+        bottom_school = rates.idxmin()
+        bottom_rate = f"{{rates.min() * 100:.1f}}%"
+        findings.append(
+            f"欠费率最高的学校为 **{{top_school}}**（{{top_rate}}），最低为 **{{bottom_school}}**（{{bottom_rate}}），"
+            f"不同学校的借款人还款表现存在显著差异"
+        )
+    elif "pos" in cross_school_pay.columns:
+        findings.append("所有借款人的缴费状态均为正常（pos），当前样本中未发现欠费情况")
+
+# 缺勤与还款风险
+if {{"month"}}.issubset(df.columns) and pd.api.types.is_numeric_dtype(df["month"]):
+    avg_absence = float(df["month"].mean())
+    long_absence_count = int((df["month"] >= 6).sum())
+    findings.append(
+        f"借款人平均离校缺勤 **{{avg_absence:.1f}}** 个月，其中 **{{long_absence_count}}** 人缺勤 6 个月及以上。"
+        f"长期缺勤可能意味着学业中断，是贷款违约的重要预警信号"
+    )
+
+# 参军机构与贷款减免
+if not organ_absense.empty:
+    top_org = organ_absense.index[0]
+    top_mean = organ_absense.iloc[0]["mean"]
+    findings.append(
+        f"参军机构中，**{{top_org}}** 的平均缺勤月数最高（{{top_mean:.1f}} 个月），"
+        f"该机构借款人可能面临更长的服役期导致的学业中断，需评估其贷款延期还款资格"
+    )
+
 if not findings:
     findings.append("数据整体分布均匀，未发现显著异常")
 for i, f_item in enumerate(findings, 1):
@@ -336,10 +492,15 @@ if high_missing:
 if any(df[c].value_counts().iloc[0] / total > 0.7 for c in cat_cols if len(df[c].value_counts()) > 0):
     suggestions.append("**特征筛选**：对分布严重偏斜的类别字段评估是否保留，避免引入噪声")
 if not cross_school_pay.empty:
-    suggestions.append("**分组对比**：针对不同学校的缴费状态差异，建议深入分析欠费原因并制定差异化催缴策略")
+    if "neg" in cross_school_pay.columns:
+        suggestions.append("**差异化催收**：针对欠费率较高的学校，建议深入分析欠费原因（学费水平、就业率、地区经济等），制定差异化催收策略")
+    suggestions.append("**还款监控**：建立按学校维度的还款率仪表盘，及时发现还款异常的学校群体")
 if not organ_absense.empty:
-    suggestions.append("**风险预警**：对平均缺勤月数较高的机构（如 {{top_org}}）重点关注，评估其对学业完成率的影响")
-suggestions.append("**持续监控**：建议定期更新数据并重新运行分析流程，跟踪关键指标的变化趋势")
+    top_org = organ_absense.index[0]
+    suggestions.append(f"**服役人员关怀**：对缺勤月数较高的服役机构（如 **{{top_org}}**）借款人，评估其是否符合军人学生贷款豁免或延期还款政策")
+if {{"month"}}.issubset(df.columns) and pd.api.types.is_numeric_dtype(df["month"]):
+    suggestions.append("**学业中断预警**：对缺勤超过 6 个月的借款人建立预警机制，主动联系了解其学业和还款计划")
+suggestions.append("**持续监控**：建议定期更新数据并重新运行分析流程，跟踪各学校欠费率、缺勤月数等关键风险指标的变化趋势")
 if not suggestions:
     suggestions.append("数据质量良好，建议保持当前数据采集流程")
 for s in suggestions:

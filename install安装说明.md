@@ -49,7 +49,7 @@ pip install -r requirements.txt
   --chat-template ~/DeepAnalyze/demo/config/qwen3_nothink.jinja
    ```
    
-   > `qwen3_nothink.jinja` 在 assistant 回复开头注入空的 `<think></think>` 块，使模型跳过 thinking 直接输出。
+   > `qwen3_nothink.jinja` 默认 `enable_thinking=false`，不触发 `<think>` token 生成，大幅提升 throughput。
    > 若需要启用 thinking（如调试推理质量），去掉 `--chat-template` 参数即可恢复默认行为。
    
 2. **后端服务**（使用 demo/backend.py，提供 `/workspace/*` 等接口）
