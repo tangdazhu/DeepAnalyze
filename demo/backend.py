@@ -2705,7 +2705,19 @@ def bot_stream(messages, workspace, session_id="default"):
             # 必须在 has_code_block 校验前进行补齐。
             if last_finish_reason in {"stop", "length"}:
                 if "<Code>" in cur_res and "</Code>" not in cur_res:
-                    cur_res += "</Code>"
+                    # 截断 <Code> 后面出现的非 Code 标签（如 </Analyze>），避免把它们当作代码内容
+                    _code_start = cur_res.find("<Code>") + len("<Code>")
+                    _tail_tag = re.search(
+                        r"</?(?:Analyze|Understand|Execute|Answer|File)>",
+                        cur_res[_code_start:],
+                    )
+                    if _tail_tag:
+                        cur_res = cur_res[: _code_start + _tail_tag.start()].rstrip()
+                        logger.info(
+                            "[bot_stream] Truncated stray tag '%s' before auto-closing </Code>",
+                            _tail_tag.group(),
+                        )
+                    cur_res += "\n</Code>"
                     logger.info(
                         "[bot_stream] Auto-closed missing </Code> before validation"
                     )
