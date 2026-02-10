@@ -14,6 +14,7 @@ import time
 import tempfile
 import textwrap
 import threading
+from datetime import datetime
 from collections import defaultdict
 from dataclasses import dataclass
 from functools import partial
@@ -2198,6 +2199,7 @@ def bot_stream(messages, workspace, session_id="default"):
         iteration += 1
         current_round = execute_rounds + 1
         premature_answer_detected = False
+        _round_start_ts = datetime.now()
         rule_for_current_round = get_round_rule(current_round)
         mode_for_current_round = round_mode(rule_for_current_round)
         logger.info(
@@ -4035,6 +4037,8 @@ def bot_stream(messages, workspace, session_id="default"):
                     code_executed = True
 
                     # 将执行输出写入日志文件
+                    _round_end_ts = datetime.now()
+                    _round_elapsed = (_round_end_ts - _round_start_ts).total_seconds()
                     try:
                         log_file = (
                             generated_dir / f"execute_round_{execute_rounds + 1}.txt"
@@ -4042,13 +4046,18 @@ def bot_stream(messages, workspace, session_id="default"):
                         with open(log_file, "w", encoding="utf-8") as f:
                             f.write(f"=== Execution Round {execute_rounds + 1} ===\n")
                             f.write(f"Session: {session_id}\n")
-                            f.write(f"Iteration: {iteration}\n\n")
+                            f.write(f"Iteration: {iteration}\n")
+                            f.write(f"Start: {_round_start_ts:%Y-%m-%d %H:%M:%S}\n")
+                            f.write(f"End: {_round_end_ts:%Y-%m-%d %H:%M:%S}\n")
+                            f.write(f"Elapsed: {_round_elapsed:.1f}s\n\n")
                             f.write("=== Code ===\n")
                             # 记录实际执行的脚本（已做轻量清洗），确保可追溯。
                             f.write(exec_code)
                             f.write("\n\n=== Output ===\n")
                             f.write(exe_output)
-                        logger.info(f"[bot_stream] Wrote execution log to {log_file}")
+                        logger.info(
+                            f"[bot_stream] Wrote execution log to {log_file} (elapsed={_round_elapsed:.1f}s)"
+                        )
                     except Exception as log_err:
                         logger.warning(
                             f"[Warning] Failed to write execution log: {log_err}"
