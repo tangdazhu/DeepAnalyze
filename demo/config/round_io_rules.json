@@ -84,7 +84,7 @@
         {"type": "markdown", "filename": "README.md"}
       ],
       "requirements": [
-        "README.md 必须以 # 生成文件目录 开头，并依次包含 ## HTML 报告、## CSV 数据文件、## PNG 可视化、## 执行日志、## 其他文件",
+        "README.md 必须以 # 生成文件目录 开头，并依次包含 ## Markdown 报告、## CSV 数据文件、## PNG 可视化、## 执行日志、## 其他文件",
         "需列出所有 execute_round_*.txt 和 README.md 本身",
         "文件列表项需包含文件大小（格式：- `filename.ext` (123 bytes)）",
         "必须写明文件总数行：共生成 X 个文件，全部存放于 `generated/` 目录。"
@@ -94,41 +94,29 @@
       "round": 9,
       "mode": "markdown_report",
       "input": {"type": "directory", "path": "generated"},
-      "guidance": "仅输出 <Analyze> + <Code> 两段；<Analyze> 只写一句话目标（不超过30字），禁止复述提示词/代码骨架；<Code> 必须是可执行 Python 脚本，必须通过 markdown_lines 列表构造 Markdown，禁止直接粘贴完整 Markdown 文本；输出文件必须写入 generated/ 目录（例如 OUTPUT_DIR = Path('generated')，并使用 OUTPUT_DIR / 'multi_table_analysis.md'），禁止写到 session 根目录。",
-      "outputs": [
-        {"type": "markdown", "filename": "multi_table_analysis.md"}
-      ],
-      "requirements": [
-        "Markdown 必须包含 ## 文件概览、## 分析过程总结、## 关键发现、## 数据洞察、## 可视化图表、## 数据文件、## README 索引 等段落",
-        "需遍历 generated/ 下的 CSV/PNG/README 并生成对应列表",
-        "必须包含分析过程总结和关键发现"
-      ]
-    },
-    {
-      "round": 10,
-      "mode": "markdown_report",
-      "input": {"type": "directory", "path": "generated"},
-      "guidance": "基于 generated/ 目录下已生成的 CSV/PNG/README/multi_table_analysis.md 等成果，进行二次综合分析并输出 comprehensive_analysis_report.md。禁止访问原始 data/ 目录或 SQLite，允许使用 pandas 处理 generated 目录中的 CSV 文件；输出文件必须写入 generated/ 目录（例如 OUTPUT_DIR = Path('generated')，并使用 OUTPUT_DIR / 'comprehensive_analysis_report.md'），禁止写到 session 根目录。",
+      "guidance": "基于 generated/ 目录下已生成的 CSV/PNG/README 等成果，进行综合数据分析并输出 comprehensive_analysis_report.md。必须读取 multi_table_join_result.csv 等 CSV 文件，做交叉分析（如学校×缴费状态、缺勤×参军等），给出至少 3 条有数据支撑的业务洞察和结论建议。禁止访问原始 data/ 目录或 SQLite；输出文件必须写入 generated/ 目录，禁止写到 session 根目录。",
       "outputs": [
         {"type": "markdown", "filename": "comprehensive_analysis_report.md"}
       ],
       "requirements": [
         "只允许读取 generated/ 目录下的文件",
-        "Markdown 需包含综合洞察、趋势/异常、群体特征等段落，可引用 PNG 图表文件名",
+        "必须读取 multi_table_join_result.csv 并基于真实列名做交叉统计分析",
+        "Markdown 需包含数据概况、交叉分析、统计发现、可视化解读、结论与建议等段落",
+        "每条洞察必须引用真实列名并给出计算得到的数值依据",
         "禁止在本轮执行 sqlite3.connect 或读取 data/ 下的原始 CSV 文件"
       ]
     },
     {
-      "round": 11,
+      "round": 10,
       "mode": "final_answer",
-      "input": {"type": "summary", "source_rounds": [2, 3, 4, 5, 6, 7, 8, 9, 10]},
-      "guidance": "仅输出一个 <Answer>，总结第 2-10 轮的分析过程、生成的关键文件以及整体结论/下一步建议，禁止再出现 <Analyze>/<Code>。引用文件必须来自 generated/ 目录。",
+      "input": {"type": "summary", "source_rounds": [2, 3, 4, 5, 6, 7, 8, 9]},
+      "guidance": "仅输出一个 <Answer>，总结第 2-9 轮的分析过程、生成的关键文件以及整体结论/下一步建议，禁止再出现 <Analyze>/<Code>。引用文件必须来自 generated/ 目录。",
       "outputs": [
         {"type": "answer", "filename": "<Answer>"}
       ],
       "requirements": [
         "只能输出单个 <Answer> 块",
-        "必须引用实际存在的文件（如 README.md、multi_table_analysis.md、multi_table_join_result.png、comprehensive_analysis_report.md 等）"
+        "必须引用实际存在的文件（如 README.md、comprehensive_analysis_report.md、multi_table_join_result.png 等）"
       ]
     }
   ]

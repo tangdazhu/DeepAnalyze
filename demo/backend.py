@@ -2644,9 +2644,7 @@ def bot_stream(messages, workspace, session_id="default"):
 
             if finished:
                 # 检查是否提前输出 Answer（在完成足够轮次之前）
-                MIN_REQUIRED_ROUNDS = (
-                    9  # 至少需要 9 轮（确保第 8、9 轮的 HTML 报告都已生成）
-                )
+                MIN_REQUIRED_ROUNDS = 9  # 至少需要 9 轮（确保第 8 轮 README 和第 9 轮综合分析报告都已生成）
                 if execute_rounds < MIN_REQUIRED_ROUNDS:
                     logger.warning(
                         f"[bot_stream] Premature <Answer> detected: execute_rounds={execute_rounds}, required={MIN_REQUIRED_ROUNDS}"
@@ -2658,9 +2656,8 @@ def bot_stream(messages, workspace, session_id="default"):
                         "- 第 2-6 轮：单表分析（处理多个数据文件）\n"
                         "- 第 7 轮：多表关联分析\n"
                         "- 第 8 轮：生成 README.md 索引文件\n"
-                        "- 第 9 轮：生成 multi_table_analysis.md 汇总报告\n"
-                        "- 第 10 轮：生成 comprehensive_analysis_report.md 综合报告\n"
-                        "- 第 11 轮：输出最终 <Answer>\n\n"
+                        "- 第 9 轮：生成 comprehensive_analysis_report.md 综合数据分析报告\n"
+                        "- 第 10 轮：输出最终 <Answer>\n\n"
                         f"**请立即继续第 {execute_rounds + 1} 轮分析，禁止输出 <Answer>。**"
                     )
                     messages.append({"role": "user", "content": reject_msg})

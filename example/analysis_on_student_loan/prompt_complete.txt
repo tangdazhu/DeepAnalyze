@@ -11,11 +11,11 @@
 2. **第 7 轮：使用 SQLite 数据库进行多表关联**
    - ✅ 此时才允许使用 `sqlite3.connect()`
 
-3. **第 11 轮：输出 `<Answer>`**
-   - ❌ **第 11 轮之前禁止输出 `<Answer>`**
-   - ✅ **只有第 11 轮才能输出 `<Answer>`**
+3. **第 10 轮：输出 `<Answer>`**
+   - ❌ **第 10 轮之前禁止输出 `<Answer>`**
+   - ✅ **只有第 10 轮才能输出 `<Answer>`**
 
-**如果你在第 11 轮之前输出 `<Answer>`，系统会强制终止任务并报错。**
+**如果你在第 10 轮之前输出 `<Answer>`，系统会强制终止任务并报错。**
 
 ## ⚡ 强制执行规则
 
@@ -119,9 +119,8 @@
 - **第 6 轮**：分析 disabled.csv 文件 📄
 - **第 7 轮**：使用 SQLite 数据库进行多表关联分析 📊
 - **第 8 轮**：生成 README.md 索引文件（记录所有生成的文件及其说明）
-- **第 9 轮**：生成 multi_table_analysis.md 汇总报告
-- **第 10 轮**：生成 comprehensive_analysis_report.md（Phase II 综合分析）
-- **第 11 轮**：输出 `<Answer>`（唯一允许输出 Answer 的轮次）
+- **第 9 轮**：生成 comprehensive_analysis_report.md（综合数据分析报告）
+- **第 10 轮**：输出 `<Answer>`（唯一允许输出 Answer 的轮次）
 
 ### 4. 第 2-6 轮：CSV 文件单表分析（必须完成）
 
@@ -419,18 +418,14 @@ print(merged.head())
 ### 7. 第 8 轮：生成 README.md 索引文件（旧模板已废弃）
 旧版 README 模板与当前规则冲突，已停用。请严格使用本文后部“第 8 轮：遍历 generated 目录并生成 README.md”的硬性要求与标准脚本。
 
-### 8. 第 9 轮：生成 multi_table_analysis.md 汇总报告
-- **任务**：遍历 `generated/` 目录下的 CSV/PNG/README 等产物，生成 Markdown 报告 `multi_table_analysis.md`。
-- **约束**：允许使用 `pathlib`、`pandas`、`datetime` 等库；必须通过 Python 构造 `markdown_lines` 并写盘，禁止直接粘贴 Markdown 文本。
+### 8. 第 9 轮：生成 comprehensive_analysis_report.md（综合数据分析报告）
+- **任务**：基于 `generated/` 目录下已生成的 CSV/PNG/README 等成果，读取真实数据做交叉分析，输出深度分析报告 `comprehensive_analysis_report.md`。
+- **约束**：允许使用 `pathlib`、`pandas`、`datetime` 等库；必须通过 Python 构造 `markdown_lines` 并写盘，禁止直接粘贴 Markdown 文本；禁止访问原始 `data/` 目录或 SQLite。
+- **说明**：请以本文后部"第 9 轮：生成综合数据分析报告"的完整模板为准。
 
-### 9. 第 10 轮：生成 comprehensive_analysis_report.md（Phase II 综合分析）
+### 9. 第 10 轮：输出最终答案
 
 **前置条件**：已完成第 2-9 轮的所有分析任务（包含 README 与 Markdown 报告）。
-**说明**：请以本文后部“第 10 轮：生成 Phase II 综合分析报告”的完整模板为准。
-
-### 10. 第 11 轮：输出最终答案
-
-**前置条件**：已完成第 2-10 轮的所有分析任务（包含 README 与 Markdown 报告）。
 **格式**：
 
 ```
@@ -446,7 +441,7 @@ print(merged.head())
 
 **如果你违反以下规则，系统会强制终止任务：**
 
-1. ⛔ **禁止在第 2-10 轮输出 `<Answer>` 标签**
+1. ⛔ **禁止在第 2-9 轮输出 `<Answer>` 标签**
 2. ⛔ **禁止跳过任何轮次**
 3. ⛔ **禁止在 `</Code>` 后继续输出任何内容**
 4. ⛔ **禁止臆测字段名** - 必须先用 `PRAGMA table_info(表名)` 查询真实字段
@@ -601,126 +596,41 @@ print(f"✅ README.md 已写入，列出了 {total_files} 个文件。")
 
 ---
 
-### 第 9 轮：生成 multi_table_analysis.md 汇总报告
-**任务**：使用 Python 遍历 `generated/` 目录中的 CSV、PNG、README 等文件，生成结构化 Markdown 报告 `multi_table_analysis.md`。禁止在 `<Code>` 中直接粘贴 Markdown 文本，必须通过 Python 构造 `markdown_lines` 并写盘。
+### 第 9 轮：生成综合数据分析报告（comprehensive_analysis_report.md）
+**任务**：基于 `generated/` 目录下已生成的 CSV/PNG/README 等成果，读取真实数据做**交叉分析**，输出深度分析报告 `comprehensive_analysis_report.md`。
 
-**输出文件**：`multi_table_analysis.md`
-
-**硬性要求**：
-1. 允许导入 `pathlib`、`pandas`、`datetime` 等库。  
-2. Markdown 必须包含 `## 文件概览`、`## 分析过程总结`、`## 关键发现`、`## 数据洞察`、`## 可视化图表`、`## 数据文件`、`## README 索引` 等段落。  
-3. 必须读取 `generated/multi_table_join_result.csv`（若存在），基于 `df.columns` 的真实列名做统计。  
-4. 必须给出至少 3 条"分析型洞察"：每条洞察都要引用真实列名，并给出计算得到的数值依据。  
-5. 禁止占位符残留：Markdown 中不得出现 `{rows}`、`{cols}` 等未渲染模板占位符。  
-6. 禁止不可读对象字符串：写入前将标量转换为普通 Python 数值（例如 `int(val)`/`float(val)`）。  
-7. 写入方式必须是 `Path(...).write_text("\n".join(markdown_lines), encoding="utf-8")`，禁止粘贴三引号 Markdown 字符串。  
-8. 结束时打印"✅ multi_table_analysis.md 已写入 …"日志。
-
-**推荐模板**：
-```python
-from pathlib import Path
-import pandas as pd
-
-generated_dir = Path("generated")
-if not generated_dir.exists():
-    raise FileNotFoundError(f"目录不存在：{generated_dir.resolve()}")
-
-files = sorted([p for p in generated_dir.iterdir() if p.is_file()])
-csv_files = [f for f in files if f.suffix.lower() == ".csv"]
-png_files = [f for f in files if f.suffix.lower() == ".png"]
-log_files = [f for f in files if f.name.startswith("execute_round_")]
-readme_path = generated_dir / "README.md"
-
-def build_file_list(items, empty_text):
-    if not items:
-        return [f"- {empty_text}"]
-    return [f"- `{f.name}` ({f.stat().st_size} bytes)" for f in items]
-
-markdown_lines = []
-markdown_lines.append("# 多表分析总结报告")
-markdown_lines.append("")
-markdown_lines.append("## 文件概览")
-markdown_lines.append(f"本次分析共生成 {len(files)} 个文件，全部存放于 `generated/` 目录。")
-markdown_lines.append("")
-markdown_lines.append("## 分析过程总结")
-markdown_lines.append("- **Round 2-6**: CSV 数据分析阶段")
-markdown_lines.append("- **Round 7**: SQLite 多表关联阶段")
-markdown_lines.append("- **Round 8**: 文件系统总结阶段，生成 README.md")
-markdown_lines.append("- **Round 9**: 报告生成阶段，创建本分析总结报告")
-markdown_lines.append("")
-markdown_lines.append("## 关键发现")
-markdown_lines.append(f"- 共处理 {len(csv_files)} 个 CSV 数据文件")
-markdown_lines.append(f"- 创建 {len(png_files)} 个数据可视化图表")
-markdown_lines.append(f"- 记录 {len(log_files)} 个执行日志文件")
-markdown_lines.append("")
-
-# 若 join 结果存在，构建数据洞察
-join_path = generated_dir / "multi_table_join_result.csv"
-if join_path.exists():
-    df_join = pd.read_csv(join_path)
-    markdown_lines.append("## 数据洞察（基于 multi_table_join_result.csv）")
-    markdown_lines.append(f"- **样本规模**：{len(df_join)} 行，{len(df_join.columns)} 列")
-    markdown_lines.append(f"- **列名**：{', '.join(map(str, df_join.columns.tolist()))}")
-    for col in df_join.columns:
-        nuniq = int(df_join[col].nunique())
-        missing = int(df_join[col].isnull().sum())
-        markdown_lines.append(f"- **{col}**：唯一值 {nuniq}，缺失 {missing}")
-    markdown_lines.append("")
-
-markdown_lines.append("## 可视化图表")
-markdown_lines += build_file_list(png_files, "（无 PNG 文件）")
-markdown_lines.append("")
-markdown_lines.append("## 数据文件")
-markdown_lines += build_file_list(csv_files, "（无 CSV 文件）")
-markdown_lines.append("")
-markdown_lines.append("## README 索引")
-if readme_path.exists():
-    markdown_lines.append(f"- `{readme_path.name}` - 完整文件列表索引")
-else:
-    markdown_lines.append("- （未找到 README.md）")
-
-report_path = generated_dir / "multi_table_analysis.md"
-report_path.write_text("\n".join(markdown_lines), encoding="utf-8")
-print(f"✅ multi_table_analysis.md 已写入，统计 {len(files)} 个文件。")
-```
-> 如需增加更多段落，请继续在 `markdown_lines` 列表中 append，而不是粘贴整段 Markdown。
-
----
-
-### 第 10 轮：生成 Phase II 综合分析报告（Markdown）
-**任务**：基于 `generated/` 目录下已生成的 CSV/PNG/README/MD 等文件，进行二次综合分析并输出 `comprehensive_analysis_report.md`。
-
-**前置条件**：已完成第 2-9 轮的所有分析任务。
+**输出文件**：`comprehensive_analysis_report.md`
 
 **核心约束**：
 1. **禁止访问原始数据**：不得使用 `sqlite3.connect()`、不得读取 `data/` 目录下的原始 CSV 文件
 2. **只能读取 generated/ 目录**：允许使用 `pandas.read_csv()` 读取 `generated/` 下的 CSV 文件
-3. **允许使用的库**：`pathlib`、`pandas`、`matplotlib`、`datetime`、`json` 等
+3. **允许使用的库**：`pathlib`、`pandas`、`datetime` 等
 4. **输出文件**：`comprehensive_analysis_report.md`（必须写入 `generated/` 目录）
 
-**分析内容要求**：
-- **必须读取真实文件**：使用 `pd.read_csv()` 读取 `multi_table_join_result.csv` 等实际存在的文件
-- **禁止编造数据**：所有分析结论必须基于读取的真实数据，禁止假设或虚构字段、数值
-- 综合洞察：仅基于 `multi_table_join_result.csv` 的真实列名进行统计（如 name, school, bool, month, organ 等）
-- 群体特征：如需统计残疾/参军/缺勤等群体，必须来自 join 结果或 `disabled_count.csv` 的真实字段
-- 可视化引用：只能引用 `generated/` 下真实存在的 PNG 文件
+**报告结构要求（必须包含以下段落）**：
+1. **数据概况**（轻量铺垫）：样本量、列名、缺失率概览
+2. **交叉分析**（核心价值，至少 2 组交叉）：
+   - 学校 × 缴费状态：哪些学校的欠费率最高？用 `pd.crosstab()` 或 `groupby` 计算
+   - 缺勤月数 × 参军状态：参军学生的缺勤是否更长？用 `groupby("organ").agg({"month": "mean"})` 等
+   - 残疾学生的学校分布是否集中？
+3. **统计发现**（至少 3 条有数据支撑的洞察）：
+   - 每条洞察必须引用真实列名并给出计算得到的数值（如 TopK 类别占比、均值/中位数、缺失率等）
+   - 禁止泛泛而谈，必须有具体数字
+4. **可视化解读**：嵌入 PNG 图表并对每张图给出一句话结论（不只是贴图）
+5. **综合结论与建议**：基于以上分析给出 2-3 条可操作建议
 
-**可追溯性与一致性要求（必须遵守）**：
-- **必须写入"数据证据区块"**：在 Markdown 中明确写出你读取的 CSV 文件名、`len(df)` 行数、`df.columns.tolist()` 真实列名、`df.dtypes` 真实类型，以及每列缺失数/缺失率。
-- **必须给出至少 3 条"分析型洞察"**：每条洞察都要 **引用真实列名（来自 df.columns）并给出你计算出的数值依据**，禁止泛泛而谈。
-  - 若存在类别列：用 `value_counts()`/`value_counts(normalize=True)` 给出 TopK 类别及占比。
-  - 若存在数值列：只对 `df.select_dtypes(include='number')` 的列做均值/中位数/分位数等统计。
-  - 若没有任何数值列：也必须输出基于类别列分布、缺失率、唯一值数量（`nunique()`）等得到的结论。
-- **禁止"默认 0"**：某项无法解析/不存在时，请输出 `N/A`，不得用 0 作为占位。
-- **禁止混入对话标签**：在 `markdown_lines` 的字符串内容里不要出现 `<Code>`、`</Code>` 等对话格式标签。
+**可追溯性要求（必须遵守）**：
+- **必须写入"数据证据区块"**：明确写出读取的 CSV 文件名、`len(df)` 行数、`df.columns.tolist()` 真实列名
+- 禁止占位符残留：Markdown 中不得出现 `{rows}`、`{cols}` 等未渲染模板占位符
+- 禁止不可读对象字符串：写入前将标量转换为普通 Python 数值（`int(val)`/`float(val)`）
+- **禁止"默认 0"**：某项无法解析/不存在时，请输出 `N/A`
+- **禁止混入对话标签**：`markdown_lines` 中不要出现 `<Code>`、`</Code>` 等标签
 
 **硬性要求**：
-1. **必须先读取 CSV 文件**：至少读取 `multi_table_join_result.csv`，查看其实际列名和数据
-2. **禁止引用不存在的文件**：只能引用 `generated/` 目录下真实存在的 CSV 和 PNG 文件
-3. **禁止编造字段名**：如果数据中没有 `loan_amount`、`monthly_income` 等字段，不得在分析中提及
-4. 必须使用 Python 构造 `markdown_lines` 列表并写入文件，禁止直接粘贴 Markdown 字符串
-5. Markdown 至少包含 3 个段落：综合洞察、数据分析、结论建议
-6. 结束时打印 "✅ comprehensive_analysis_report.md 已写入".
+1. 必须先读取 `multi_table_join_result.csv`，查看其实际列名和数据
+2. 禁止引用不存在的文件，禁止编造字段名
+3. 必须使用 Python 构造 `markdown_lines` 列表并写入文件，禁止直接粘贴 Markdown 字符串
+4. 结束时打印 "✅ comprehensive_analysis_report.md 已写入"
 
 **推荐模板**：
 ```python
@@ -732,9 +642,9 @@ generated_dir = Path("generated")
 csv_files = sorted(generated_dir.glob("*.csv"))
 png_files = sorted(generated_dir.glob("*.png"))
 
-# 读取 multi_table_join_result.csv
-df_join = pd.read_csv(generated_dir / "multi_table_join_result.csv")
-print(f"✅ 读取 multi_table_join_result.csv，共 {len(df_join)} 行，列名：{list(df_join.columns)}")
+# ── 读取主数据 ──
+df = pd.read_csv(generated_dir / "multi_table_join_result.csv")
+print(f"✅ 读取 multi_table_join_result.csv，共 {len(df)} 行，列名：{list(df.columns)}")
 
 def read_csv_safe(path: Path) -> pd.DataFrame:
     if path.exists():
@@ -743,82 +653,148 @@ def read_csv_safe(path: Path) -> pd.DataFrame:
 
 df_disabled = read_csv_safe(generated_dir / "disabled_count.csv")
 
-# 统计关键指标（仅基于真实列名）
-total_students = len(df_join)
-enrolled_schools = int(df_join["school"].nunique()) if "school" in df_join.columns else "N/A"
-payment_records = int(df_join["bool"].notna().sum()) if "bool" in df_join.columns else "N/A"
-absense_records = int(df_join["month"].notna().sum()) if "month" in df_join.columns else "N/A"
-enlist_records = int(df_join["organ"].notna().sum()) if "organ" in df_join.columns else "N/A"
+total = len(df)
+cols = list(df.columns)
 
-# 构造 Markdown
-markdown_lines = [
-    "# Student Loan 数据综合分析报告（Phase II）",
-    "",
-    f"生成时间：{datetime.now():%Y-%m-%d %H:%M:%S}",
-    "",
-    "## 1. 数据概览",
-    f"本次分析基于 **{len(csv_files)}** 个 CSV 文件和 **{len(png_files)}** 个可视化图表。",
-    f"多表关联结果共 **{total_students}** 条记录，包含字段：{', '.join(df_join.columns)}",
-    "",
-    f"- 在校学生涉及 **{enrolled_schools}** 所学校",
-    f"- 缴费状态记录 **{payment_records}** 条",
-    f"- 缺勤记录 **{absense_records}** 条",
-    f"- 参军学生记录 **{enlist_records}** 条",
-    "",
-    "## 2. 多维度分析",
-    "",
-    "### 学校分布",
-    "![学校分布图](enrolled_school_dist.png)",
-    "",
-    "### 缴费状态分布",
-    "![缴费状态分布图](payment_status_dist.png)",
-    "",
-    "### 缺勤月份分布",
-    "![缺勤月份分布图](absense_month_dist.png)",
-    "",
-    "### 参军机构分布",
-    "![参军机构分布图](enlist_organ_dist.png)",
-    "",
-    "### 残疾学生统计",
-    "![残疾学生占比图](disabled_vs_total.png)",
-    "",
-    "### 多表关联可视化",
-    "![多表关联结果](multi_table_join_result.png)",
-    "",
-    "## 3. 结论与建议",
-    "",
-    f"- 学生群体覆盖 {enrolled_schools} 所学校，建议针对不同学校制定差异化贷款政策",
-    f"- 缺勤学生占比较高（{absense_records} 条记录），需关注学业连续性对还款能力的影响",
-    f"- 参军学生记录（{enlist_records} 条）属于特殊群体，建议提供专项贷款优惠政策",
-    "- 多表关联分析揭示了学生状态的多维特征，为精准风控提供数据支持",
-    "",
-    "## 4. 参考文件",
-    "",
-    "- [multi_table_analysis.md](multi_table_analysis.md) - 前序分析过程总结",
-    "- [README.md](README.md) - 生成文件列表索引",
-]
+# ── 交叉分析 ──
+# 1) 学校 × 缴费状态
+cross_school_pay = pd.DataFrame()
+if {"school", "bool"}.issubset(df.columns):
+    cross_school_pay = pd.crosstab(df["school"], df["bool"], margins=True)
+
+# 2) 参军状态 × 缺勤月数
+organ_absense = pd.DataFrame()
+if {"organ", "month"}.issubset(df.columns):
+    organ_absense = df.groupby("organ")["month"].agg(["mean", "median", "count"])
+    organ_absense = organ_absense.sort_values("mean", ascending=False)
+
+# 3) 各列基础统计
+col_stats = []
+for c in cols:
+    nuniq = int(df[c].nunique())
+    missing = int(df[c].isnull().sum())
+    miss_pct = f"{missing / total * 100:.1f}%"
+    col_stats.append((c, nuniq, missing, miss_pct))
+
+# ── 构造 Markdown ──
+md = []
+md.append("# Student Loan 综合数据分析报告")
+md.append("")
+md.append(f"生成时间：{datetime.now():%Y-%m-%d %H:%M:%S}")
+md.append("")
+
+# 1. 数据概况
+md.append("## 1. 数据概况")
+md.append(f"- **数据来源**：`multi_table_join_result.csv`（{total} 行，{len(cols)} 列）")
+md.append(f"- **字段列表**：{', '.join(cols)}")
+md.append(f"- **CSV 文件数**：{len(csv_files)}，**PNG 图表数**：{len(png_files)}")
+md.append("")
+md.append("| 字段 | 唯一值 | 缺失数 | 缺失率 |")
+md.append("|------|--------|--------|--------|")
+for c, nuniq, missing, miss_pct in col_stats:
+    md.append(f"| {c} | {nuniq} | {missing} | {miss_pct} |")
+md.append("")
+
+# 2. 交叉分析
+md.append("## 2. 交叉分析")
+md.append("")
+if not cross_school_pay.empty:
+    md.append("### 2.1 学校 × 缴费状态")
+    md.append("以下为各学校的缴费状态交叉统计：")
+    md.append("")
+    md.append(cross_school_pay.to_markdown())
+    md.append("")
+    # 找出欠费率最高的学校
+    if "neg" in cross_school_pay.columns and "All" in cross_school_pay.columns:
+        rates = (cross_school_pay["neg"] / cross_school_pay["All"]).drop("All", errors="ignore")
+        top_school = rates.idxmax()
+        top_rate = f"{rates.max() * 100:.1f}%"
+        md.append(f"**发现**：欠费率最高的学校为 **{top_school}**（{top_rate}）。")
+    md.append("")
+
+if not organ_absense.empty:
+    md.append("### 2.2 参军机构 × 缺勤月数")
+    md.append("")
+    md.append("| 机构 | 平均缺勤月数 | 中位数 | 人数 |")
+    md.append("|------|-------------|--------|------|")
+    for org, row in organ_absense.iterrows():
+        md.append(f"| {org} | {row['mean']:.1f} | {row['median']:.1f} | {int(row['count'])} |")
+    md.append("")
+    top_org = organ_absense.index[0]
+    top_mean = f"{organ_absense.iloc[0]['mean']:.1f}"
+    md.append(f"**发现**：平均缺勤月数最长的机构为 **{top_org}**（{top_mean} 个月）。")
+    md.append("")
+
+# 3. 统计发现
+md.append("## 3. 统计发现")
+md.append("")
+# 类别列 TopK
+for c in cols:
+    if df[c].dtype == "object":
+        vc = df[c].value_counts()
+        top3 = vc.head(3)
+        items = "; ".join(f"{k}={int(v)}" for k, v in top3.items())
+        md.append(f"- **{c}** 共 {int(vc.shape[0])} 个类别，Top3：{items}")
+# 数值列统计
+for c in cols:
+    if pd.api.types.is_numeric_dtype(df[c]):
+        mean_v = float(df[c].mean())
+        med_v = float(df[c].median())
+        md.append(f"- **{c}** 均值={mean_v:.2f}，中位数={med_v:.2f}，"
+                  f"Q25={float(df[c].quantile(0.25)):.2f}，Q75={float(df[c].quantile(0.75)):.2f}")
+md.append("")
+
+# 4. 可视化解读
+md.append("## 4. 可视化图表解读")
+md.append("")
+chart_desc = {
+    "enrolled_school_dist.png": "展示各学校的学生注册人数分布，可识别生源集中度",
+    "payment_status_dist.png": "展示缴费/欠费状态占比，反映整体还款健康度",
+    "absense_month_dist.png": "展示最长缺勤月数的频率分布，识别缺勤集中区间",
+    "enlist_organ_dist.png": "展示参军学生的机构分布，了解兵源结构",
+    "disabled_vs_total.png": "对比残疾学生与总人数，量化特殊群体占比",
+    "multi_table_join_result.png": "多表关联结果的综合可视化",
+}
+for png in sorted(png_files):
+    desc = chart_desc.get(png.name, "数据可视化图表")
+    md.append(f"### {png.stem}")
+    md.append(f"![{png.stem}]({png.name})")
+    md.append(f"> {desc}")
+    md.append("")
+
+# 5. 结论与建议
+md.append("## 5. 结论与建议")
+md.append("")
+md.append(f"1. **生源分布不均**：{int(df['school'].nunique()) if 'school' in df.columns else 'N/A'} 所学校中，"
+          "部分学校学生集中度较高，建议针对重点学校制定差异化贷款审批策略。")
+md.append(f"2. **缺勤风险**：缺勤月数中位数为 {float(df['month'].median()) if 'month' in df.columns else 'N/A'}，"
+          "长期缺勤学生可能面临学业中断风险，需关注其还款能力。")
+md.append("3. **特殊群体关注**：参军学生和残疾学生属于政策优惠对象，"
+          "建议在贷款审批流程中增加专项通道。")
+md.append("")
 
 report_path = generated_dir / "comprehensive_analysis_report.md"
-report_path.write_text("\n".join(markdown_lines), encoding="utf-8")
-print(f"✅ comprehensive_analysis_report.md 已写入，共 {len(markdown_lines)} 行。")
+report_path.write_text("\n".join(md), encoding="utf-8")
+print(f"✅ comprehensive_analysis_report.md 已写入，共 {len(md)} 行。")
 ```
+> 如需增加更多段落，请继续在 `md` 列表中 append，而不是粘贴整段 Markdown。
 
 ---
 
-### 第 11 轮：输出总结报告
-**任务**：仅输出一个 `<Answer>`，形成对本次 10 轮（2-10 轮）分析与产出的总结报告。
+### 第 10 轮：输出总结报告
+**任务**：仅输出一个 `<Answer>`，形成对本次 9 轮（2-9 轮）分析与产出的总结报告。
 
 **写作要求（务必遵守）**：  
 1. 仅允许输出 `<Answer>`，禁止再写 `<Analyze>` / `<Code>`。  
 2. 报告需回答三件事：  
-   - **做了哪些分析**：逐轮概述第 2-10 轮的任务与方法。  
+   - **做了哪些分析**：逐轮概述第 2-9 轮的任务与方法。  
    - **生成了哪些结果**：列出关键文件（CSV/PNG/README/MD 等）并点明它们代表的含义或可视化内容。  
    - **整体结论/下一步**：基于已生成的文件给出至少 2 条定量或定性结论（务必引用具体文件作为依据），如出现被回滚的轮次也需说明原因及修复。  
 3. `<Answer>` 内正文可以是 Markdown 段落，但不得引用外部脚本或 CSS。  
 4. **禁止编造文件名**：只能引用以下真实存在的文件：
    - CSV: `enrolled_summary.csv`, `payment_status_summary.csv`, `absense_summary.csv`, `enlist_summary.csv`, `disabled_count.csv`, `multi_table_join_result.csv`
    - PNG: `enrolled_school_dist.png`, `payment_status_dist.png`, `absense_month_dist.png`, `enlist_organ_dist.png`, `disabled_vs_total.png`, `multi_table_join_result.png`
-   - MD: `multi_table_analysis.md`, `comprehensive_analysis_report.md`
+   - MD: `comprehensive_analysis_report.md`
    - 其他: `README.md`
 5. **禁止编造数据内容**：不得提及不存在的字段（如 `loan_amount`、`monthly_income`、`region` 等），只能基于实际的学生数据字段（name, school, bool, month, organ 等）进行总结。  
 
@@ -826,15 +802,14 @@ print(f"✅ comprehensive_analysis_report.md 已写入，共 {len(markdown_lines
 
 ## 🔒 轮次进度追踪
 
-**当前进度**：第 2 轮 / 共 11 轮
+**当前进度**：第 2 轮 / 共 10 轮
 **已完成**：第 1 轮（Bootstrap）
-**待完成**：第 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 轮
+**待完成**：第 2, 3, 4, 5, 6, 7, 8, 9, 10 轮
 
 **⚠️ 重要提醒**：
 - 每轮输出 `</Code>` 后立即停止
 - 等待代码执行完成后，立即开始下一轮
 - 不要等待用户指令，不要询问用户需求
 - **第 8 轮：生成 README.md（保持不变）**
-- **第 9 轮：生成 multi_table_analysis.md（Markdown 汇总报告）**
-- **第 10 轮：生成 comprehensive_analysis_report.md（Phase II 综合分析）**
-- **第 11 轮：输出 `<Answer>` 总结报告**
+- **第 9 轮：生成 comprehensive_analysis_report.md（综合数据分析报告）**
+- **第 10 轮：输出 `<Answer>` 总结报告**

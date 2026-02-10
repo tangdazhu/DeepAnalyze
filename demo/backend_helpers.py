@@ -91,128 +91,133 @@ print(f"✅ README.md 已写入，列出了 {total_files} 个文件。")
 
 
 def build_markdown_report_template(md_filename):
-    """返回生成 Markdown 分析报告的通用代码骨架"""
+    """返回生成综合数据分析报告的代码骨架（含交叉分析、统计发现、可视化解读、结论建议）"""
     template = f'''
-**请使用以下 Python 框架构建 Markdown（仅可微调变量/样式，不得删除核心语句）：**
+**请使用以下 Python 框架构建综合分析报告（仅可微调变量/样式，不得删除核心语句）：**
 
 ```python
 from pathlib import Path
+from datetime import datetime
 import pandas as pd
 
 generated_dir = Path("generated")
 if not generated_dir.exists():
     raise FileNotFoundError(f"目录不存在：{{generated_dir.resolve()}}")
 
-files = sorted([p for p in generated_dir.iterdir() if p.is_file()])
-csv_files = [f for f in files if f.suffix.lower() == ".csv"]
-png_files = [f for f in files if f.suffix.lower() == ".png"]
-log_files = [f for f in files if f.name.startswith("execute_round_") and f.suffix == ".txt"]
-md_files = [f for f in files if f.suffix.lower() == ".md"]
-readme_path = generated_dir / "README.md"
+csv_files = sorted(generated_dir.glob("*.csv"))
+png_files = sorted(generated_dir.glob("*.png"))
 
-def to_plain_number(val):
-    """将 numpy/pandas 标量转为普通 Python 数值，避免出现 np.int64 等不可读内容。"""
-    try:
-        if pd.isna(val):
-            return None
-    except Exception:
-        pass
-    try:
-        if hasattr(val, "item"):
-            return val.item()
-    except Exception:
-        pass
-    return val
+# ── 读取主数据 ──
+df = pd.read_csv(generated_dir / "multi_table_join_result.csv")
+print(f"✅ 读取 multi_table_join_result.csv，共 {{len(df)}} 行，列名：{{list(df.columns)}}")
 
-def build_file_list(items, empty_text):
-    if not items:
-        return [f"- {{empty_text}}"]
-    return [f"- `{{f.name}}` ({{f.stat().st_size}} bytes)" for f in items]
+def read_csv_safe(path: Path) -> pd.DataFrame:
+    if path.exists():
+        return pd.read_csv(path)
+    return pd.DataFrame()
 
-markdown_lines = []
-markdown_lines.append("# 多表分析总结报告")
-markdown_lines.append("")
+total = len(df)
+cols = list(df.columns)
 
-markdown_lines.append("## 文件概览")
-markdown_lines.append(f"本次分析共生成 {{len(files)}} 个文件，全部存放于 `generated/` 目录。")
-markdown_lines.append("")
+# ── 各列基础统计 ──
+col_stats = []
+for c in cols:
+    nuniq = int(df[c].nunique())
+    missing = int(df[c].isnull().sum())
+    miss_pct = f"{{missing / total * 100:.1f}}%"
+    col_stats.append((c, nuniq, missing, miss_pct))
 
-markdown_lines.append("## 分析过程总结")
-markdown_lines.append("- **Round 2-6**: CSV 数据分析阶段，对多个数据文件进行了单表分析并生成汇总结果")
-markdown_lines.append("- **Round 7**: SQLite 多表关联阶段，将五个表通过 name 字段进行 JOIN，生成综合分析结果")
-markdown_lines.append("- **Round 8**: 文件系统总结阶段，遍历 generated 目录生成 README.md 索引文件")
-markdown_lines.append("- **Round 9**: 报告生成阶段，创建本分析总结报告")
-markdown_lines.append("")
+# ── 交叉分析 ──
+cross_school_pay = pd.DataFrame()
+if {{"school", "bool"}}.issubset(df.columns):
+    cross_school_pay = pd.crosstab(df["school"], df["bool"], margins=True)
 
-markdown_lines.append("## 关键发现")
-markdown_lines.append(f"- 共处理 {{len([f for f in csv_files if 'summary' not in f.name and 'join' not in f.name])}} 个原始数据文件")
-markdown_lines.append(f"- 生成 {{len([f for f in csv_files if 'summary' in f.name or 'join' in f.name])}} 个统计汇总文件")
-markdown_lines.append(f"- 创建 {{len(png_files)}} 个数据可视化图表")
-markdown_lines.append(f"- 记录 {{len(log_files)}} 个执行日志文件")
-markdown_lines.append("")
+organ_absense = pd.DataFrame()
+if {{"organ", "month"}}.issubset(df.columns):
+    organ_absense = df.groupby("organ")["month"].agg(["mean", "median", "count"])
+    organ_absense = organ_absense.sort_values("mean", ascending=False)
 
-# 构建数据洞察（若 join 结果存在）
-join_path = generated_dir / "multi_table_join_result.csv"
-if join_path.exists():
-    try:
-        df_join = pd.read_csv(join_path)
-    except Exception:
-        df_join = pd.DataFrame()
+# ── 构造 Markdown ──
+md = []
+md.append("# 综合数据分析报告")
+md.append("")
+md.append(f"生成时间：{{datetime.now():%Y-%m-%d %H:%M:%S}}")
+md.append("")
 
-    if not df_join.empty:
-        markdown_lines.append("## 数据洞察（基于 multi_table_join_result.csv）")
-        markdown_lines.append(f"- **样本规模**：{{len(df_join)}} 行，{{len(df_join.columns)}} 列")
-        markdown_lines.append(f"- **列名**：{{', '.join(map(str, df_join.columns.tolist()))}}")
+# 1. 数据概况
+md.append("## 1. 数据概况")
+md.append(f"- **数据来源**：`multi_table_join_result.csv`（{{total}} 行，{{len(cols)}} 列）")
+md.append(f"- **字段列表**：{{', '.join(cols)}}")
+md.append(f"- **CSV 文件数**：{{len(csv_files)}}，**PNG 图表数**：{{len(png_files)}}")
+md.append("")
+md.append("| 字段 | 唯一值 | 缺失数 | 缺失率 |")
+md.append("|------|--------|--------|--------|")
+for c, nuniq, missing, miss_pct in col_stats:
+    md.append(f"| {{c}} | {{nuniq}} | {{missing}} | {{miss_pct}} |")
+md.append("")
 
-        missing_rate = df_join.isna().mean().sort_values(ascending=False)
-        top_missing = missing_rate.head(3)
-        top_items = [f"{{col}}={{rate:.2%}}" for col, rate in top_missing.items()]
-        markdown_lines.append(f"- **缺失率 Top3**：{{', '.join(top_items)}}")
+# 2. 交叉分析
+md.append("## 2. 交叉分析")
+md.append("")
+if not cross_school_pay.empty:
+    md.append("### 2.1 学校 × 缴费状态")
+    md.append(cross_school_pay.to_markdown())
+    md.append("")
+    if "neg" in cross_school_pay.columns and "All" in cross_school_pay.columns:
+        rates = (cross_school_pay["neg"] / cross_school_pay["All"]).drop("All", errors="ignore")
+        top_school = rates.idxmax()
+        top_rate = f"{{rates.max() * 100:.1f}}%"
+        md.append(f"**发现**：欠费率最高的学校为 **{{top_school}}**（{{top_rate}}）。")
+    md.append("")
 
-        cat_cols = df_join.select_dtypes(exclude="number").columns.tolist()
-        num_cols = df_join.select_dtypes(include="number").columns.tolist()
+if not organ_absense.empty:
+    md.append("### 2.2 参军机构 × 缺勤月数")
+    md.append("")
+    md.append("| 机构 | 平均缺勤月数 | 中位数 | 人数 |")
+    md.append("|------|-------------|--------|------|")
+    for org, row in organ_absense.iterrows():
+        md.append(f"| {{org}} | {{row['mean']:.1f}} | {{row['median']:.1f}} | {{int(row['count'])}} |")
+    md.append("")
 
-        if cat_cols:
-            col = cat_cols[0]
-            vc = df_join[col].astype(str).value_counts(dropna=False)
-            topk = vc.head(3)
-            parts = [f"{{k}}={{int(to_plain_number(v) or 0)}}" for k, v in topk.items()]
-            markdown_lines.append(f"- **类别分布示例**：字段 `{{col}}` Top3={{'; '.join(parts)}}（共{{len(vc)}}类）")
+# 3. 统计发现
+md.append("## 3. 统计发现")
+md.append("")
+for c in cols:
+    if df[c].dtype == "object":
+        vc = df[c].value_counts()
+        top3 = vc.head(3)
+        items = "; ".join(f"{{k}}={{int(v)}}" for k, v in top3.items())
+        md.append(f"- **{{c}}** 共 {{int(vc.shape[0])}} 个类别，Top3：{{items}}")
+for c in cols:
+    if pd.api.types.is_numeric_dtype(df[c]):
+        md.append(f"- **{{c}}** 均值={{float(df[c].mean()):.2f}}，中位数={{float(df[c].median()):.2f}}，"
+                  f"Q25={{float(df[c].quantile(0.25)):.2f}}，Q75={{float(df[c].quantile(0.75)):.2f}}")
+md.append("")
 
-        if num_cols:
-            col = num_cols[0]
-            s = df_join[col]
-            mean_val = to_plain_number(s.mean())
-            median_val = to_plain_number(s.median())
-            q25 = to_plain_number(s.quantile(0.25))
-            q75 = to_plain_number(s.quantile(0.75))
-            markdown_lines.append(f"- **数值分布示例**：字段 `{{col}}` mean={{mean_val}}, median={{median_val}}, p25={{q25}}, p75={{q75}}")
+# 4. 可视化解读
+md.append("## 4. 可视化图表解读")
+md.append("")
+for png in sorted(png_files):
+    md.append(f"### {{png.stem}}")
+    md.append(f"![{{png.stem}}]({{png.name}})")
+    md.append("")
 
-        markdown_lines.append("")
-
-markdown_lines.append("## 可视化图表")
-markdown_lines += build_file_list(png_files, "（无 PNG 文件）")
-markdown_lines.append("")
-
-markdown_lines.append("## 数据文件")
-markdown_lines += build_file_list(csv_files, "（无 CSV 文件）")
-markdown_lines.append("")
-
-markdown_lines.append("## README 索引")
-if readme_path.exists():
-    markdown_lines.append(f"- `{{readme_path.name}}` - 完整文件列表索引")
-else:
-    markdown_lines.append("- （未找到 README.md）")
-markdown_lines.append("")
+# 5. 结论与建议
+md.append("## 5. 结论与建议")
+md.append("")
+md.append("1. 基于交叉分析结果，给出针对性建议")
+md.append("2. 基于统计发现，指出需要关注的风险点")
+md.append("3. 基于可视化图表，总结数据的整体特征")
+md.append("")
 
 report_path = generated_dir / "{md_filename}"
-report_path.write_text("\\n".join(markdown_lines), encoding="utf-8")
-print(f"✅ Markdown 报告已写入：{{report_path.name}}")
+report_path.write_text("\\n".join(md), encoding="utf-8")
+print(f"✅ 综合分析报告已写入：{{report_path.name}}")
 ```
 
-- ❗ Markdown 必须通过 `markdown_lines` 逐行构建，禁止 `md_template = \\"""...\\"""` 或 `print("#")` 写死整段 Markdown。
-- ❗ 需遍历 generated/ 下真实存在的 CSV/PNG/README 文件，并写入列表。
-- ❗ 必须包含 ## 文件概览、## 分析过程总结、## 关键发现、## 数据洞察、## 可视化图表、## 数据文件、## README 索引 等段落。
+- ❗ Markdown 必须通过 `md` 列表逐行构建，禁止 `md_template = \\"""...\\"""` 写死整段 Markdown。
+- ❗ 必须读取 multi_table_join_result.csv 并做交叉分析，禁止只列文件清单。
+- ❗ 必须包含 ## 数据概况、## 交叉分析、## 统计发现、## 可视化图表解读、## 结论与建议 等段落。
 '''
     return textwrap.dedent(template).strip()
 
