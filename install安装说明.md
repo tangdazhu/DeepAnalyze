@@ -34,6 +34,7 @@ pip install -r requirements.txt
 
 1. **模型服务**
 --seed 42：固定随机种子（可以是任意整数，42 是常用值）
+--reasoning-parser qwen3：（可选）启用 Qwen3 推理解析器，vLLM ≥0.8 支持；旧版本可省略，backend.py 会通过 `/no_think` 标记兜底禁用 thinking
 
    ```bash
    (deepanalyze) tdz@tangdazhu:~$
@@ -46,6 +47,9 @@ pip install -r requirements.txt
   --seed 42 \
   --max-model-len 32768
    ```
+   
+   > 若 vLLM ≥0.8，可追加 `--reasoning-parser qwen3` 以获得更精确的 thinking 控制。
+   > Thinking 开关由 `API/config.py` 中的 `ENABLE_THINKING` 控制，backend.py 会自动在请求中注入 `/no_think` 标记（兼容所有 vLLM 版本）。
    
 2. **后端服务**（使用 demo/backend.py，提供 `/workspace/*` 等接口）
    ```bash
