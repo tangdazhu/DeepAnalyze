@@ -2095,6 +2095,8 @@ def bot_stream(messages, workspace, session_id="default"):
     MAX_EMPTY_CODE_ROUNDS = 3
     missing_code_rounds = 0  # 连续缺少 <Code> 标签的轮数
     MAX_MISSING_CODE_ROUNDS = 3
+    md_filename_reject_rounds = 0  # 连续 markdown filename 未引用的拒绝轮数
+    MAX_MD_FILENAME_REJECT_ROUNDS = 3  # 超过此上限后跳过文件名校验，直接执行
     duplicate_analyze_rounds = 0  # 连续重复 <Analyze> 的轮数
     MAX_DUPLICATE_ANALYZE_ROUNDS = 5  # 最多允许 5 轮重复（增加容忍度）
     suppress_duplicate_analyze_once = (
@@ -3132,6 +3134,7 @@ def bot_stream(messages, workspace, session_id="default"):
                         mode_for_next == "markdown_report"
                         and effective_code
                         and len(effective_code.strip()) < 120
+                        and md_filename_reject_rounds < MAX_MD_FILENAME_REJECT_ROUNDS
                     ):
                         expected_md_files = (
                             round_expected_filenames_by_type(rule_for_next, "markdown")
@@ -3143,9 +3146,12 @@ def bot_stream(messages, workspace, session_id="default"):
                             if expected_md_files and expected_md_files[0]
                             else "(规则要求的Markdown文件)"
                         )
+                        md_filename_reject_rounds += 1
                         logger.warning(
-                            "[bot_stream] Code rejected: extracted markdown report code too short (len=%s)",
+                            "[bot_stream] Code rejected: extracted markdown report code too short (len=%s, attempt %d/%d)",
                             len(effective_code.strip()),
+                            md_filename_reject_rounds,
+                            MAX_MD_FILENAME_REJECT_ROUNDS,
                         )
                         short_prompt = (
                             "检测到你在 <Code> 中输出的脚本内容过短/不完整，系统无法执行并生成 Markdown 报告。"
@@ -3238,18 +3244,33 @@ def bot_stream(messages, workspace, session_id="default"):
                             expected_md_name
                             and expected_md_name.lower() not in effective_code.lower()
                         ):
+                            md_filename_reject_rounds += 1
                             logger.warning(
-                                "[bot_stream] Code rejected: expected Markdown filename not referenced: %s",
+                                "[bot_stream] Code rejected: expected Markdown filename not referenced: %s (attempt %d/%d)",
                                 expected_md_name,
+                                md_filename_reject_rounds,
+                                MAX_MD_FILENAME_REJECT_ROUNDS,
                             )
-                            prompt = (
-                                f"第 {target_round} 轮必须写出 `{expected_md_name}`。"
-                                f"请在代码中使用 `Path('generated') / '{expected_md_name}'` 写入该 Markdown 文件（必须与规则一致），"
-                                "请用 `markdown_lines = [...]` 逐行构造 Markdown，然后 write_text 写盘。"
-                            )
-                            messages.append({"role": "user", "content": prompt})
-                            refund_iteration()
-                            continue
+                            if (
+                                md_filename_reject_rounds
+                                >= MAX_MD_FILENAME_REJECT_ROUNDS
+                            ):
+                                logger.warning(
+                                    "[bot_stream] Markdown filename reject limit reached, skipping filename check to avoid infinite loop"
+                                )
+                                md_filename_reject_rounds = 0
+                                # 不再 continue，让代码继续执行后续流程
+                            else:
+                                prompt = (
+                                    f"第 {target_round} 轮必须写出 `{expected_md_name}`。"
+                                    f"请在代码中使用 `Path('generated') / '{expected_md_name}'` 写入该 Markdown 文件（必须与规则一致），"
+                                    "请用 `markdown_lines = [...]` 逐行构造 Markdown，然后 write_text 写盘。"
+                                )
+                                messages.append({"role": "user", "content": prompt})
+                                refund_iteration()
+                                continue
+                        else:
+                            md_filename_reject_rounds = 0  # 校验通过，重置计数
 
                     # 计算代码签名，用于重复检测
                     code_signature = "\n".join(
