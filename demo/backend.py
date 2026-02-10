@@ -3264,7 +3264,10 @@ def bot_stream(messages, workspace, session_id="default"):
                                 prompt = (
                                     f"第 {target_round} 轮必须写出 `{expected_md_name}`。"
                                     f"请在代码中使用 `Path('generated') / '{expected_md_name}'` 写入该 Markdown 文件（必须与规则一致），"
-                                    "请用 `markdown_lines = [...]` 逐行构造 Markdown，然后 write_text 写盘。"
+                                    "请用 `markdown_lines = [...]` 逐行构造 Markdown，然后 write_text 写盘。\n\n"
+                                    "⚠️ 禁止生成情感分析/NLP/TextBlob/spaCy 等无关代码。"
+                                    "本轮任务是基于 generated/ 目录下已有的 CSV 文件（如 multi_table_join_result.csv）做数据统计分析，"
+                                    "请严格按照上方提供的 Python 代码模板执行。禁止使用 input() 函数。"
                                 )
                                 messages.append({"role": "user", "content": prompt})
                                 refund_iteration()
@@ -3304,6 +3307,27 @@ def bot_stream(messages, workspace, session_id="default"):
                         # 只保留包含实际函数调用的行
                         _code_lines.append(stripped)
                     _code_no_comments = "\n".join(_code_lines)
+
+                    # 检测阻塞调用：input() 在无交互环境下会导致超时
+                    _stripped_for_input = re.sub(
+                        r'(["\']).*?\1', '""', _code_no_comments
+                    )
+                    if re.search(r"\binput\s*\(", _stripped_for_input):
+                        logger.warning(
+                            "[bot_stream] Code rejected: contains input() call which blocks in non-interactive environment"
+                        )
+                        messages.append(
+                            {
+                                "role": "user",
+                                "content": (
+                                    "你的代码中包含 `input()` 调用，在自动化执行环境中会导致超时阻塞。"
+                                    "请移除所有 `input()` 调用，改为直接使用变量赋值或从文件读取数据。"
+                                    "禁止使用任何需要用户交互的函数（input/raw_input/sys.stdin 等）。"
+                                ),
+                            }
+                        )
+                        refund_iteration()
+                        continue
 
                     has_pandas = (
                         "import pandas" in _code_no_comments
@@ -4327,7 +4351,8 @@ def bot_stream(messages, workspace, session_id="default"):
                                     missing_file_retries,
                                     MAX_MISSING_FILE_RETRIES,
                                 )
-                                missing_file_retries = 0
+                                # 不重置计数器：保持高值防止后续 error detection 回退轮次后再次触发重试循环
+                                # missing_file_retries 会在下一轮成功时被重置（else 分支）
                             else:
                                 produced_hint = "，本轮检测到的文件：" + (
                                     ", ".join(sorted(produced_names))
@@ -4546,7 +4571,12 @@ def bot_stream(messages, workspace, session_id="default"):
 
                     # 检测代码执行错误：只要有 Traceback/Error/Exception 就警告模型
                     # 不管是否生成了文件，因为部分成功的代码仍可能包含严重错误
-                    if not is_schema_code and non_schema_exec_rounds > 0:
+                    # 但如果 output retries 已经 exhausted，不再回退轮次，让流程推进到下一轮
+                    if (
+                        not is_schema_code
+                        and non_schema_exec_rounds > 0
+                        and missing_file_retries <= MAX_MISSING_FILE_RETRIES
+                    ):
                         has_error = any(
                             keyword in exe_output.lower()
                             for keyword in ["traceback", "error:", "exception"]
