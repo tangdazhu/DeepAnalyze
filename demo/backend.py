@@ -2213,7 +2213,7 @@ def bot_stream(messages, workspace, session_id="default"):
         safe_messages = trim_messages(messages)
 
         _extra_body = {
-            "add_generation_prompt": False,
+            "add_generation_prompt": True,
             "stop_token_ids": [151676, 151645],
         }
         response = client.chat.completions.create(
