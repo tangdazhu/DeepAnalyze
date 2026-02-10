@@ -2163,22 +2163,58 @@ def bot_stream(messages, workspace, session_id="default"):
         )
         if len(serialized) <= MAX_PROMPT_CHARS:
             return input_messages
-        trimmed: list[dict] = []
+
+        # 始终保留：第一条 system 消息（任务上下文）+ 最后一条 user 消息（当前轮指令/代码模板）
+        head_msgs = []
+        tail_msgs = []
+        reserved_chars = 0
+
+        # 保留第一条 system 消息
+        if input_messages and input_messages[0].get("role") == "system":
+            head_msgs.append(input_messages[0])
+            reserved_chars += len(json.dumps(input_messages[0], ensure_ascii=False))
+
+        # 保留最后一条 user 消息（通常包含 continue prompt 和代码模板）
+        if input_messages and input_messages[-1].get("role") == "user":
+            tail_msgs.append(input_messages[-1])
+            reserved_chars += len(json.dumps(input_messages[-1], ensure_ascii=False))
+
+        # 中间消息从后往前保留，直到达到配额
+        middle_start = len(head_msgs)
+        middle_end = len(input_messages) - len(tail_msgs)
+        middle_msgs = input_messages[middle_start:middle_end]
+
+        budget = MAX_PROMPT_CHARS - reserved_chars
+        kept_middle: list[dict] = []
         total = 0
-        for msg in reversed(input_messages):
+        for msg in reversed(middle_msgs):
             encoded = json.dumps(msg, ensure_ascii=False)
-            if total + len(encoded) > MAX_PROMPT_CHARS:
+            if total + len(encoded) > budget:
                 break
-            trimmed.append(msg)
+            kept_middle.append(msg)
             total += len(encoded)
-        trimmed = list(reversed(trimmed))
-        lead = [
-            {
-                "role": "system",
-                "content": "历史消息过长，已截断早期对话，请根据仍保留的内容继续。",
-            }
-        ]
-        return lead + trimmed
+        kept_middle = list(reversed(kept_middle))
+
+        # 如果有截断，插入提示
+        truncation_notice = []
+        if len(kept_middle) < len(middle_msgs):
+            truncation_notice = [
+                {
+                    "role": "system",
+                    "content": "历史消息过长，已截断早期对话，请根据仍保留的内容继续。",
+                }
+            ]
+        result = head_msgs + truncation_notice + kept_middle + tail_msgs
+        logger.info(
+            "[trim_messages] original=%d msgs, kept=%d (head=%d, middle=%d, tail=%d, truncated=%d)",
+            len(input_messages),
+            len(result),
+            len(head_msgs),
+            len(kept_middle),
+            len(tail_msgs),
+            len(middle_msgs) - len(kept_middle),
+        )
+        return result
 
     # 【强制首轮 bootstrap】在第一轮迭代前，无论如何都先执行 schema bootstrap
     if not schema_bootstrap_used:
@@ -4364,6 +4400,33 @@ def bot_stream(messages, workspace, session_id="default"):
                                     + produced_hint
                                     + "。请补齐缺少的产物。"
                                 )
+                                # 对 markdown_report 模式，附带执行错误信息和正确路径提示
+                                if mode_for_current == "markdown_report":
+                                    # 提取 exe_output 中的错误行
+                                    error_lines_in_output = [
+                                        line
+                                        for line in (exe_output or "").split("\n")
+                                        if any(
+                                            kw in line.lower()
+                                            for kw in [
+                                                "error",
+                                                "traceback",
+                                                "exception",
+                                                "filenotfound",
+                                            ]
+                                        )
+                                    ]
+                                    if error_lines_in_output:
+                                        prompt += (
+                                            "\n\n⚠️ 代码执行时出现以下错误：\n"
+                                            + "\n".join(error_lines_in_output[-5:])
+                                        )
+                                    prompt += (
+                                        "\n\n**关键提示**：CSV 文件在 `generated/` 子目录下，必须使用 `Path('generated') / 'multi_table_join_result.csv'` 读取，"
+                                        "禁止使用 `'multi_table_join_result.csv'` 这种不带目录前缀的路径。"
+                                        "请严格按照上方提供的 Python 代码模板执行，不要自行编写代码。"
+                                        "代码中禁止使用 try/except 吞掉异常，必须让错误正常抛出以便定位问题。"
+                                    )
                                 # 先把模型响应和执行结果加入消息历史，避免连续 user 消息导致模型回声
                                 messages.append(
                                     {"role": "assistant", "content": cur_res}
