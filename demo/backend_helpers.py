@@ -305,63 +305,24 @@ md.append("## 6. 结论与建议")
 md.append("")
 md.append("### 6.1 核心发现")
 findings = []
-# 基于缺失率发现
 high_missing = [(c, miss_pct) for c, _, missing, miss_pct in col_stats if missing > 0]
 if high_missing:
     for c, pct in high_missing:
-        findings.append(f"字段 **{{c}}** 存在缺失（缺失率 {{pct}}），建议在后续分析中进行缺失值处理")
+        findings.append(f"字段 **{{c}}** 存在缺失（缺失率 {{pct}}）")
 else:
     findings.append("所有字段均无缺失值，数据质量良好")
-# 基于类别分布发现
 for c in cat_cols:
     vc = df[c].value_counts()
     if len(vc) == 1:
-        findings.append(f"字段 **{{c}}** 仅有 1 个取值（{{vc.index[0]}}），该字段无区分度，可考虑剔除")
+        findings.append(f"字段 **{{c}}** 仅有 1 个取值（{{vc.index[0]}}），无区分度")
     elif vc.iloc[0] / total > 0.7:
-        findings.append(f"字段 **{{c}}** 中 **{{vc.index[0]}}** 占比超过 70%（{{vc.iloc[0]}}/{{total}}），分布严重偏斜")
-# 基于数值分布发现
+        findings.append(f"字段 **{{c}}** 中 **{{vc.index[0]}}** 占比超 70%，分布偏斜")
 for c in num_cols:
-    q1 = float(df[c].quantile(0.25))
-    q3 = float(df[c].quantile(0.75))
+    q1, q3 = float(df[c].quantile(0.25)), float(df[c].quantile(0.75))
     iqr = q3 - q1
     outliers = int(((df[c] < q1 - 1.5 * iqr) | (df[c] > q3 + 1.5 * iqr)).sum())
     if outliers > 0:
-        findings.append(f"字段 **{{c}}** 存在 {{outliers}} 个离群值（IQR 方法），建议进一步排查")
-
-# ── 学生贷款业务相关发现 ──
-# 欠费人群特征
-if {{"school", "bool"}}.issubset(df.columns) and not cross_school_pay.empty:
-    if "neg" in cross_school_pay.columns and "All" in cross_school_pay.columns:
-        rates = (cross_school_pay["neg"] / cross_school_pay["All"]).drop("All", errors="ignore")
-        top_school = rates.idxmax()
-        top_rate = f"{{rates.max() * 100:.1f}}%"
-        bottom_school = rates.idxmin()
-        bottom_rate = f"{{rates.min() * 100:.1f}}%"
-        findings.append(
-            f"欠费率最高的学校为 **{{top_school}}**（{{top_rate}}），最低为 **{{bottom_school}}**（{{bottom_rate}}），"
-            f"不同学校的借款人还款表现存在显著差异"
-        )
-    elif "pos" in cross_school_pay.columns:
-        findings.append("所有借款人的缴费状态均为正常（pos），当前样本中未发现欠费情况")
-
-# 缺勤与还款风险
-if {{"month"}}.issubset(df.columns) and pd.api.types.is_numeric_dtype(df["month"]):
-    avg_absence = float(df["month"].mean())
-    long_absence_count = int((df["month"] >= 6).sum())
-    findings.append(
-        f"借款人平均离校缺勤 **{{avg_absence:.1f}}** 个月，其中 **{{long_absence_count}}** 人缺勤 6 个月及以上。"
-        f"长期缺勤可能意味着学业中断，是贷款违约的重要预警信号"
-    )
-
-# 参军机构与贷款减免
-if not organ_absense.empty:
-    top_org = organ_absense.index[0]
-    top_mean = organ_absense.iloc[0]["mean"]
-    findings.append(
-        f"参军机构中，**{{top_org}}** 的平均缺勤月数最高（{{top_mean:.1f}} 个月），"
-        f"该机构借款人可能面临更长的服役期导致的学业中断，需评估其贷款延期还款资格"
-    )
-
+        findings.append(f"字段 **{{c}}** 存在 {{outliers}} 个离群值（IQR 方法）")
 if not findings:
     findings.append("数据整体分布均匀，未发现显著异常")
 for i, f_item in enumerate(findings, 1):
@@ -371,21 +332,9 @@ md.append("")
 md.append("### 6.2 建议措施")
 suggestions = []
 if high_missing:
-    suggestions.append("**数据清洗**：对存在缺失的字段进行填充（均值/众数）或删除处理")
-if any(df[c].value_counts().iloc[0] / total > 0.7 for c in cat_cols if len(df[c].value_counts()) > 0):
-    suggestions.append("**特征筛选**：对分布严重偏斜的类别字段评估是否保留，避免引入噪声")
-if not cross_school_pay.empty:
-    if "neg" in cross_school_pay.columns:
-        suggestions.append("**差异化催收**：针对欠费率较高的学校，建议深入分析欠费原因（学费水平、就业率、地区经济等），制定差异化催收策略")
-    suggestions.append("**还款监控**：建立按学校维度的还款率仪表盘，及时发现还款异常的学校群体")
-if not organ_absense.empty:
-    top_org = organ_absense.index[0]
-    suggestions.append(f"**服役人员关怀**：对缺勤月数较高的服役机构（如 **{{top_org}}**）借款人，评估其是否符合军人学生贷款豁免或延期还款政策")
-if {{"month"}}.issubset(df.columns) and pd.api.types.is_numeric_dtype(df["month"]):
-    suggestions.append("**学业中断预警**：对缺勤超过 6 个月的借款人建立预警机制，主动联系了解其学业和还款计划")
-suggestions.append("**持续监控**：建议定期更新数据并重新运行分析流程，跟踪各学校欠费率、缺勤月数等关键风险指标的变化趋势")
-if not suggestions:
-    suggestions.append("数据质量良好，建议保持当前数据采集流程")
+    suggestions.append("**数据清洗**：对缺失字段进行填充或删除处理")
+suggestions.append("**持续监控**：建议定期更新数据并重新运行分析流程")
+suggestions.append("**深入分析**：对分布异常或离群值较多的字段做进一步业务调研")
 for s in suggestions:
     md.append(f"- {{s}}")
 md.append("")
