@@ -2212,16 +2212,11 @@ def bot_stream(messages, workspace, session_id="default"):
         )
         safe_messages = trim_messages(messages)
 
-        _extra_body = {
-            "add_generation_prompt": True,
-            "stop_token_ids": [151676, 151645],
-        }
         response = client.chat.completions.create(
             model=MODEL_PATH,
             messages=safe_messages,
             temperature=0.3,
             stream=True,
-            extra_body=_extra_body,
         )
         raw_res = ""
         sanitized_stream = ""
