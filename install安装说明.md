@@ -34,7 +34,7 @@ pip install -r requirements.txt
 
 1. **模型服务**
 --seed 42：固定随机种子（可以是任意整数，42 是常用值）
---reasoning-parser qwen3：**必须**，启用 Qwen3 推理解析器，使 backend.py 的 `ENABLE_THINKING` 开关生效
+--chat-template：指定自定义 chat template，禁用 Qwen3 的 thinking 模式以大幅提升生成速度
 
    ```bash
    (deepanalyze) tdz@tangdazhu:~$
@@ -46,11 +46,11 @@ pip install -r requirements.txt
   --trust-remote-code \
   --seed 42 \
   --max-model-len 32768 \
-  --reasoning-parser qwen3
+  --chat-template ~/DeepAnalyze/demo/config/qwen3_nothink.jinja
    ```
    
-   > Thinking 开关由 `API/config.py` 中的 `ENABLE_THINKING` 控制（默认 `False` 即关闭）。
-   > backend.py 通过 `extra_body={"chat_template_kwargs": {"enable_thinking": False}}` 在请求级别禁用 thinking。
+   > `qwen3_nothink.jinja` 在 assistant 回复开头注入空的 `<think></think>` 块，使模型跳过 thinking 直接输出。
+   > 若需要启用 thinking（如调试推理质量），去掉 `--chat-template` 参数即可恢复默认行为。
    
 2. **后端服务**（使用 demo/backend.py，提供 `/workspace/*` 等接口）
    ```bash
