@@ -274,43 +274,89 @@ md.append("")
 md.append("## 5. 可视化图表解读")
 md.append("")
 
+def _find_best_csv(png_stem, csv_files_list):
+    """为 PNG 找到最佳匹配的 CSV：先同名，再关键词模糊匹配"""
+    exact = generated_dir / f"{{png_stem}}.csv"
+    if exact.exists():
+        return exact
+    stem_lower = png_stem.lower()
+    keywords = [w for w in re.split(r"[_\\-\\s]+", stem_lower) if len(w) > 2]
+    best_path, best_score = None, 0
+    for cf in csv_files_list:
+        cf_lower = cf.stem.lower()
+        score = sum(1 for kw in keywords if kw in cf_lower)
+        if score > best_score:
+            best_score = score
+            best_path = cf
+    return best_path if best_score > 0 else None
+
+def _build_interp(png_stem, matched_csv, df_main):
+    """基于匹配的 CSV 和主表数据，生成有业务含义的图表解读"""
+    parts = []
+    stem_lower = png_stem.lower()
+    local_df = None
+    if matched_csv and matched_csv.exists():
+        try:
+            local_df = pd.read_csv(matched_csv)
+            parts.append(f"数据源 `{{matched_csv.name}}`（{{len(local_df)}} 行 {{len(local_df.columns)}} 列）。")
+        except Exception:
+            pass
+    # 数值列统计
+    src = local_df if local_df is not None else df_main
+    _nc = [c for c in src.columns if pd.api.types.is_numeric_dtype(src[c])]
+    for c in _nc:
+        _mean, _med = float(src[c].mean()), float(src[c].median())
+        _min, _max = float(src[c].min()), float(src[c].max())
+        parts.append(f"`{{c}}` 均值={{_mean:.2f}}，中位数={{_med:.2f}}，范围[{{_min:.2f}}, {{_max:.2f}}]。")
+    # 分类列分布
+    _cc = [c for c in src.columns if src[c].dtype == "object"]
+    for c in _cc:
+        _vc = src[c].value_counts()
+        _n = len(src)
+        _top3 = "; ".join(f"{{k}}({{int(v)}}人,{{v/_n*100:.0f}}%)" for k, v in _vc.head(3).items())
+        parts.append(f"`{{c}}` 共 {{len(_vc)}} 个取值，Top3：{{_top3}}。")
+    # 业务含义推断
+    if any(kw in stem_lower for kw in ["absense", "absent", "month"]):
+        if _nc:
+            c0 = _nc[0]
+            high_cnt = int((src[c0] >= 6).sum()) if c0 in src.columns else 0
+            parts.append(f"缺勤月数反映学业连续性风险。")
+            if high_cnt > 0:
+                parts.append(f"其中 {{high_cnt}} 人缺勤≥6个月，属长期离校群体，学业中断和还款违约风险较高。")
+    elif any(kw in stem_lower for kw in ["disabled", "残障"]):
+        parts.append("残障学生群体虽占比较小，但可能面临更大的就业困难和还款压力，建议纳入贷款减免或延期还款政策的优先考虑范围。")
+    elif any(kw in stem_lower for kw in ["enlist", "organ", "参军"]):
+        if _cc:
+            _vc = src[_cc[0]].value_counts()
+            parts.append(f"参军机构分布反映学生服役去向集中度，**{{_vc.index[0]}}** 占比最高（{{int(_vc.iloc[0])}}人），不同机构学生可能适用不同的贷款减免政策。")
+    elif any(kw in stem_lower for kw in ["school", "enrolled", "学校"]):
+        if _cc:
+            _vc = src[_cc[0]].value_counts()
+            parts.append(f"学校分布显示学生集中度，**{{_vc.index[0]}}** 学生最多（{{int(_vc.iloc[0])}}人），不同学校的学费水平和就业前景差异可能影响贷款违约风险。")
+    elif any(kw in stem_lower for kw in ["payment", "bool", "缴费"]):
+        if _cc:
+            _vc = src[_cc[0]].value_counts()
+            if len(_vc) == 1:
+                parts.append(f"所有学生缴费状态均为 **{{_vc.index[0]}}**（100%），表明当前政策执行覆盖全面，无欠费记录。")
+            else:
+                parts.append(f"缴费状态分布直接反映贷款还款健康度，是风险管理的核心指标。")
+    elif any(kw in stem_lower for kw in ["join", "multi", "关联"]):
+        parts.append("多表关联结果整合了学校、缴费状态、缺勤月数、服役机构等多维信息，可用于识别高风险借款人的共同特征。")
+    if not parts:
+        parts.append(f"该图展示了 {{png_stem}} 的可视化分析结果，请结合上下文数据进行业务解读。")
+    return " ".join(parts)
+
 for png in sorted(png_files):
     md.append(f"### {{png.stem}}")
     md.append(f"![{{png.stem}}]({{png.name}})")
     md.append("")
-    # 尝试找到同名 CSV 并生成数据概要
     csv_key = png.stem
     if csv_key in csv_summaries:
         md.append(f"**数据概要**：{{csv_summaries[csv_key]}}")
         md.append("")
-    # 通用解读：读取同名 CSV 做数值统计 + 分类分布
-    interp_parts = []
-    csv_path = generated_dir / f"{{png.stem}}.csv"
-    if csv_path.exists():
-        try:
-            _tmp = pd.read_csv(csv_path)
-            _nr, _ncol = _tmp.shape
-            interp_parts.append(f"数据源 `{{csv_path.name}}`（{{_nr}} 行 {{_ncol}} 列）。")
-            for _c in _tmp.columns:
-                if pd.api.types.is_numeric_dtype(_tmp[_c]):
-                    _mean = float(_tmp[_c].mean())
-                    _med = float(_tmp[_c].median())
-                    _min = float(_tmp[_c].min())
-                    _max = float(_tmp[_c].max())
-                    interp_parts.append(
-                        f"数值列 `{{_c}}`：均值={{_mean:.2f}}，中位数={{_med:.2f}}，"
-                        f"范围 [{{_min:.2f}}, {{_max:.2f}}]。"
-                    )
-            for _c in _tmp.columns:
-                if _tmp[_c].dtype == "object":
-                    _vc = _tmp[_c].value_counts()
-                    _top3 = "; ".join(f"{{k}}({{int(v)}}人, {{v/_nr*100:.0f}}%)" for k, v in _vc.head(3).items())
-                    interp_parts.append(f"分类列 `{{_c}}` 共 {{len(_vc)}} 个取值，Top3：{{_top3}}。")
-        except Exception:
-            pass
-    if not interp_parts:
-        interp_parts.append(f"该图展示了 {{png.stem}} 的可视化分析结果。")
-    md.append(f"**解读**：{{' '.join(interp_parts)}}")
+    matched_csv = _find_best_csv(png.stem, csv_files)
+    interp = _build_interp(png.stem, matched_csv, df)
+    md.append(f"**解读**：{{interp}}")
     md.append("")
 
 # 6. 结论与建议
@@ -322,38 +368,49 @@ findings = []
 high_missing = [(c, miss_pct) for c, _, missing, miss_pct in col_stats if missing > 0]
 if high_missing:
     for c, pct in high_missing:
-        findings.append(f"字段 **{{c}}** 存在缺失（缺失率 {{pct}}），建议进行缺失值处理")
+        findings.append(f"字段 **{{c}}** 存在缺失（缺失率 {{pct}}），可能影响分析准确性，建议优先处理")
 else:
-    findings.append("所有字段均无缺失值，数据质量良好")
-# 分类字段分布
+    findings.append("所有字段均无缺失值，数据质量良好，可直接用于建模分析")
+# 分类字段分布 + 业务含义
 for c in cat_cols:
     vc = df[c].value_counts()
+    top3_str = "、".join(f"**{{k}}**（{{int(v)}}人）" for k, v in vc.head(3).items())
     if len(vc) == 1:
-        findings.append(f"字段 **{{c}}** 仅有 1 个取值（{{vc.index[0]}}），无区分度，可考虑剔除")
-    elif vc.iloc[0] / total > 0.7:
-        findings.append(f"字段 **{{c}}** 中 **{{vc.index[0]}}** 占比 {{vc.iloc[0]/total*100:.1f}}%，分布严重偏斜")
-# 数值字段统计
+        findings.append(f"字段 **{{c}}** 所有记录取值均为 **{{vc.index[0]}}**（100%），表明当前样本在该维度无差异，该字段对分群建模无区分度")
+    elif vc.iloc[0] / total > 0.5:
+        findings.append(f"字段 **{{c}}** 中 {{top3_str}} 占据主要比例，分布集中，建议重点关注高占比群体的管理策略")
+    else:
+        findings.append(f"字段 **{{c}}** 分布较均匀，Top3 为 {{top3_str}}")
+# 数值字段统计 + 业务含义
 for c in num_cols:
     _mean = float(df[c].mean())
     _med = float(df[c].median())
     q1, q3 = float(df[c].quantile(0.25)), float(df[c].quantile(0.75))
     iqr = q3 - q1
     outliers = int(((df[c] < q1 - 1.5 * iqr) | (df[c] > q3 + 1.5 * iqr)).sum())
-    findings.append(f"数值字段 **{{c}}**：均值={{_mean:.2f}}，中位数={{_med:.2f}}，Q25={{q1:.2f}}，Q75={{q3:.2f}}"
-                    + (f"，存在 {{outliers}} 个离群值" if outliers > 0 else ""))
-# 交叉分析发现
+    skew_note = "分布右偏（均值>中位数），存在部分高值个体" if _mean > _med * 1.1 else "分布较对称"
+    findings.append(
+        f"数值字段 **{{c}}**：均值={{_mean:.2f}}，中位数={{_med:.2f}}，Q25={{q1:.2f}}，Q75={{q3:.2f}}，{{skew_note}}"
+        + (f"，其中 {{outliers}} 个离群值需重点排查" if outliers > 0 else "")
+    )
+# 交叉分析发现 + 业务推断
 if not cross_school_pay.empty:
     if "neg" in cross_school_pay.columns and "All" in cross_school_pay.columns:
         rates = (cross_school_pay["neg"] / cross_school_pay["All"]).drop("All", errors="ignore")
         top_s = rates.idxmax()
-        findings.append(f"交叉分析显示欠费率最高的学校为 **{{top_s}}**（{{rates.max()*100:.1f}}%），需重点关注")
+        findings.append(f"交叉分析显示 **{{top_s}}** 欠费率最高（{{rates.max()*100:.1f}}%），建议对该校加强财务干预和学生帮扶")
     else:
-        findings.append(f"学校×缴费状态交叉表中所有学生缴费状态一致，当前样本无差异")
+        findings.append("学校×缴费状态交叉分析显示所有学生缴费状态一致，当前政策执行覆盖全面，但需持续监控防止未来出现分化")
 if not organ_absense.empty:
     _top_org = organ_absense.index[0]
     _top_mean = organ_absense.iloc[0]["mean"]
     _top_cnt = int(organ_absense.iloc[0]["count"])
-    findings.append(f"参军机构中 **{{_top_org}}** 平均缺勤 {{_top_mean:.1f}} 个月（{{_top_cnt}} 人），缺勤风险最高")
+    _bot_org = organ_absense.index[-1]
+    _bot_mean = organ_absense.iloc[-1]["mean"]
+    findings.append(
+        f"参军机构缺勤分析：**{{_top_org}}** 平均缺勤 {{_top_mean:.1f}} 个月（{{_top_cnt}} 人），缺勤风险最高；"
+        f"**{{_bot_org}}** 平均缺勤仅 {{_bot_mean:.1f}} 个月，差异显著，提示不同机构对学业连续性的影响不同"
+    )
 if not findings:
     findings.append("数据整体分布均匀，未发现显著异常")
 for i, f_item in enumerate(findings, 1):
@@ -363,19 +420,26 @@ md.append("")
 md.append("### 6.2 建议措施")
 suggestions = []
 if high_missing:
-    suggestions.append("**数据清洗**：对缺失字段进行填充（均值/众数）或删除处理")
-if not cross_school_pay.empty and "neg" in cross_school_pay.columns:
-    suggestions.append("**差异化管理**：针对欠费率较高的学校深入分析原因，制定针对性催收或帮扶策略")
+    suggestions.append("**数据治理**：对缺失字段进行填充（均值/众数）或删除处理，确保后续建模数据完整性")
+if not cross_school_pay.empty:
+    if "neg" in cross_school_pay.columns:
+        suggestions.append("**差异化管理**：针对欠费率较高的学校深入分析原因，制定针对性催收或帮扶策略")
+    else:
+        suggestions.append("**政策延续**：当前缴费状态良好，建议维持现有政策并建立预警机制，防止未来出现欠费分化")
 if not organ_absense.empty:
-    suggestions.append("**缺勤预警**：对平均缺勤月数较高的机构人员建立预警机制，关注其学业连续性")
+    suggestions.append(f"**缺勤预警**：对 **{{organ_absense.index[0]}}** 等高缺勤机构人员建立学业预警机制，联合学工部门开展学业支持计划")
+for c in cat_cols:
+    vc = df[c].value_counts()
+    if vc.iloc[0] / total > 0.5 and len(vc) > 1:
+        suggestions.append(f"**重点关注**：**{{c}}** 字段中 **{{vc.index[0]}}** 占比最高（{{vc.iloc[0]/total*100:.0f}}%），建议加强该群体的学业支持与管理")
 for c in num_cols:
     q1, q3 = float(df[c].quantile(0.25)), float(df[c].quantile(0.75))
     iqr = q3 - q1
     outliers = int(((df[c] < q1 - 1.5 * iqr) | (df[c] > q3 + 1.5 * iqr)).sum())
     if outliers > 0:
-        suggestions.append(f"**离群值排查**：字段 **{{c}}** 存在 {{outliers}} 个离群值，建议核实数据准确性")
-suggestions.append("**持续监控**：建议定期更新数据并重新运行分析流程，跟踪关键指标变化趋势")
-suggestions.append("**深入分析**：对分布异常的字段结合业务背景做进一步调研")
+        suggestions.append(f"**离群值排查**：**{{c}}** 存在 {{outliers}} 个离群值，建议核实数据准确性，避免潜在风险被忽视")
+suggestions.append("**持续监控**：建议定期更新数据并重新运行分析流程，动态跟踪关键指标变化趋势，提升管理精细化水平")
+suggestions.append("**流程模块化**：将本分析流程模块化，支持未来快速扩展至其他学生群体或分析维度")
 for s in suggestions:
     md.append(f"- {{s}}")
 md.append("")
