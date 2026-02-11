@@ -2177,6 +2177,8 @@ def bot_stream(messages, workspace, session_id="default", resume_from: int = 0):
     MAX_MISSING_CODE_ROUNDS = 3
     md_filename_reject_rounds = 0  # 连续 markdown filename 未引用的拒绝轮数
     MAX_MD_FILENAME_REJECT_ROUNDS = 3  # 超过此上限后跳过文件名校验，直接执行
+    readme_validation_retries = 0  # README 验证失败重试计数
+    MAX_README_VALIDATION_RETRIES = 3  # README 验证最多重试 3 次，超过后跳过验证
     duplicate_analyze_rounds = 0  # 连续重复 <Analyze> 的轮数
     MAX_DUPLICATE_ANALYZE_ROUNDS = 5  # 最多允许 5 轮重复（增加容忍度）
     suppress_duplicate_analyze_once = (
@@ -4652,30 +4654,42 @@ def bot_stream(messages, workspace, session_id="default", resume_from: int = 0):
                                 readme_text, generated_dir
                             )
                             if not is_valid_readme:
+                                readme_validation_retries += 1
                                 logger.warning(
-                                    "[bot_stream] README.md format validation failed in round %s: %s",
+                                    "[bot_stream] README.md format validation failed in round %s (retry %s/%s): %s",
                                     current_round,
+                                    readme_validation_retries,
+                                    MAX_README_VALIDATION_RETRIES,
                                     "; ".join(readme_issues),
                                 )
-                                detail_prompt = (
-                                    "生成的 README.md 未符合规范：\n- "
-                                    + "\n- ".join(readme_issues)
-                                    + "\n请按照模板遍历 generated/ 目录并重新写入 README.md。"
-                                )
-                                # 先把模型响应和执行结果加入消息历史，避免连续 user 消息
-                                messages.append(
-                                    {"role": "assistant", "content": cur_res}
-                                )
-                                messages.append(
-                                    {"role": "execute", "content": f"{exe_output}"}
-                                )
-                                messages.append(
-                                    {"role": "user", "content": detail_prompt}
-                                )
-                                # 允许下一轮重复 Analyze（因为是同一任务的纠错重试）
-                                allow_duplicate_analyze_retry()
-                                refund_iteration()
-                                continue
+                                if (
+                                    readme_validation_retries
+                                    >= MAX_README_VALIDATION_RETRIES
+                                ):
+                                    logger.warning(
+                                        "[bot_stream] README validation retry limit reached (%s), accepting current README and proceeding",
+                                        MAX_README_VALIDATION_RETRIES,
+                                    )
+                                else:
+                                    detail_prompt = (
+                                        "生成的 README.md 未符合规范：\n- "
+                                        + "\n- ".join(readme_issues)
+                                        + "\n请按照模板遍历 generated/ 目录并重新写入 README.md。"
+                                    )
+                                    # 先把模型响应和执行结果加入消息历史，避免连续 user 消息
+                                    messages.append(
+                                        {"role": "assistant", "content": cur_res}
+                                    )
+                                    messages.append(
+                                        {"role": "execute", "content": f"{exe_output}"}
+                                    )
+                                    messages.append(
+                                        {"role": "user", "content": detail_prompt}
+                                    )
+                                    # 允许下一轮重复 Analyze（因为是同一任务的纠错重试）
+                                    allow_duplicate_analyze_retry()
+                                    refund_iteration()
+                                    continue
 
                     exe_str = f"\n<Execute>\n```\n{exe_output}\n```\n</Execute>\n"
                     actual_files = {

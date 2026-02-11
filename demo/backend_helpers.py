@@ -522,9 +522,14 @@ def validate_readme_document(readme_text, generated_dir):
             issues.append(f"缺少段落：{section}")
 
     # 检查文件总数（允许 ±2 的误差，因为 README.md 和 execute_round_N.txt 在生成时还不存在）
-    total_match = re.search(r"共生成\s*(\d+)\s*个文件", normalized_text)
+    # 支持多种中文表述：共生成/共包含/共有/包含/含有 X 个文件
+    total_match = re.search(r"共[生包]?[成含有]\s*(\d+)\s*个文件", normalized_text)
+    if not total_match:
+        total_match = re.search(r"[包含有]\s*(\d+)\s*个文件", normalized_text)
     if not total_match:
         total_match = re.search(r"文件总数\s*[:：]?\s*(\d+)", normalized_text)
+    if not total_match:
+        total_match = re.search(r"(\d+)\s*个文件", normalized_text)
     if not total_match:
         total_match = re.search(
             r"A total of\s+(\d+)\s+files", normalized_text, re.IGNORECASE
