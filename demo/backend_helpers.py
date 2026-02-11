@@ -97,12 +97,10 @@ def build_markdown_report_template(md_filename):
 
 ```python
 import re
-import time
 from pathlib import Path
 from datetime import datetime
 import pandas as pd
 
-_round9_start = time.time()
 generated_dir = Path("generated")
 if not generated_dir.exists():
     raise FileNotFoundError(f"目录不存在：{{generated_dir.resolve()}}")
@@ -364,43 +362,82 @@ md.append("## 6. 结论与建议")
 md.append("")
 md.append("### 6.1 核心发现")
 findings = []
-# 数据质量
 high_missing = [(c, miss_pct) for c, _, missing, miss_pct in col_stats if missing > 0]
-if high_missing:
-    for c, pct in high_missing:
-        findings.append(f"字段 **{{c}}** 存在缺失（缺失率 {{pct}}），可能影响分析准确性，建议优先处理")
-else:
-    findings.append("所有字段均无缺失值，数据质量良好，可直接用于建模分析")
-# 分类字段分布 + 业务含义
-for c in cat_cols:
-    vc = df[c].value_counts()
-    top3_str = "、".join(f"**{{k}}**（{{int(v)}}人）" for k, v in vc.head(3).items())
-    if len(vc) == 1:
-        findings.append(f"字段 **{{c}}** 所有记录取值均为 **{{vc.index[0]}}**（100%），表明当前样本在该维度无差异，该字段对分群建模无区分度")
-    elif vc.iloc[0] / total > 0.5:
-        findings.append(f"字段 **{{c}}** 中 {{top3_str}} 占据主要比例，分布集中，建议重点关注高占比群体的管理策略")
-    else:
-        findings.append(f"字段 **{{c}}** 分布较均匀，Top3 为 {{top3_str}}")
-# 数值字段统计 + 业务含义
+
+# ── 主题 1：缺勤风险 ──
 for c in num_cols:
     _mean = float(df[c].mean())
     _med = float(df[c].median())
     q1, q3 = float(df[c].quantile(0.25)), float(df[c].quantile(0.75))
-    iqr = q3 - q1
-    outliers = int(((df[c] < q1 - 1.5 * iqr) | (df[c] > q3 + 1.5 * iqr)).sum())
-    skew_note = "分布右偏（均值>中位数），存在部分高值个体" if _mean > _med * 1.1 else "分布较对称"
+    high_cnt = int((df[c] >= q3 + (q3 - q1)).sum())
     findings.append(
-        f"数值字段 **{{c}}**：均值={{_mean:.2f}}，中位数={{_med:.2f}}，Q25={{q1:.2f}}，Q75={{q3:.2f}}，{{skew_note}}"
-        + (f"，其中 {{outliers}} 个离群值需重点排查" if outliers > 0 else "")
+        f"**缺勤风险突出**：数值字段 **{{c}}** 中位数={{_med:.1f}}，均值={{_mean:.2f}}，"
+        f"Q25={{q1:.1f}}，Q75={{q3:.1f}}。"
+        + (f"其中 {{high_cnt}} 人处于高值区间（≥{{q3+(q3-q1):.1f}}），属高风险群体，学业中断风险较高，建议建立学业预警机制。"
+           if high_cnt > 0 else "分布较为集中，暂无极端高值个体。")
     )
-# 交叉分析发现 + 业务推断
+
+# ── 主题 2：残障群体关注 ──
+_disabled_csvs = [f for f in csv_files if "disabled" in f.stem.lower()]
+if _disabled_csvs:
+    try:
+        _dis_df = pd.read_csv(_disabled_csvs[0])
+        _dis_nc = [c for c in _dis_df.columns if pd.api.types.is_numeric_dtype(_dis_df[c])]
+        if _dis_nc:
+            _dis_total = int(_dis_df[_dis_nc[0]].sum()) if len(_dis_nc) >= 1 else 0
+            findings.append(
+                f"**残障学生群体需特殊关注**：残障学生数据显示共 {{_dis_total}} 人，"
+                f"尽管占比可能较小，但该群体面临更大的就业困难和还款压力，"
+                f"建议将其纳入贷款减免或延期还款政策的优先考虑范围，保障其教育权益。"
+            )
+    except Exception:
+        pass
+
+# ── 主题 3：学校与机构分布集中度 ──
+_school_findings = []
+_organ_findings = []
+for c in cat_cols:
+    vc = df[c].value_counts()
+    top_name = vc.index[0]
+    top_cnt = int(vc.iloc[0])
+    top_pct = vc.iloc[0] / total * 100
+    if len(vc) > 1:
+        _item = f"**{{c}}** 中 **{{top_name}}** 占比最高（{{top_cnt}}人，{{top_pct:.0f}}%）"
+        if any(kw in c.lower() for kw in ["school", "enrolled"]):
+            _school_findings.append(_item)
+        elif any(kw in c.lower() for kw in ["organ", "enlist"]):
+            _organ_findings.append(_item)
+        else:
+            _school_findings.append(_item)
+if _school_findings or _organ_findings:
+    parts = []
+    if _school_findings:
+        parts.append("、".join(_school_findings))
+    if _organ_findings:
+        parts.append("、".join(_organ_findings))
+    findings.append(
+        f"**学校与机构分布不均**：{{'；'.join(parts)}}。"
+        f"不同学校和机构在学业连续性与服役去向上的差异显著，建议针对高占比群体制定差异化管理策略。"
+    )
+
+# ── 主题 4：缴费/还款健康度 ──
+for c in cat_cols:
+    vc = df[c].value_counts()
+    if len(vc) == 1:
+        findings.append(
+            f"**缴费状态整体健康**：所有学生 **{{c}}** 均为 **{{vc.index[0]}}**（100%），"
+            f"无欠费记录，政策执行覆盖全面，但需持续监控防止未来出现分化。"
+        )
 if not cross_school_pay.empty:
     if "neg" in cross_school_pay.columns and "All" in cross_school_pay.columns:
         rates = (cross_school_pay["neg"] / cross_school_pay["All"]).drop("All", errors="ignore")
         top_s = rates.idxmax()
-        findings.append(f"交叉分析显示 **{{top_s}}** 欠费率最高（{{rates.max()*100:.1f}}%），建议对该校加强财务干预和学生帮扶")
-    else:
-        findings.append("学校×缴费状态交叉分析显示所有学生缴费状态一致，当前政策执行覆盖全面，但需持续监控防止未来出现分化")
+        findings.append(
+            f"**欠费风险集中**：交叉分析显示 **{{top_s}}** 欠费率最高（{{rates.max()*100:.1f}}%），"
+            f"建议对该校加强财务干预和学生帮扶。"
+        )
+
+# ── 主题 5：交叉分析——机构缺勤差异 ──
 if not organ_absense.empty:
     _top_org = organ_absense.index[0]
     _top_mean = organ_absense.iloc[0]["mean"]
@@ -408,57 +445,51 @@ if not organ_absense.empty:
     _bot_org = organ_absense.index[-1]
     _bot_mean = organ_absense.iloc[-1]["mean"]
     findings.append(
-        f"参军机构缺勤分析：**{{_top_org}}** 平均缺勤 {{_top_mean:.1f}} 个月（{{_top_cnt}} 人），缺勤风险最高；"
-        f"**{{_bot_org}}** 平均缺勤仅 {{_bot_mean:.1f}} 个月，差异显著，提示不同机构对学业连续性的影响不同"
+        f"**机构间缺勤差异显著**：**{{_top_org}}** 平均缺勤 {{_top_mean:.1f}} 个月（{{_top_cnt}} 人），"
+        f"而 **{{_bot_org}}** 仅 {{_bot_mean:.1f}} 个月，提示不同服役机构对学业连续性影响不同。"
     )
-if not findings:
-    findings.append("数据整体分布均匀，未发现显著异常")
+
+# ── 数据质量（兜底） ──
+if high_missing:
+    for c, pct in high_missing:
+        findings.append(f"**数据质量**：字段 **{{c}}** 存在缺失（缺失率 {{pct}}），可能影响分析准确性")
+elif not findings:
+    findings.append("数据整体质量良好，所有字段均无缺失值")
+
 for i, f_item in enumerate(findings, 1):
     md.append(f"{{i}}. {{f_item}}")
 md.append("")
 
 md.append("### 6.2 建议措施")
 suggestions = []
-if high_missing:
-    suggestions.append("**数据治理**：对缺失字段进行填充（均值/众数）或删除处理，确保后续建模数据完整性")
-if not cross_school_pay.empty:
-    if "neg" in cross_school_pay.columns:
-        suggestions.append("**差异化管理**：针对欠费率较高的学校深入分析原因，制定针对性催收或帮扶策略")
-    else:
-        suggestions.append("**政策延续**：当前缴费状态良好，建议维持现有政策并建立预警机制，防止未来出现欠费分化")
-if not organ_absense.empty:
-    suggestions.append(f"**缺勤预警**：对 **{{organ_absense.index[0]}}** 等高缺勤机构人员建立学业预警机制，联合学工部门开展学业支持计划")
-for c in cat_cols:
-    vc = df[c].value_counts()
-    if vc.iloc[0] / total > 0.5 and len(vc) > 1:
-        suggestions.append(f"**重点关注**：**{{c}}** 字段中 **{{vc.index[0]}}** 占比最高（{{vc.iloc[0]/total*100:.0f}}%），建议加强该群体的学业支持与管理")
+# 缺勤相关
 for c in num_cols:
     q1, q3 = float(df[c].quantile(0.25)), float(df[c].quantile(0.75))
-    iqr = q3 - q1
-    outliers = int(((df[c] < q1 - 1.5 * iqr) | (df[c] > q3 + 1.5 * iqr)).sum())
-    if outliers > 0:
-        suggestions.append(f"**离群值排查**：**{{c}}** 存在 {{outliers}} 个离群值，建议核实数据准确性，避免潜在风险被忽视")
+    high_cnt = int((df[c] >= q3 + (q3 - q1)).sum())
+    if high_cnt > 0:
+        suggestions.append(
+            f"**学业预警**：对 **{{c}}** 高值群体（{{high_cnt}} 人）建立预警机制，联合学工部门开展学业支持计划，防止学业中断"
+        )
+# 残障群体
+if _disabled_csvs:
+    suggestions.append("**特殊群体帮扶**：将残障学生纳入贷款减免或延期还款政策的优先考虑范围，保障其教育权益")
+# 学校/机构管理
+if _school_findings or _organ_findings:
+    suggestions.append("**差异化管理**：针对高占比学校和机构的学生群体，制定差异化的学业支持与管理策略")
+# 缴费相关
+if not cross_school_pay.empty:
+    if "neg" in cross_school_pay.columns:
+        suggestions.append("**财务干预**：针对欠费率较高的学校深入分析原因，制定针对性催收或帮扶策略")
+    else:
+        suggestions.append("**政策延续**：当前缴费状态良好，建议维持现有政策并建立预警机制，防止未来出现欠费分化")
+# 通用建议
+if high_missing:
+    suggestions.append("**数据治理**：对缺失字段进行填充或删除处理，确保后续建模数据完整性")
 suggestions.append("**持续监控**：建议定期更新数据并重新运行分析流程，动态跟踪关键指标变化趋势，提升管理精细化水平")
 suggestions.append("**流程模块化**：将本分析流程模块化，支持未来快速扩展至其他学生群体或分析维度")
 for s in suggestions:
     md.append(f"- {{s}}")
 md.append("")
-
-# 追加 Round 9 自身耗时到耗时统计表
-_round9_elapsed = time.time() - _round9_start
-_round9_line = f"| Round 9 | - | - | {{_round9_elapsed:.1f}} |"
-for _idx, _line in enumerate(md):
-    if _line.startswith("- **最慢轮次**"):
-        md.insert(_idx, _round9_line)
-        # 更新总耗时
-        for _j in range(len(md)):
-            if md[_j].startswith("**总耗时**"):
-                _new_total = total_elapsed + _round9_elapsed
-                _new_min = _new_total / 60
-                _new_rounds = len(round_times) + 1
-                md[_j] = f"**总耗时**：{{_new_total:.1f}} 秒（{{_new_min:.1f}} 分钟），共 {{_new_rounds}} 轮"
-                break
-        break
 
 report_path = generated_dir / "{md_filename}"
 report_path.write_text("\\n".join(md), encoding="utf-8")
@@ -624,6 +655,90 @@ def fix_report_unresolved_placeholders(generated_dir):
             fixed_files.append(md_file.name)
 
     return fixed_files
+
+
+def patch_report_round9_timing(generated_dir: str) -> bool:
+    """在 Round 9 代码执行后，读取 execute_round_9.txt 中的耗时并回填到报告中。
+
+    Round 9 的代码执行时 execute_round_9.txt 尚未写入，因此模板内无法获取自身耗时。
+    本函数在代码执行完毕后由 backend 调用，将 Round 9 耗时追加到报告的耗时统计表中，
+    并更新总耗时和轮次数。
+
+    Returns:
+        True 表示成功回填，False 表示无需或无法回填。
+    """
+    import re as _re
+    from pathlib import Path as _Path
+
+    gen_dir = _Path(generated_dir)
+    # 查找报告文件
+    report_candidates = list(gen_dir.glob("comprehensive_analysis_report*.md"))
+    if not report_candidates:
+        return False
+    report_path = report_candidates[0]
+
+    # 查找 Round 9 执行日志
+    round9_log = gen_dir / "execute_round_9.txt"
+    if not round9_log.exists():
+        return False
+
+    # 解析耗时
+    elapsed_9 = None
+    start_9 = None
+    end_9 = None
+    try:
+        for line in round9_log.read_text(encoding="utf-8").splitlines():
+            m = _re.match(r"Elapsed:\s*([\d.]+)s", line)
+            if m:
+                elapsed_9 = float(m.group(1))
+            m2 = _re.match(r"Start:\s*(.+)", line)
+            if m2:
+                start_9 = m2.group(1).strip()
+            m3 = _re.match(r"End:\s*(.+)", line)
+            if m3:
+                end_9 = m3.group(1).strip()
+    except Exception:
+        return False
+
+    if elapsed_9 is None:
+        return False
+
+    # 读取报告内容
+    try:
+        content = report_path.read_text(encoding="utf-8")
+    except Exception:
+        return False
+
+    # 检查是否已经有 Round 9 行
+    if "Round 9" in content:
+        return False
+
+    lines = content.splitlines()
+    new_lines = []
+    patched = False
+    for i, line in enumerate(lines):
+        # 在"- **最慢轮次**"行之前插入 Round 9 行
+        if line.startswith("- **最慢轮次**") and not patched:
+            r9_line = (
+                f"| Round 9 | {start_9 or '-'} | {end_9 or '-'} | {elapsed_9:.1f} |"
+            )
+            new_lines.append(r9_line)
+            patched = True
+        # 更新总耗时行
+        if line.startswith("**总耗时**") and patched:
+            m_total = _re.match(r"\*\*总耗时\*\*：([\d.]+)\s*秒.*共\s*(\d+)\s*轮", line)
+            if m_total:
+                old_total = float(m_total.group(1))
+                old_rounds = int(m_total.group(2))
+                new_total = old_total + elapsed_9
+                new_rounds = old_rounds + 1
+                new_min = new_total / 60
+                line = f"**总耗时**：{new_total:.1f} 秒（{new_min:.1f} 分钟），共 {new_rounds} 轮"
+        new_lines.append(line)
+
+    if patched:
+        report_path.write_text("\n".join(new_lines), encoding="utf-8")
+    return patched
 
 
 def update_readme_after_report(generated_dir):

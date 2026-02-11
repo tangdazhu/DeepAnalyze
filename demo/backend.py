@@ -4447,6 +4447,7 @@ def bot_stream(messages, workspace, session_id="default"):
                             from backend_helpers import (
                                 update_readme_after_report,
                                 fix_report_unresolved_placeholders,
+                                patch_report_round9_timing,
                             )
 
                             fixed = fix_report_unresolved_placeholders(generated_dir)
@@ -4454,6 +4455,11 @@ def bot_stream(messages, workspace, session_id="default"):
                                 logger.info(
                                     "[bot_stream] Fixed unresolved placeholders in report: %s",
                                     ", ".join(fixed),
+                                )
+                            # 回填 Round 9 耗时（此时 execute_round_9.txt 已写入）
+                            if patch_report_round9_timing(generated_dir):
+                                logger.info(
+                                    "[bot_stream] Patched Round 9 timing into report"
                                 )
                             update_readme_after_report(generated_dir)
                             logger.info(
