@@ -353,6 +353,7 @@ export function ThreePanelInterface() {
   ]);
   const [inputValue, setInputValue] = useState("");
   const [isTyping, setIsTyping] = useState(false);
+  const [isRegenerating, setIsRegenerating] = useState(false);
   const [attachments, setAttachments] = useState<FileAttachment[]>([]);
   const [workspaceFiles, setWorkspaceFiles] = useState<WorkspaceFile[]>([]);
   const [workspaceTree, setWorkspaceTree] = useState<WorkspaceNode | null>(
@@ -2370,6 +2371,128 @@ export function ThreePanelInterface() {
     }
   };
 
+  // 判断对话中是否包含 </Answer>（用于显示「重新生成报告」按钮）
+  const hasAnswerTag = messages.some(
+    (m) => m.sender === "ai" && m.content.includes("</Answer>")
+  );
+
+  const handleRegenerate = async () => {
+    if (isTyping || isRegenerating) return;
+    setIsRegenerating(true);
+
+    // 插入一条 AI 占位消息
+    const aiMsgId = `regen-${Date.now()}-${Math.random()}`;
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: aiMsgId,
+        sender: "ai",
+        content: "",
+        timestamp: new Date(),
+      },
+    ]);
+
+    let accumulatedMessage = "";
+
+    const updateAiMessage = (fullText: string) => {
+      setMessages((prev) => {
+        const next = [...prev];
+        const idx = next.findIndex((m) => m.id === aiMsgId);
+        if (idx >= 0) {
+          next[idx] = { ...next[idx], content: fullText };
+        }
+        return next;
+      });
+      autoCollapseForContent(fullText);
+      if (fullText.includes("<File>")) {
+        if (fileRefreshTimerRef.current) {
+          window.clearTimeout(fileRefreshTimerRef.current);
+        }
+        fileRefreshTimerRef.current = window.setTimeout(async () => {
+          await loadWorkspaceTree();
+          await loadWorkspaceFiles();
+          fileRefreshTimerRef.current = null;
+        }, 300);
+      }
+    };
+
+    try {
+      const controller = new AbortController();
+      fetchControllerRef.current = controller;
+
+      const response = await fetch(API_URLS.CHAT_REGENERATE, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+          resume_from: 8,
+        }),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      if (!reader) {
+        setIsRegenerating(false);
+        return;
+      }
+
+      let buffer = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed === "data: [DONE]") continue;
+          try {
+            const json = JSON.parse(trimmed);
+            const deltaContent = json.choices?.[0]?.delta?.content;
+            if (deltaContent) {
+              accumulatedMessage += deltaContent;
+              updateAiMessage(accumulatedMessage);
+            }
+          } catch (e) {
+            console.warn("JSON parse error for line:", trimmed, e);
+          }
+        }
+      }
+
+      // 处理 buffer 中剩余内容
+      if (buffer.trim()) {
+        try {
+          const json = JSON.parse(buffer.trim());
+          const deltaContent = json.choices?.[0]?.delta?.content;
+          if (deltaContent) {
+            accumulatedMessage += deltaContent;
+            updateAiMessage(accumulatedMessage);
+          }
+        } catch (e) {}
+      }
+
+      await loadWorkspaceFiles();
+      await loadWorkspaceTree();
+    } catch (error: any) {
+      if (error?.name === "AbortError") {
+        console.info("重新生成请求已取消");
+      } else {
+        console.error("Regenerate error:", error);
+        toast({ description: "重新生成失败，请稍后重试", variant: "destructive" });
+      }
+    } finally {
+      if (fetchControllerRef.current) {
+        fetchControllerRef.current = null;
+      }
+      setIsRegenerating(false);
+    }
+  };
+
   const handleFileUpload = async (
     event: React.ChangeEvent<HTMLInputElement>
   ) => {
@@ -2974,6 +3097,29 @@ export function ThreePanelInterface() {
                     </Button>
                   </div>
                 </div>
+                {/* 重新生成报告按钮：对话包含 </Answer> 且未在执行中时显示 */}
+                {hasAnswerTag && !isTyping && (
+                  <div className="flex justify-center pt-2">
+                    <Button
+                      onClick={handleRegenerate}
+                      size="sm"
+                      disabled={isRegenerating}
+                      className="bg-blue-600 hover:bg-blue-700 text-white dark:bg-blue-500 dark:hover:bg-blue-600 rounded-lg px-4 py-2"
+                    >
+                      {isRegenerating ? (
+                        <>
+                          <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                          正在重新生成...
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="h-4 w-4 mr-2" />
+                          重新生成报告 (Round 8-10)
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                )}
               </div>
             </div>
           </ResizablePanel>

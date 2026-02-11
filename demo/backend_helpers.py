@@ -800,3 +800,58 @@ def update_readme_after_report(generated_dir):
     readme_path = generated_path / "README.md"
     readme_path.write_text("\n".join(lines), encoding="utf-8")
     return True
+
+
+def cleanup_rounds_from(generated_dir, from_round: int) -> list[str]:
+    """删除 >= from_round 的轮次产出文件，为重跑做准备。
+
+    删除规则：
+    - execute_round_{N}.txt（N >= from_round）
+    - README.md（Round 8 产出）
+    - comprehensive_analysis_report*.md（Round 9 产出）
+
+    不删除：
+    - CSV 文件（Round 1~7 产出）
+    - PNG 文件（Round 1~7 产出）
+    - execute_round_0_bootstrap.txt
+
+    Args:
+        generated_dir: generated/ 目录路径（str 或 Path）
+        from_round: 从哪一轮开始清理（含该轮）
+
+    Returns:
+        被删除的文件名列表
+    """
+    import re as _re
+    from pathlib import Path as _Path
+
+    gen_dir = _Path(generated_dir)
+    if not gen_dir.exists():
+        return []
+
+    deleted = []
+
+    # 删除 execute_round_{N}.txt（N >= from_round）
+    for f in sorted(gen_dir.glob("execute_round_*.txt")):
+        m = _re.search(r"execute_round_(\d+)\.txt", f.name)
+        if not m:
+            continue
+        round_num = int(m.group(1))
+        if round_num >= from_round:
+            f.unlink()
+            deleted.append(f.name)
+
+    # 删除 README.md（Round 8 产出）
+    if from_round <= 8:
+        readme = gen_dir / "README.md"
+        if readme.exists():
+            readme.unlink()
+            deleted.append("README.md")
+
+    # 删除 comprehensive_analysis_report*.md（Round 9 产出）
+    if from_round <= 9:
+        for f in gen_dir.glob("comprehensive_analysis_report*.md"):
+            f.unlink()
+            deleted.append(f.name)
+
+    return deleted

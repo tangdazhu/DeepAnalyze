@@ -206,6 +206,13 @@ def load_round_io_rules_config() -> dict[int, dict[str, Any]]:
 ROUND_IO_RULES = load_round_io_rules_config()
 
 
+def reload_round_io_rules() -> None:
+    """重新加载 round_io_rules.json 到全局变量（用于 resume 时刷新配置）。"""
+    global ROUND_IO_RULES
+    ROUND_IO_RULES = load_round_io_rules_config()
+    logger.info("[配置] 🔄 已重新加载 round_io_rules")
+
+
 def get_round_rule(round_no: int) -> Optional[dict[str, Any]]:
     """返回指定轮次的规则（若未配置则返回 None）。"""
     return ROUND_IO_RULES.get(round_no)
@@ -2028,7 +2035,80 @@ def extract_effective_code(code_str: str) -> str:
     return code
 
 
-def bot_stream(messages, workspace, session_id="default"):
+def rebuild_minimal_context(workspace_path: Path, session_id: str) -> list[dict]:
+    """从文件系统重建最小对话上下文，供 resume 模式使用。
+
+    构建的 messages 列表包含：
+    1. user 消息：原始指令 + workspace 文件信息
+    2. assistant 消息：bootstrap 结果（从 execute_round_0_bootstrap.txt 读取）
+    3. user 消息：已完成轮次摘要 + generated/ 文件清单
+
+    Returns:
+        可直接用于 bot_stream 主循环的 messages 列表
+    """
+    msgs: list[dict] = []
+
+    # 1. 构建 user 指令（包含 workspace 文件信息）
+    workspace_file_info = collect_file_info(str(workspace_path))
+    user_instruction = "请继续分析以下数据，完成剩余轮次的任务。"
+    if workspace_file_info:
+        msgs.append(
+            {
+                "role": "user",
+                "content": f"# Instruction\n{user_instruction}\n\n# Data\n{workspace_file_info}",
+            }
+        )
+    else:
+        msgs.append({"role": "user", "content": f"# Instruction\n{user_instruction}"})
+
+    # 2. 注入 bootstrap 结果（让模型知道数据库 schema 和路径）
+    generated_dir = workspace_path / "generated"
+    bootstrap_file = generated_dir / "execute_round_0_bootstrap.txt"
+    if bootstrap_file.exists():
+        try:
+            bootstrap_content = bootstrap_file.read_text(encoding="utf-8")
+            # 从 bootstrap 日志中提取 Output 部分
+            output_marker = "=== Output ==="
+            idx = bootstrap_content.find(output_marker)
+            if idx >= 0:
+                bootstrap_output = bootstrap_content[idx + len(output_marker) :].strip()
+            else:
+                bootstrap_output = bootstrap_content
+            # 重新构建 bootstrap 块（与 run_schema_bootstrap 输出格式一致）
+            bootstrap_block = (
+                "<Analyze>\n首轮 Schema Bootstrap：查询数据库结构。\n</Analyze>\n\n"
+                f"<Execute>\n```\n{bootstrap_output}\n```\n</Execute>\n"
+            )
+            msgs.append({"role": "assistant", "content": bootstrap_block})
+        except Exception as e:
+            logger.warning(f"[rebuild_minimal_context] 读取 bootstrap 文件失败: {e}")
+
+    # 3. 注入已有文件清单摘要
+    if generated_dir.exists():
+        existing_files = sorted(
+            [
+                f.name
+                for f in generated_dir.iterdir()
+                if f.is_file() and not f.name.startswith(".")
+            ]
+        )
+        if existing_files:
+            file_list = "\n".join(f"- {name}" for name in existing_files)
+            summary = (
+                f"前面的轮次已完成，generated/ 目录下已有以下 {len(existing_files)} 个文件：\n\n"
+                f"{file_list}\n\n"
+                "请从当前轮次继续执行。"
+            )
+            msgs.append({"role": "user", "content": summary})
+
+    logger.info(
+        f"[rebuild_minimal_context] 重建上下文完成: {len(msgs)} 条消息, "
+        f"session={session_id}"
+    )
+    return msgs
+
+
+def bot_stream(messages, workspace, session_id="default", resume_from: int = 0):
     original_cwd = os.getcwd()
     workspace_path = Path(get_session_workspace(session_id)).resolve()
     workspace_path.mkdir(parents=True, exist_ok=True)
@@ -2215,6 +2295,27 @@ def bot_stream(messages, workspace, session_id="default"):
             len(middle_msgs) - len(kept_middle),
         )
         return result
+
+    # 【Resume 模式】从指定轮次重跑（跳过 bootstrap，清理旧文件，重建上下文）
+    if resume_from > 0:
+        from backend_helpers import cleanup_rounds_from
+
+        deleted = cleanup_rounds_from(generated_dir, resume_from)
+        logger.info(
+            f"[bot_stream] Resume from round {resume_from}, cleaned {len(deleted)} files: {deleted}"
+        )
+        # 重建最小对话上下文
+        messages = rebuild_minimal_context(workspace_path, session_id)
+        # 设置计数器，使主循环从 resume_from 开始
+        execute_rounds = resume_from - 1
+        non_schema_exec_rounds = max(0, resume_from - 2)  # 扣除 bootstrap
+        schema_bootstrap_used = True
+        schema_confirmed = True
+        initial_tables_locked = True
+        # 通知前端 resume 开始
+        resume_notice = f"\n🔄 从 Round {resume_from} 开始重新生成报告...\n\n"
+        assistant_reply += resume_notice
+        yield resume_notice
 
     # 【强制首轮 bootstrap】在第一轮迭代前，无论如何都先执行 schema bootstrap
     if not schema_bootstrap_used:
@@ -5268,6 +5369,67 @@ async def stop_chat(body: dict = Body(...)):
     session_id = body.get("session_id", "default")
     trigger_stop_flag(session_id)
     return {"message": f"stop signal sent for {session_id}"}
+
+
+@app.post("/chat/regenerate")
+async def regenerate_report(body: dict = Body(...)):
+    """从指定轮次重新生成报告（默认从 Round 8 开始）。
+
+    请求体：
+    {
+        "session_id": "default",
+        "resume_from": 8          // 可选，默认 8
+    }
+
+    响应：NDJSON 流式输出（与 /chat/completions 格式一致）
+    """
+    session_id = body.get("session_id", "default")
+    resume_from = body.get("resume_from", 8)
+
+    # 重新加载配置（用户可能修改了 round_io_rules.json）
+    try:
+        reload_round_io_rules()
+    except Exception as e:
+        logger.warning(f"[regenerate] 重新加载配置失败: {e}")
+
+    def generate():
+        chunk_count = 0
+        for delta_content in bot_stream(
+            messages=[],
+            workspace=[],
+            session_id=session_id,
+            resume_from=resume_from,
+        ):
+            chunk_count += 1
+            if chunk_count <= 3 or chunk_count % 10 == 0:
+                logger.info(
+                    f"[regenerate] chunk #{chunk_count}, len={len(delta_content)}"
+                )
+            chunk = {
+                "id": "chatcmpl-regenerate",
+                "object": "chat.completion.chunk",
+                "created": int(__import__("time").time()),
+                "model": MODEL_PATH,
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"content": delta_content},
+                        "finish_reason": None,
+                    }
+                ],
+            }
+            yield json.dumps(chunk) + "\n"
+
+        end_chunk = {
+            "id": "chatcmpl-regenerate",
+            "object": "chat.completion.chunk",
+            "created": int(__import__("time").time()),
+            "model": MODEL_PATH,
+            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+        }
+        yield json.dumps(end_chunk) + "\n"
+
+    return StreamingResponse(generate(), media_type="text/plain")
 
 
 # -------- Export Report (PDF + MD) --------
