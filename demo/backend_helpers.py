@@ -658,11 +658,11 @@ def fix_report_unresolved_placeholders(generated_dir):
 
 
 def patch_report_round9_timing(generated_dir: str) -> bool:
-    """在 Round 9 代码执行后，读取 execute_round_9.txt 中的耗时并回填到报告中。
+    """在 markdown_report 代码执行后，将报告中缺失的轮次耗时从 execute_round_*.txt 回填。
 
-    Round 9 的代码执行时 execute_round_9.txt 尚未写入，因此模板内无法获取自身耗时。
-    本函数在代码执行完毕后由 backend 调用，将 Round 9 耗时追加到报告的耗时统计表中，
-    并更新总耗时和轮次数。
+    报告模板在代码执行时只能读取到已有的 execute_round_*.txt（不含自身），
+    本函数在代码执行完毕后由 backend 调用，扫描所有 execute_round_*.txt，
+    将报告中尚未包含的轮次耗时追加到耗时统计表中，并更新总耗时和轮次数。
 
     Returns:
         True 表示成功回填，False 表示无需或无法回填。
@@ -671,67 +671,67 @@ def patch_report_round9_timing(generated_dir: str) -> bool:
     from pathlib import Path as _Path
 
     gen_dir = _Path(generated_dir)
-    # 查找报告文件
     report_candidates = list(gen_dir.glob("comprehensive_analysis_report*.md"))
     if not report_candidates:
         return False
     report_path = report_candidates[0]
 
-    # 查找 Round 9 执行日志
-    round9_log = gen_dir / "execute_round_9.txt"
-    if not round9_log.exists():
-        return False
-
-    # 解析耗时
-    elapsed_9 = None
-    start_9 = None
-    end_9 = None
-    try:
-        for line in round9_log.read_text(encoding="utf-8").splitlines():
-            m = _re.match(r"Elapsed:\s*([\d.]+)s", line)
-            if m:
-                elapsed_9 = float(m.group(1))
-            m2 = _re.match(r"Start:\s*(.+)", line)
-            if m2:
-                start_9 = m2.group(1).strip()
-            m3 = _re.match(r"End:\s*(.+)", line)
-            if m3:
-                end_9 = m3.group(1).strip()
-    except Exception:
-        return False
-
-    if elapsed_9 is None:
-        return False
-
-    # 读取报告内容
     try:
         content = report_path.read_text(encoding="utf-8")
     except Exception:
         return False
 
-    # 检查是否已经有 Round 9 行
-    if "Round 9" in content:
+    # 找出报告中已有的 Round 编号
+    existing_rounds = set(_re.findall(r"Round\s+(\d+)", content))
+
+    # 扫描所有 execute_round_*.txt，找出报告中缺失的
+    missing_rounds = []
+    for log_file in sorted(gen_dir.glob("execute_round_*.txt")):
+        m_num = _re.search(r"execute_round_(\d+)\.txt", log_file.name)
+        if not m_num:
+            continue
+        round_num = m_num.group(1)
+        if round_num in existing_rounds or round_num == "0":
+            continue
+        # 解析耗时
+        elapsed, start_ts, end_ts = None, None, None
+        try:
+            for line in log_file.read_text(encoding="utf-8").splitlines():
+                m = _re.match(r"Elapsed:\s*([\d.]+)s", line)
+                if m:
+                    elapsed = float(m.group(1))
+                m2 = _re.match(r"Start:\s*(.+)", line)
+                if m2:
+                    start_ts = m2.group(1).strip()
+                m3 = _re.match(r"End:\s*(.+)", line)
+                if m3:
+                    end_ts = m3.group(1).strip()
+        except Exception:
+            continue
+        if elapsed is not None:
+            missing_rounds.append((round_num, start_ts, end_ts, elapsed))
+
+    if not missing_rounds:
         return False
 
     lines = content.splitlines()
     new_lines = []
     patched = False
-    for i, line in enumerate(lines):
-        # 在"- **最慢轮次**"行之前插入 Round 9 行
+    total_added_elapsed = sum(r[3] for r in missing_rounds)
+    for line in lines:
         if line.startswith("- **最慢轮次**") and not patched:
-            r9_line = (
-                f"| Round 9 | {start_9 or '-'} | {end_9 or '-'} | {elapsed_9:.1f} |"
-            )
-            new_lines.append(r9_line)
+            for rnum, start_ts, end_ts, elapsed in missing_rounds:
+                new_lines.append(
+                    f"| Round {rnum} | {start_ts or '-'} | {end_ts or '-'} | {elapsed:.1f} |"
+                )
             patched = True
-        # 更新总耗时行
         if line.startswith("**总耗时**") and patched:
             m_total = _re.match(r"\*\*总耗时\*\*：([\d.]+)\s*秒.*共\s*(\d+)\s*轮", line)
             if m_total:
                 old_total = float(m_total.group(1))
                 old_rounds = int(m_total.group(2))
-                new_total = old_total + elapsed_9
-                new_rounds = old_rounds + 1
+                new_total = old_total + total_added_elapsed
+                new_rounds = old_rounds + len(missing_rounds)
                 new_min = new_total / 60
                 line = f"**总耗时**：{new_total:.1f} 秒（{new_min:.1f} 分钟），共 {new_rounds} 轮"
         new_lines.append(line)
