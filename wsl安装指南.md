@@ -430,3 +430,147 @@ vllm serve ~/models/DeepAnalyze-8B \
 | `Qwen/Qwen1.5-7B-Chat` / `Qwen/Qwen2-7B-Instruct` | 7B | 经典 7B 版本，可替代使用。 |
 
 > 以上显存估算基于 FP16/bfloat16；若使用量化权重，请在 vLLM 命令中添加对应 `--quantization` 参数。
+
+---
+
+## 在 WSL2 Ubuntu 中启用 Docker（沙箱执行环境）
+
+DeepAnalyze 支持通过 Docker 容器隔离执行模型生成的 Python 代码（详见 `docs/docker-sandbox-design.md`）。在 WSL2 Ubuntu 环境中启用 Docker 有两种方案。
+
+### 方案 A：复用 Windows Docker Desktop（推荐）
+
+如果 Windows 宿主机已安装 Docker Desktop（`wsl --list --verbose` 中可见 `docker-desktop`），只需开启 WSL2 集成即可，无需在 Ubuntu 内额外安装。
+
+1. **打开 Docker Desktop 设置**
+   - Docker Desktop → Settings → Resources → **WSL Integration**
+
+2. **启用 Ubuntu 集成**
+   - 勾选 **Enable integration with my default WSL distro**
+   - 找到你的 Ubuntu 发行版（如 `Ubuntu` 或 `Ubuntu-22.04`），**打开开关**
+   - 点击 **Apply & Restart**
+
+3. **在 WSL2 Ubuntu 终端验证**
+   ```bash
+   docker info
+   docker run --rm hello-world
+   ```
+   若输出正常，说明 Docker 已可用。
+
+4. **构建 DeepAnalyze 沙箱镜像**
+   ```bash
+   cd ~/DeepAnalyze/demo/docker
+   docker build -t deepanalyze-sandbox:latest .
+   ```
+
+5. **验证镜像**
+   ```bash
+   docker run --rm deepanalyze-sandbox:latest python -c "
+   import pandas as pd; import matplotlib; import seaborn as sns
+   print('pandas:', pd.__version__)
+   print('matplotlib:', matplotlib.__version__)
+   print('seaborn:', sns.__version__)
+   print('All OK')
+   "
+   ```
+
+6. **启用沙箱模式**
+   - 修改 `API/config.py`：
+     ```python
+     DOCKER_SANDBOX_ENABLED = True
+     ```
+   - 重启 backend 即可。启动日志会显示：
+     ```
+     [启动] Docker 沙箱执行已启用，镜像: deepanalyze-sandbox:latest
+     ```
+
+> **优点**：零安装，直接复用 Windows 上已有的 Docker Engine，WSL2 和 Windows 共享同一个 Docker 守护进程。
+
+### 方案 B：在 WSL2 Ubuntu 内独立安装 Docker Engine
+
+如果不想依赖 Docker Desktop，可以在 Ubuntu 内直接安装 Docker Engine。
+
+1. **卸载旧版本（如有）**
+   ```bash
+   sudo apt-get remove -y docker docker-engine docker.io containerd runc 2>/dev/null
+   ```
+
+2. **安装依赖并添加 Docker 官方仓库**
+   ```bash
+   sudo apt-get update
+   sudo apt-get install -y ca-certificates curl gnupg
+
+   # 添加 Docker GPG key
+   sudo install -m 0755 -d /etc/apt/keyrings
+   curl -fsSL https://download.docker.com/linux/ubuntu/gpg | \
+     sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+   sudo chmod a+r /etc/apt/keyrings/docker.gpg
+
+   # 添加仓库
+   echo \
+     "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+     https://download.docker.com/linux/ubuntu \
+     $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+     sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+   ```
+
+3. **安装 Docker Engine**
+   ```bash
+   sudo apt-get update
+   sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin
+   ```
+
+4. **启动 Docker 服务**
+   ```bash
+   sudo service docker start
+   ```
+   > **注意**：WSL2 默认没有 systemd，每次重启 WSL 后需手动执行此命令。
+   > 如果你的 Ubuntu 已启用 systemd（`/etc/wsl.conf` 中设置了 `[boot] systemd=true`），则 Docker 会随系统自动启动。
+
+5. **将当前用户加入 docker 组（免 sudo）**
+   ```bash
+   sudo usermod -aG docker $USER
+   ```
+   然后退出并重新打开 Ubuntu 终端使组权限生效。
+
+6. **验证**
+   ```bash
+   docker info
+   docker run --rm hello-world
+   ```
+
+7. **构建沙箱镜像并启用**
+   ```bash
+   cd ~/DeepAnalyze/demo/docker
+   docker build -t deepanalyze-sandbox:latest .
+   ```
+   修改 `API/config.py` 中 `DOCKER_SANDBOX_ENABLED = True`，重启 backend。
+
+### 启用 systemd 自动启动 Docker（可选）
+
+如果希望 Docker 在 WSL 启动时自动运行，可启用 systemd：
+
+```bash
+# 编辑 /etc/wsl.conf
+sudo tee -a /etc/wsl.conf > /dev/null <<EOF
+[boot]
+systemd=true
+EOF
+```
+
+然后在 Windows PowerShell 中重启 WSL：
+
+```powershell
+wsl --shutdown
+```
+
+重新打开 Ubuntu 终端后，Docker 将自动启动，无需手动 `sudo service docker start`。
+
+### 常见问题
+
+| 问题 | 解决方案 |
+|------|---------|
+| `docker: command not found` | 方案 A：检查 Docker Desktop WSL Integration 是否开启；方案 B：确认已安装 docker-ce |
+| `permission denied` | 执行 `sudo usermod -aG docker $USER` 后重新登录 |
+| `Cannot connect to the Docker daemon` | 方案 A：确认 Docker Desktop 正在运行；方案 B：执行 `sudo service docker start` |
+| 镜像构建时拉取超时 | 配置 Docker 镜像加速器，或确保代理设置正确（参见本文档"允许局域网/WSL 访问"章节） |
+| `DOCKER_SANDBOX_ENABLED=True` 但日志显示回退到本地 | 检查 Docker 是否运行、镜像是否已构建 |

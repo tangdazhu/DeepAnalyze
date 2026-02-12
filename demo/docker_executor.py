@@ -72,6 +72,19 @@ def execute_in_docker(
     generated_dir = workspace_path / "generated"
     generated_dir.mkdir(parents=True, exist_ok=True)
 
+    # ---- 路径重写：将宿主机 workspace 绝对路径替换为容器内 /data ----
+    # 模型生成的代码可能包含宿主机绝对路径（如 /home/user/.../workspace/session_xxx/file.csv），
+    # 但容器内 workspace 挂载在 /data，需要透明替换。
+    host_ws = str(workspace_path)
+    # 同时处理正斜杠和反斜杠（Windows 路径）
+    host_ws_variants = {host_ws}
+    host_ws_variants.add(host_ws.replace("\\", "/"))
+    host_ws_variants.add(host_ws.replace("/", "\\"))
+    for variant in host_ws_variants:
+        if variant and variant in code_str:
+            code_str = code_str.replace(variant, "/data")
+            logger.info("[docker_exec] 路径重写: '%s' → '/data'", variant)
+
     # 将代码写入 generated/ 下的临时文件（容器内可通过 /data/generated/ 访问）
     fd, tmp_path = tempfile.mkstemp(suffix=".py", dir=str(generated_dir))
     os.close(fd)
@@ -86,7 +99,9 @@ def execute_in_docker(
         container_script = f"/data/generated/{tmp_name}"
 
         cmd = [
-            "docker", "run", "--rm",
+            "docker",
+            "run",
+            "--rm",
             # 资源限制
             f"--memory={memory_limit}",
             f"--cpus={cpu_limit}",
@@ -99,18 +114,25 @@ def execute_in_docker(
             # 只读根文件系统（/data 除外）
             "--read-only",
             # 挂载 workspace → /data（读写，因为需要写入 generated/）
-            "-v", f"{workspace_path}:/data",
+            "-v",
+            f"{workspace_path}:/data",
             # 工作目录
-            "-w", "/data",
+            "-w",
+            "/data",
             # 镜像
             image,
             # 执行命令
-            "python", container_script,
+            "python",
+            container_script,
         ]
 
         logger.info(
             "[docker_exec] Running: image=%s, script=%s, timeout=%ss, mem=%s, cpu=%s",
-            image, tmp_name, timeout_sec, memory_limit, cpu_limit,
+            image,
+            tmp_name,
+            timeout_sec,
+            memory_limit,
+            cpu_limit,
         )
 
         completed = subprocess.run(
@@ -133,9 +155,7 @@ def execute_in_docker(
         )
         return f"[Timeout]: execution exceeded {timeout_sec} seconds"
     except FileNotFoundError:
-        logger.error(
-            "[docker_exec] Docker command not found. Is Docker installed?"
-        )
+        logger.error("[docker_exec] Docker command not found. Is Docker installed?")
         return "[Error]: Docker is not installed or not in PATH"
     except Exception as e:
         logger.error("[docker_exec] Unexpected error: %s", e)
