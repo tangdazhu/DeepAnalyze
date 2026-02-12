@@ -459,11 +459,33 @@ def execute_code(code_str):
 def execute_code_safe(
     code_str: str, workspace_dir: str = None, timeout_sec: int = 120
 ) -> str:
-    """在独立进程中执行代码，支持超时，避免阻塞主进程。"""
+    """在独立进程中执行代码，支持超时，避免阻塞主进程。
+
+    当 DOCKER_SANDBOX_ENABLED=True 时，代码在 Docker 容器中隔离执行；
+    否则使用本地 subprocess 执行（原有逻辑）。
+    """
     if workspace_dir is None:
         workspace_dir = WORKSPACE_BASE_DIR
     exec_cwd = os.path.abspath(workspace_dir)
     os.makedirs(exec_cwd, exist_ok=True)
+
+    # ---- Docker 沙箱模式 ----
+    if DOCKER_SANDBOX_ENABLED:
+        logger.info(
+            "[exec] Docker 模式: workspace=%s, timeout=%ss", exec_cwd, timeout_sec
+        )
+        return execute_in_docker(
+            code_str=code_str,
+            workspace_dir=exec_cwd,
+            image=DOCKER_SANDBOX_IMAGE,
+            timeout_sec=timeout_sec,
+            memory_limit=DOCKER_SANDBOX_MEMORY_LIMIT,
+            cpu_limit=DOCKER_SANDBOX_CPU_LIMIT,
+            network=DOCKER_SANDBOX_NETWORK,
+            tmpfs_size=DOCKER_SANDBOX_TMPFS_SIZE,
+        )
+
+    # ---- 本地 subprocess 模式（原有逻辑） ----
     tmp_path = None
     try:
         fd, tmp_path = tempfile.mkstemp(suffix=".py", dir=exec_cwd)
@@ -516,6 +538,39 @@ logger.info(
     ENABLE_THINKING,
     getattr(api_config, "ENABLE_THINKING", "NOT_SET"),
 )
+
+# ---- Docker 沙箱配置 ----
+DOCKER_SANDBOX_ENABLED = getattr(api_config, "DOCKER_SANDBOX_ENABLED", False)
+DOCKER_SANDBOX_IMAGE = getattr(
+    api_config, "DOCKER_SANDBOX_IMAGE", "deepanalyze-sandbox:latest"
+)
+DOCKER_SANDBOX_MEMORY_LIMIT = getattr(api_config, "DOCKER_SANDBOX_MEMORY_LIMIT", "2g")
+DOCKER_SANDBOX_CPU_LIMIT = getattr(api_config, "DOCKER_SANDBOX_CPU_LIMIT", "2.0")
+DOCKER_SANDBOX_NETWORK = getattr(api_config, "DOCKER_SANDBOX_NETWORK", "none")
+DOCKER_SANDBOX_TMPFS_SIZE = getattr(api_config, "DOCKER_SANDBOX_TMPFS_SIZE", "256m")
+
+if DOCKER_SANDBOX_ENABLED:
+    from docker_executor import (
+        check_docker_available,
+        check_image_exists,
+        execute_in_docker,
+    )
+
+    if not check_docker_available():
+        logger.error(
+            "[启动] DOCKER_SANDBOX_ENABLED=True 但 Docker 不可用，回退到本地执行"
+        )
+        DOCKER_SANDBOX_ENABLED = False
+    elif not check_image_exists(DOCKER_SANDBOX_IMAGE):
+        logger.error(
+            "[启动] Docker 镜像 %s 不存在，请先构建。回退到本地执行",
+            DOCKER_SANDBOX_IMAGE,
+        )
+        DOCKER_SANDBOX_ENABLED = False
+    else:
+        logger.info("[启动] Docker 沙箱执行已启用，镜像: %s", DOCKER_SANDBOX_IMAGE)
+else:
+    logger.info("[启动] Docker 沙箱未启用，使用本地 subprocess 执行")
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SQLITE_SEEDS = [
     (

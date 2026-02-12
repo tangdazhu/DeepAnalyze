@@ -46,5 +46,16 @@ ENABLE_THINKING = False
 # Stop token IDs for DeepAnalyze model
 STOP_TOKEN_IDS = [151676, 151645]
 
+# Docker 沙箱执行配置
+# 设置 DOCKER_SANDBOX_ENABLED = True 启用 Docker 容器隔离执行
+# 设置为 False（默认）则使用本地 subprocess 执行
+DOCKER_SANDBOX_ENABLED = True
+DOCKER_SANDBOX_IMAGE = "deepanalyze-sandbox:latest"
+DOCKER_SANDBOX_MEMORY_LIMIT = "2g"
+DOCKER_SANDBOX_CPU_LIMIT = "2.0"
+DOCKER_SANDBOX_TIMEOUT = 120
+DOCKER_SANDBOX_NETWORK = "none"
+DOCKER_SANDBOX_TMPFS_SIZE = "256m"
+
 # Supported tools
 SUPPORTED_TOOLS = ["code_interpreter"]
